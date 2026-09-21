@@ -255,7 +255,8 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
         ? post.photoDescription
         : null;
     const canRetryPhoto = Boolean(fallbackPhotoDescription);
-    const canRegeneratePhoto = Boolean(resolvedPhotoUrl)
+    const canRegeneratePhoto = post.photoSource !== "album"
+        && Boolean(resolvedPhotoUrl)
         && Boolean(post.photoUrl)
         && Boolean(post.photoDescription?.trim());
     const openPhotoPromptEditor = useCallback(() => {
@@ -385,6 +386,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                         }}
                         onRegenerate={canRegeneratePhoto ? openPhotoPromptEditor : undefined}
                         regenerating={photoRegenerating}
+                        infoText={post.photoSource === "album" ? "来自照片库" : undefined}
                     />
                 )}
                 {resolvedPhotoUrl && photoRegenerating && (

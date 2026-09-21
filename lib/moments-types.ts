@@ -11,6 +11,8 @@ export type MomentPost = {
     photoUseReferenceImage?: boolean; // AI-generated photo should use character reference image
     photoGenerationStatus?: "pending" | "failed" | "generated";
     photoGenerationPrompt?: string;
+    photoSource?: "album" | "generated";
+    photoLibraryId?: string;
     photoGenerationError?: string;
     photoCompressedAt?: string;
     photoCleanedAt?: string;

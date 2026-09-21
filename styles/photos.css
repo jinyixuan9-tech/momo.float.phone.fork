@@ -672,3 +672,158 @@
   .photos-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .photos-import-preview { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
+
+/* v0.2.1 · Vision + Resolver */
+.photos-setting-card {
+  justify-content: space-between;
+  padding: 13px 14px;
+}
+.photos-setting-card > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 40px;
+}
+.photos-setting-card .photos-switch {
+  align-self: center;
+  margin: 0;
+}
+
+.photos-vision-heading,
+.photos-current-traits-head,
+.photos-strategy-head,
+.photos-person-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.photos-mini-action {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  background: #f1f1f4;
+  color: #111114;
+  font-size: calc(9px * var(--app-text-scale, 1));
+}
+.photos-mini-action:disabled { opacity: .5; }
+.photos-mini-action span { margin: 0; color: inherit; }
+.photos-spin { animation: photos-spin .9s linear infinite; }
+@keyframes photos-spin { to { transform: rotate(360deg); } }
+
+.photos-edit-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid rgba(60, 60, 67, 0.08);
+}
+.photos-edit-row:first-of-type { margin-top: 10px; }
+.photos-edit-row > span {
+  font-size: calc(10px * var(--app-text-scale, 1));
+  color: rgba(17, 17, 20, .52);
+}
+.photos-edit-row input,
+.photos-edit-row select,
+.photos-edit-row textarea,
+.photos-current-traits-card textarea,
+.photos-strategy-card select {
+  width: 100%;
+  border: 0;
+  outline: none;
+  border-radius: 10px;
+  padding: 8px 9px;
+  background: #f5f5f7;
+  color: #111114;
+  font: inherit;
+  font-size: calc(10px * var(--app-text-scale, 1));
+}
+.photos-edit-row textarea {
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.45;
+}
+.photos-edit-row-compact { grid-template-columns: 54px minmax(0, 1fr); padding: 7px 0; }
+
+.photos-person-slots { display: grid; gap: 10px; margin-top: 10px; }
+.photos-person-slot {
+  padding: 11px;
+  border-radius: 13px;
+  background: #f7f7f9;
+}
+.photos-person-slot-head strong { font-size: calc(11px * var(--app-text-scale, 1)); }
+.photos-person-slot-head span { font-size: calc(9px * var(--app-text-scale, 1)); color: rgba(17, 17, 20, .46); }
+
+.photos-reference-btn {
+  width: calc(100% - 24px);
+  margin: 10px 12px 0;
+  border: 0;
+  border-radius: 15px;
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: #111114;
+  color: #fff;
+  font-size: calc(10px * var(--app-text-scale, 1));
+  font-weight: 650;
+}
+
+.photos-current-traits-card,
+.photos-strategy-card {
+  margin: 10px 12px 12px;
+  padding: 13px;
+  border-radius: 17px;
+  background: rgba(255,255,255,.95);
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+}
+.photos-current-traits-head strong,
+.photos-strategy-head strong { display: block; font-size: calc(13px * var(--app-text-scale, 1)); }
+.photos-current-traits-head span,
+.photos-strategy-head span,
+.photos-current-traits-source {
+  display: block;
+  margin-top: 3px;
+  font-size: calc(9px * var(--app-text-scale, 1));
+  line-height: 1.45;
+  color: rgba(17, 17, 20, .46);
+}
+.photos-current-traits-card textarea {
+  min-height: 72px;
+  margin-top: 10px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.photos-current-traits-source { margin-top: 7px; }
+
+.photos-strategy-card { margin-bottom: 8px; }
+.photos-strategy-head { align-items: flex-start; margin-bottom: 8px; }
+.photos-strategy-card > label {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(60,60,67,.08);
+}
+.photos-strategy-card > label > span {
+  font-size: calc(10px * var(--app-text-scale, 1));
+  color: rgba(17,17,20,.56);
+}
+
+.photos-vision-error {
+  margin: 9px 0 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 59, 48, .08);
+  color: #b42318;
+  font-size: calc(9px * var(--app-text-scale, 1));
+  line-height: 1.45;
+}

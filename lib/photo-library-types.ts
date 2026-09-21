@@ -1,14 +1,35 @@
 export type PhotoVisionStatus = "unprocessed" | "pending" | "done" | "failed";
 
-export type PhotoShotType = "selfie" | "taken_by_character" | "other";
-
-export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char";
+export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char" | "bubble" | "sms" | "other";
 
 export type PhotoUsageRecord = {
   channel: PhotoUsageChannel;
   characterId: string;
   targetId?: string;
   usedAt: number;
+};
+
+export type PhotoAppearance = {
+  hair?: string;
+  accessories?: string;
+  outfit?: string;
+  season?: string;
+  scene?: string;
+};
+
+export type PhotoPersonSlot = {
+  id: string;
+  position?: string;
+  mappedCharacterId?: string;
+  appearance: PhotoAppearance;
+};
+
+export type PhotoSourceStrategy = "album_only" | "generated_only" | "album_then_generated";
+
+export type CharacterCurrentTraits = {
+  text: string;
+  sourcePhotoId?: string;
+  updatedAt: number;
 };
 
 export type PhotoRecord = {
@@ -22,24 +43,36 @@ export type PhotoRecord = {
   /** 真正的角色×角色共享关系。user 不参与 shared pair。 */
   sharedPairIds: string[];
 
-  /** 后续 Photo Resolver 是否允许自动选中这张图。 */
+  /** Photo Resolver 是否允许自动选中这张图。 */
   aiUsable: boolean;
 
-  /** v0.2.1 自动识图预留字段。 */
+  /** 自动识图。AI 结果只是初始建议，全部允许用户后续手改。 */
   visionStatus: PhotoVisionStatus;
   visionSummary?: string;
+  subject?: string;
+  appearance?: PhotoAppearance;
+  people?: PhotoPersonSlot[];
   visionTags?: string[];
-  sceneTags?: string[];
-  shotType?: PhotoShotType;
+  visionError?: string;
 
-  /** 后续 DM / 朋友圈复用规则使用；MVP 只预留，不主动写入。 */
+  /** 用户人工修改过的字段名；重新识图默认不覆盖这些字段。 */
+  manualFields?: string[];
+
+  /** DM / 朋友圈等复用规则。 */
   usageHistory: PhotoUsageRecord[];
 
   createdAt: number;
   updatedAt: number;
 };
 
+export type PhotoLibraryPreferences = {
+  chatStrategy: PhotoSourceStrategy;
+  momentsStrategy: PhotoSourceStrategy;
+};
+
 export type PhotoLibraryState = {
-  version: 1;
+  version: 2;
   photos: PhotoRecord[];
+  currentTraitsByCharacter: Record<string, CharacterCurrentTraits>;
+  preferences: PhotoLibraryPreferences;
 };

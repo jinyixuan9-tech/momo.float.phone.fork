@@ -7,7 +7,10 @@ import {
   Image as ImageIcon,
   Images,
   Link2,
+  Loader2,
   Plus,
+  RefreshCw,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -17,7 +20,7 @@ import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storag
 import type { Character } from "@/lib/character-types";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 import { deleteThemeAsset, describeAssetSaveError } from "@/lib/theme-storage";
-import type { PhotoRecord } from "@/lib/photo-library-types";
+import type { PhotoAppearance, PhotoPersonSlot, PhotoRecord, PhotoSourceStrategy } from "@/lib/photo-library-types";
 import {
   PHOTO_LIBRARY_UPDATED_EVENT,
   appendPhotoRecords,
@@ -26,8 +29,11 @@ import {
   loadPhotoLibrary,
   parsePhotoSharedPairId,
   removePhotoRecord,
+  setCharacterCurrentTraits,
+  setPhotoLibraryPreferences,
   updatePhotoRecord,
 } from "@/lib/photo-library-storage";
+import { analyzePhotos, analyzePhotosInBackground, photoTraitsTextForCharacter } from "@/lib/photo-library-vision";
 
 type Props = {
   onClose: () => void;
@@ -97,7 +103,10 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (nex
 
 export function PhotosApp({ onClose, onNotice }: Props) {
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters());
-  const [photos, setPhotos] = useState<PhotoRecord[]>(() => sortPhotos(loadPhotoLibrary().photos));
+  const initialLibrary = useMemo(() => loadPhotoLibrary(), []);
+  const [photos, setPhotos] = useState<PhotoRecord[]>(() => sortPhotos(initialLibrary.photos));
+  const [currentTraitsByCharacter, setCurrentTraitsByCharacter] = useState(initialLibrary.currentTraitsByCharacter);
+  const [preferences, setPreferences] = useState(initialLibrary.preferences);
   const [imageMap, setImageMap] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<MainTab>("library");
   const [scope, setScope] = useState<AlbumScope>(null);
@@ -111,7 +120,12 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   const detailPhoto = detailId ? photos.find((photo) => photo.id === detailId) ?? null : null;
   const characterById = useMemo(() => new Map(characters.map((character) => [character.id, character])), [characters]);
 
-  const refreshLibrary = () => setPhotos(sortPhotos(loadPhotoLibrary().photos));
+  const refreshLibrary = () => {
+    const state = loadPhotoLibrary();
+    setPhotos(sortPhotos(state.photos));
+    setCurrentTraitsByCharacter(state.currentTraitsByCharacter);
+    setPreferences(state.preferences);
+  };
 
   useEffect(() => {
     const refreshCharacters = () => setCharacters(loadCharacters());
@@ -122,6 +136,13 @@ export function PhotosApp({ onClose, onNotice }: Props) {
       window.removeEventListener(CHARACTERS_UPDATED_EVENT, refreshCharacters);
       window.removeEventListener(PHOTO_LIBRARY_UPDATED_EVENT, refreshPhotos);
     };
+  }, []);
+
+  useEffect(() => {
+    const pendingIds = loadPhotoLibrary().photos
+      .filter((photo) => photo.visionStatus === "unprocessed")
+      .map((photo) => photo.id);
+    if (pendingIds.length > 0) analyzePhotosInBackground(pendingIds);
   }, []);
 
   useEffect(() => {
@@ -171,7 +192,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     .sort((a, b) => b.items.length - a.items.length), [characters, photos]);
 
   const sharedAlbums = useMemo(() => {
-    const pairIds = Array.from(new Set(photos.flatMap((photo) => photo.sharedPairIds)));
+    const pairIds: string[] = Array.from(new Set<string>(photos.flatMap((photo) => photo.sharedPairIds)));
     return pairIds.flatMap((pairId) => {
       const pair = parsePhotoSharedPairId(pairId);
       if (!pair) return [];
@@ -274,7 +295,10 @@ export function PhotosApp({ onClose, onNotice }: Props) {
       setUploadProgress({ current: index + 1, total: uploadDraft.files.length });
     }
 
-    if (records.length > 0) appendPhotoRecords(records);
+    if (records.length > 0) {
+      appendPhotoRecords(records);
+      analyzePhotosInBackground(records.map((record) => record.id));
+    }
     uploadDraft.previewUrls.forEach((url) => URL.revokeObjectURL(url));
     setUploadDraft(null);
     setUploading(false);
@@ -290,6 +314,49 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   const updateDetail = (patch: Partial<PhotoRecord>) => {
     if (!detailPhoto) return;
     updatePhotoRecord(detailPhoto.id, patch);
+  };
+
+  const markManual = (field: string): string[] => Array.from(new Set([...(detailPhoto?.manualFields ?? []), field]));
+
+  const updateDetailManual = (field: string, patch: Partial<PhotoRecord>) => {
+    if (!detailPhoto) return;
+    updatePhotoRecord(detailPhoto.id, { ...patch, manualFields: markManual(field) });
+  };
+
+  const updateAppearanceField = (key: keyof PhotoAppearance, value: string) => {
+    if (!detailPhoto) return;
+    updateDetailManual("appearance", { appearance: { ...(detailPhoto.appearance ?? {}), [key]: value.trim() || undefined } });
+  };
+
+  const updatePersonSlot = (slotId: string, updater: (slot: PhotoPersonSlot) => PhotoPersonSlot) => {
+    if (!detailPhoto) return;
+    const next = (detailPhoto.people ?? []).map((slot) => slot.id === slotId ? updater(slot) : slot);
+    updateDetailManual("people", { people: next });
+  };
+
+  const reanalyzeDetail = async () => {
+    if (!detailPhoto) return;
+    await analyzePhotos([detailPhoto.id]);
+    onNotice?.("识图已更新；你手动改过的字段会保留。");
+  };
+
+  const setTraitsFromPhoto = (characterId: string) => {
+    if (!detailPhoto) return;
+    const text = photoTraitsTextForCharacter(detailPhoto, characterId);
+    if (!text) {
+      onNotice?.("这张照片还没有可用的人物特征，先完成识图或手动填写。");
+      return;
+    }
+    setCharacterCurrentTraits(characterId, text, detailPhoto.id);
+    onNotice?.(`已用这张照片更新 ${characterById.get(characterId)?.name || "角色"} 的当前特征。`);
+  };
+
+  const saveCurrentTraits = (characterId: string, text: string) => {
+    setCharacterCurrentTraits(characterId, text);
+  };
+
+  const updateStrategy = (context: "chat" | "moments", value: PhotoSourceStrategy) => {
+    setPhotoLibraryPreferences(context === "chat" ? { chatStrategy: value } : { momentsStrategy: value });
   };
 
   const toggleDetailCharacter = (characterId: string) => {
@@ -313,6 +380,19 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     if (!detailPhoto || detailPhoto.linkedCharacterIds.length !== 2) return;
     const pairId = createPhotoSharedPairId(detailPhoto.linkedCharacterIds[0], detailPhoto.linkedCharacterIds[1]);
     updateDetail({ sharedPairIds: next && pairId ? [pairId] : [] });
+  };
+
+  const analyzePendingPhotos = async () => {
+    const ids = loadPhotoLibrary().photos
+      .filter((photo) => photo.visionStatus !== "done")
+      .map((photo) => photo.id);
+    if (ids.length === 0) {
+      onNotice?.("没有待识别或失败的照片。");
+      return;
+    }
+    onNotice?.(`开始识别 ${ids.length} 张照片；会按每批最多 4 张依次处理。`);
+    await analyzePhotos(ids);
+    onNotice?.("批量识图已完成；失败项可以在照片详情里查看并重试。");
   };
 
   const deleteDetailPhoto = async () => {
@@ -433,14 +513,123 @@ export function PhotosApp({ onClose, onNotice }: Props) {
           <section className="photos-setting-card">
             <div>
               <strong>AI 可调用</strong>
-              <span>开启后，后续聊天与朋友圈可优先使用这张真实照片</span>
+              <span>关闭后只保留在 Photos，不参与角色自动发图</span>
             </div>
             <Toggle checked={detailPhoto.aiUsable} onChange={(next) => updateDetail({ aiUsable: next })} label="AI 可调用" />
           </section>
 
+          <section className="photos-inspector-card photos-vision-card">
+            <div className="photos-inspector-heading photos-vision-heading">
+              <div>
+                <strong>外观与场景</strong>
+                <span>
+                  {detailPhoto.visionStatus === "pending" ? "正在识别…" : detailPhoto.visionStatus === "failed" ? `识别失败：${detailPhoto.visionError || "可重新识别"}` : detailPhoto.visionStatus === "done" ? "AI 已填好，你可以随时修改" : "尚未识别"}
+                </span>
+              </div>
+              <button type="button" className="photos-mini-action" onClick={() => void reanalyzeDetail()} disabled={detailPhoto.visionStatus === "pending"}>
+                {detailPhoto.visionStatus === "pending" ? <Loader2 size={14} className="photos-spin" /> : <RefreshCw size={14} />}
+                <span>重新识别</span>
+              </button>
+            </div>
+
+            {detailPhoto.visionStatus === "failed" && detailPhoto.visionError ? (
+              <div className="photos-vision-error">{detailPhoto.visionError}</div>
+            ) : null}
+
+            <label className="photos-edit-row">
+              <span>内容描述</span>
+              <textarea
+                value={detailPhoto.visionSummary || ""}
+                placeholder="AI 会用一句话概括画面"
+                onChange={(event) => updateDetailManual("visionSummary", { visionSummary: event.target.value })}
+              />
+            </label>
+            <label className="photos-edit-row">
+              <span>主体</span>
+              <input
+                value={detailPhoto.subject || ""}
+                placeholder="自拍、宠物、风景、食物…"
+                onChange={(event) => updateDetailManual("subject", { subject: event.target.value })}
+              />
+            </label>
+            {(["hair", "accessories", "outfit", "season", "scene"] as const).map((key) => (
+              <label className="photos-edit-row" key={key}>
+                <span>{key === "hair" ? "发色" : key === "accessories" ? "配饰" : key === "outfit" ? "穿搭" : key === "season" ? "季节" : "场景"}</span>
+                <input
+                  value={detailPhoto.appearance?.[key] || ""}
+                  placeholder={key === "hair" ? "如：浅金色短发" : key === "accessories" ? "眼镜、耳钉、项链等" : key === "outfit" ? "如：黑色外套配白T" : key === "season" ? "夏天倾向 / 无法判断" : "如：家里客厅、咖啡店"}
+                  onChange={(event) => updateAppearanceField(key, event.target.value)}
+                />
+              </label>
+            ))}
+            <label className="photos-edit-row">
+              <span>检索标签</span>
+              <input
+                value={(detailPhoto.visionTags || []).join("、")}
+                placeholder="狗、镜子、夜景…"
+                onChange={(event) => updateDetailManual("visionTags", { visionTags: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })}
+              />
+            </label>
+          </section>
+
+          {(detailPhoto.people ?? []).length > 1 ? (
+            <section className="photos-inspector-card">
+              <div className="photos-inspector-heading">
+                <strong>多人照片</strong>
+                <span>AI 只描述人物槽位，谁是谁由你来匹配</span>
+              </div>
+              <div className="photos-person-slots">
+                {(detailPhoto.people ?? []).map((person, index) => (
+                  <div className="photos-person-slot" key={person.id}>
+                    <div className="photos-person-slot-head">
+                      <strong>人物 {index + 1}</strong>
+                      <span>{person.position || "位置未标注"}</span>
+                    </div>
+                    <label className="photos-edit-row photos-edit-row-compact">
+                      <span>位置</span>
+                      <input
+                        value={person.position || ""}
+                        placeholder="如：左侧 / 中间 / 右侧"
+                        onChange={(event) => updatePersonSlot(person.id, (slot) => ({ ...slot, position: event.target.value || undefined }))}
+                      />
+                    </label>
+                    <label className="photos-edit-row">
+                      <span>对应角色</span>
+                      <select
+                        value={person.mappedCharacterId || ""}
+                        onChange={(event) => updatePersonSlot(person.id, (slot) => ({ ...slot, mappedCharacterId: event.target.value || undefined }))}
+                      >
+                        <option value="">暂不匹配</option>
+                        {detailPhoto.linkedCharacterIds.map((id) => (
+                          <option key={id} value={id}>{characterById.get(id)?.name || id}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {(["hair", "accessories", "outfit", "season", "scene"] as const).map((key) => (
+                      <label className="photos-edit-row photos-edit-row-compact" key={key}>
+                        <span>{key === "hair" ? "发色" : key === "accessories" ? "配饰" : key === "outfit" ? "穿搭" : key === "season" ? "季节" : "场景"}</span>
+                        <input
+                          value={person.appearance?.[key] || ""}
+                          onChange={(event) => updatePersonSlot(person.id, (slot) => ({ ...slot, appearance: { ...slot.appearance, [key]: event.target.value } }))}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {detailPhoto.linkedCharacterIds.map((characterId) => (
+            <button type="button" className="photos-reference-btn" key={characterId} onClick={() => setTraitsFromPhoto(characterId)}>
+              <Sparkles size={15} />
+              用这张照片设为 {characterById.get(characterId)?.name || "角色"} 的当前特征参考
+            </button>
+          ))}
+
           <section className="photos-meta-card">
             <span>文件</span><strong>{detailPhoto.originalName || "照片"}</strong>
-            <span>识图</span><strong>尚未分析 · 下一阶段接入</strong>
+            <span>识图</span><strong>{detailPhoto.visionStatus === "done" ? "已分析" : detailPhoto.visionStatus === "pending" ? "分析中" : detailPhoto.visionStatus === "failed" ? "失败" : "待分析"}</strong>
           </section>
         </main>
       </section>
@@ -460,7 +649,26 @@ export function PhotosApp({ onClose, onNotice }: Props) {
           </div>
           <button type="button" className="photos-round-btn" onClick={openPicker} aria-label="导入照片"><Plus size={20} /></button>
         </header>
-        <main className="photos-library-scroll">{renderPhotoGrid(scopedPhotos)}</main>
+        <main className="photos-library-scroll">
+          {scope.type === "character" ? (
+            <section className="photos-current-traits-card">
+              <div className="photos-current-traits-head">
+                <div>
+                  <strong>当前特征</strong>
+                  <span>可选。留空时，这个角色的照片默认都可参与匹配。</span>
+                </div>
+                <Sparkles size={17} />
+              </div>
+              <textarea
+                value={currentTraitsByCharacter[scope.characterId]?.text || ""}
+                placeholder="例如：现在是浅金发、夏天、最近偶尔戴黑框眼镜。也可以从某张近期照片自动提取。"
+                onChange={(event) => saveCurrentTraits(scope.characterId, event.target.value)}
+              />
+              {currentTraitsByCharacter[scope.characterId]?.sourcePhotoId ? <span className="photos-current-traits-source">当前参考来自一张已选照片；你仍可继续手动修改。</span> : null}
+            </section>
+          ) : null}
+          {renderPhotoGrid(scopedPhotos)}
+        </main>
         <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => handleFiles(event.target.files)} />
         {uploadDraft ? renderUploadSheet() : null}
       </section>
@@ -558,6 +766,36 @@ export function PhotosApp({ onClose, onNotice }: Props) {
       <main className="photos-library-scroll photos-home-scroll">
         {tab === "library" ? (
           <>
+            <section className="photos-strategy-card">
+              <div className="photos-strategy-head">
+                <div>
+                  <strong>角色发图策略</strong>
+                  <span>用于测试相册匹配；不会在聊天前端显示图片来源标签。</span>
+                </div>
+                {photos.some((photo) => photo.visionStatus !== "done") ? (
+                  <button type="button" className="photos-mini-action" onClick={() => void analyzePendingPhotos()}>
+                    <RefreshCw size={13} />
+                    <span>识别待处理</span>
+                  </button>
+                ) : null}
+              </div>
+              <label>
+                <span>聊天</span>
+                <select value={preferences.chatStrategy} onChange={(event) => updateStrategy("chat", event.target.value as PhotoSourceStrategy)}>
+                  <option value="album_only">仅匹配相册</option>
+                  <option value="generated_only">仅生图</option>
+                  <option value="album_then_generated">优先相册，匹配不到再生图</option>
+                </select>
+              </label>
+              <label>
+                <span>朋友圈</span>
+                <select value={preferences.momentsStrategy} onChange={(event) => updateStrategy("moments", event.target.value as PhotoSourceStrategy)}>
+                  <option value="album_only">仅匹配相册</option>
+                  <option value="generated_only">仅生图</option>
+                  <option value="album_then_generated">优先相册，匹配不到再生图</option>
+                </select>
+              </label>
+            </section>
             {photos.length > 0 ? (
               <div className="photos-library-summary">
                 <strong>全部照片</strong>

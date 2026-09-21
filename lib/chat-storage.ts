@@ -225,6 +225,8 @@ export type ChatMessage = {
         imageGenerationMediaRef?: string;
         imageGenerationPrompt?: string;
         imageGenerationUsedReference?: boolean;
+        imageSource?: "album" | "generated";
+        photoLibraryId?: string;
         imageGenerationStatus?: "pending" | "failed" | "generated";
         imageGenerationError?: string;
         mediaCompressedAt?: string;

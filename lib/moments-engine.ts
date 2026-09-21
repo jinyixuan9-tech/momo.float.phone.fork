@@ -55,6 +55,7 @@ import { DEFAULT_MOMENTS_BILINGUAL_PROMPT, resolveBilingualPrompt } from "./bili
 import { generateImageFromConfiguredApi } from "./image-generation-service";
 import { isAbortError, throwIfAborted } from "./abort-utils";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
+import { getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "./photo-library-resolver";
 import {
     getVisibleMomentCommentsForCharacter,
     getVisibleMomentLikesForCharacter,
@@ -1192,15 +1193,40 @@ export function attachMomentPhotoInBackground(
         let photoUrl: string | undefined;
         let errorMessage: string | undefined;
         let aborted = false;
+        let sourcePatch: Partial<MomentPost> = {};
         try {
-            photoUrl = await generateMomentPhotoUrl(description, characterId, useReferenceImage, signal);
+            const strategy = getPhotoSourceStrategy("moments");
+            if (strategy !== "generated_only") {
+                const match = await resolvePhotoForUse({ characterId, description, channel: "moments" });
+                if (match) {
+                    photoUrl = `asset://${match.photo.assetId}`;
+                    sourcePatch = { photoSource: "album", photoLibraryId: match.photo.id, photoGenerationPrompt: undefined };
+                    recordPhotoUse(match, { characterId, description, channel: "moments" });
+                } else if (strategy === "album_only") {
+                    // 仅匹配模式：没找到就不挂图，也不偷跑生图。朋友圈正文照常发布。
+                    updateMomentPost(postId, {
+                        photoUrl: undefined,
+                        photoDescription: undefined,
+                        photoGenerationStatus: undefined,
+                        photoGenerationError: undefined,
+                        photoSource: undefined,
+                        photoLibraryId: undefined,
+                    });
+                    dispatchMomentsUpdated();
+                    return;
+                }
+            }
+            if (!photoUrl) {
+                photoUrl = await generateMomentPhotoUrl(description, characterId, useReferenceImage, signal);
+                if (photoUrl) sourcePatch = { photoSource: "generated", photoLibraryId: undefined };
+            }
         } catch (error) {
             aborted = isAbortError(error);
             errorMessage = error instanceof Error ? error.message : String(error);
         }
         const reason = errorMessage || "生图配置未启用或生成失败";
         updateMomentPost(postId, photoUrl
-            ? { photoUrl, photoGenerationStatus: "generated", photoGenerationError: undefined }
+            ? { photoUrl, photoGenerationStatus: "generated", photoGenerationError: undefined, ...sourcePatch }
             : { photoGenerationStatus: "failed", photoGenerationError: reason });
         dispatchMomentsUpdated();
         // 失败时只在当下弹一次提示（卡片上不再挂红字），中断不算失败

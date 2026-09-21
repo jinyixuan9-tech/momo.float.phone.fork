@@ -1846,6 +1846,7 @@ export function MediaImageWithPreview({
     onError,
     onRegenerate,
     regenerating,
+    infoText,
 }: {
     url: string;
     title: string;
@@ -1853,6 +1854,7 @@ export function MediaImageWithPreview({
     onError?: () => void;
     onRegenerate?: () => void;
     regenerating?: boolean;
+    infoText?: string;
 }) {
     const [preview, setPreview] = useState(false);
     const saveName = filename || title;
@@ -1870,6 +1872,7 @@ export function MediaImageWithPreview({
                     saveFilename={ensureExtension(saveName, "image")}
                     onRegenerate={onRegenerate ? () => { setPreview(false); onRegenerate(); } : undefined}
                     regenerating={regenerating}
+                    infoText={infoText}
                     onClose={() => setPreview(false)}
                 />
             )}
@@ -2096,7 +2099,8 @@ function MediaFileBubble({
         // 重试把状态落库为 pending（见 generated-image-retry.ts），角标据此显示——
         // 比组件内的 imageRegenerating 可靠：滚远了卸载再回来，角标还在。
         const imageRegenPending = imageRegenerating;
-        const canRegenerateImage = Boolean(msg.mediaData?.label?.trim());
+        const isAlbumImage = msg.mediaData?.imageSource === "album";
+        const canRegenerateImage = !isAlbumImage && Boolean(msg.mediaData?.label?.trim());
         return (
             <div className="chat-generated-image-retry-stack">
                 <div className="chat-generated-image-regen-wrap">
@@ -2106,6 +2110,7 @@ function MediaFileBubble({
                         filename={title}
                         onRegenerate={canRegenerateImage ? openImagePromptEditor : undefined}
                         regenerating={imageRegenerating}
+                        infoText={isAlbumImage ? "来自照片库" : undefined}
                     />
                     {imageRegenPending && (
                         <div className="chat-generated-image-regen-badge" aria-hidden="true">

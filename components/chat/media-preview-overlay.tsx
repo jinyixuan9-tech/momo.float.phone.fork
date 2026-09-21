@@ -25,6 +25,7 @@ export function MediaPreviewOverlay({
     saveFilename,
     onRegenerate,
     regenerating,
+    infoText,
     onClose,
 }: {
     imageUrl?: string | null;
@@ -32,6 +33,7 @@ export function MediaPreviewOverlay({
     saveFilename?: string;
     onRegenerate?: () => void;
     regenerating?: boolean;
+    infoText?: string;
     onClose: () => void;
 }) {
     // 保存要重新拉一次图片，慢网络下会卡一下——按钮上给个状态
@@ -50,6 +52,14 @@ export function MediaPreviewOverlay({
                     onClick={e => e.stopPropagation()}
                 >
                     {description}
+                </div>
+            ) : null}
+            {infoText ? (
+                <div
+                    style={{ color: "#fff", opacity: 0.62, fontSize: "calc(12px*var(--app-text-scale,1))", textAlign: "center", maxWidth: "min(80vw, 420px)" }}
+                    onClick={e => e.stopPropagation()}
+                >
+                    {infoText}
                 </div>
             ) : null}
             <div style={{ display: "flex", gap: 12 }} onClick={e => e.stopPropagation()}>
