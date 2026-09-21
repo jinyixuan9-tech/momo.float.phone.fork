@@ -46,3 +46,7 @@
 - Restored Chinese static-asset filenames that had been escaped as `#Uxxxx` during archive extraction.
 - This fixes Netlify deployment rejection for `#` characters in deployed filenames.
 - Code references remain unchanged because they already point to the original Chinese filenames.
+
+## v0.2.0 · Photos MVP
+
+在 v0.1.1 精简基线上新增原生 Photos App。当前只完成相册管理层：图库、人物、char×char Shared、批量上传、角色关联、AI 可调用标记与持久化。自动识图和聊天/朋友圈 Photo Resolver 尚未接入，详见 `PHOTOS_MVP.md`。

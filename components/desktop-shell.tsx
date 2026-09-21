@@ -9,6 +9,7 @@ import { startMomentsService, stopMomentsService } from "@/lib/moments-engine";
 import { bgTimerCleanup } from "@/lib/bg-timer";
 import { PhoneThemeApp } from "@/components/phone-theme-app";
 import { PhoneCharacterApp } from "@/components/phone-character-app";
+import { PhotosApp } from "@/components/photos/photos-app";
 import { PhoneSettingsApp } from "@/components/phone-settings-app";
 import { PhoneChatApp } from "@/components/chat/phone-chat-app";
 import { PhonePlaceholderApp } from "@/components/phone-placeholder-app";
@@ -516,7 +517,8 @@ function normalizeLayout(raw: unknown, widgets: WidgetInstance[], dockIds: Set<D
     // placeIconOnAvailablePage 页满会顺延到下一页乃至新开一页——
     // 曾经这里只在现有页里找空格，页面被图标和组件占满时就静默放弃，
     // 图标（如外观）从此永久丢失且每次重启都救不回
-    placeIconOnAvailablePage(layout, widgets, { id, row: 1, col: 1 }, primaryPage);
+    const preferred = id === "photos" ? { row: 6, col: 3 } : { row: 1, col: 1 };
+    placeIconOnAvailablePage(layout, widgets, { id, ...preferred }, primaryPage);
     allPlaced.add(id);
   }
 
@@ -3892,6 +3894,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           wallpaperStyle={wallpaperStyle}
         />
       );
+    }
+
+    if (activeApp === "photos") {
+      return <PhotosApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
 
     if (activeApp === "characters") {

@@ -252,6 +252,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_diary_entry_font_scale_v1",
           "ai_phone_shopping_state_v1",
           "ai_phone_wallet_state_v1",
+          "ai_phone_photo_library_v1",
           "ai_phone_reading_interaction_config_v1",
           "ai_phone_reading_appearance_v1",
           "ai_phone_menstrual_config_v1",
