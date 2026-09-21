@@ -42,4 +42,7 @@
 3. 重点检查桌面、聊天、朋友圈、角色、设置、资源库、阅读、冒险、栖所、剧情、查手机、小红书、在场、手记、购物、游戏、资源集市。
 4. 确认无误后再合并到 `main`。
 
-Branch deploy test
+## v0.1.1 packaging fix
+- Restored Chinese static-asset filenames that had been escaped as `#Uxxxx` during archive extraction.
+- This fixes Netlify deployment rejection for `#` characters in deployed filenames.
+- Code references remain unchanged because they already point to the original Chinese filenames.
