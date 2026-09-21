@@ -756,7 +756,6 @@ export function DebugPromptPanel() {
         ["moments", "朋友圈"],
         ["calendar", "日历"],
         ["story", "剧情"],
-        ["vn", "漫卷"],
         ...EXTRA_PROMPT_APPS.map(app => [app.id, app.label] as [DebugMode, string]),
     ];
 

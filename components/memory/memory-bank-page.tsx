@@ -84,10 +84,8 @@ const MEMORY_SOURCE_OPTIONS: Array<{ key: MemorySourceKey; label: string }> = [
     { key: "diary", label: "手记便签" },
     { key: "xiaohongshu", label: "小红书" },
     { key: "interview_magazine", label: "在场访谈" },
-    { key: "cocreate", label: "共创" },
     { key: "game", label: "内置小游戏" },
     { key: "story", label: "剧情小剧场" },
-    { key: "vn", label: "漫卷" },
     { key: "adventure", label: "地图冒险" },
     { key: "custom_app", label: "自定义应用" },
 ];

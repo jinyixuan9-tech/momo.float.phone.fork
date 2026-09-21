@@ -179,11 +179,29 @@ function preserveCustomAppPresetPrompts(fresh: PresetConfig, previous: PresetCon
 
 // --- Presets ──────────────────────────────────────────
 
+
+const REMOVED_BUILTIN_PROMPT_IDS = new Set([
+    "vn_output_format",
+    "vn_story_beats",
+    "cocreate_write",
+    "cocreate_discuss",
+    "cocreate_tools_write",
+    "cocreate_tools_read",
+]);
+
+function stripRemovedBuiltinFeaturePrompts(preset: PresetConfig): PresetConfig {
+    if (!preset.builtIn) return preset;
+    const prompts = (preset.prompts ?? []).filter(prompt => !REMOVED_BUILTIN_PROMPT_IDS.has(prompt.identifier));
+    const promptOrder = (preset.prompt_order ?? []).filter(entry => !REMOVED_BUILTIN_PROMPT_IDS.has(entry.identifier));
+    if (prompts.length === (preset.prompts ?? []).length && promptOrder.length === (preset.prompt_order ?? []).length) return preset;
+    return { ...preset, prompts, prompt_order: promptOrder };
+}
+
 export function loadPresets(): PresetConfig[] {
     if (typeof window === "undefined") return [];
     try {
         const cachedPresets = readPresetsCache();
-        const presets: PresetConfig[] = cachedPresets.map(stripDeprecatedPresetFields);
+        const presets: PresetConfig[] = cachedPresets.map(stripDeprecatedPresetFields).map(stripRemovedBuiltinFeaturePrompts);
         let shouldPersistCleanup = JSON.stringify(cachedPresets) !== JSON.stringify(presets);
 
         // Ensure built-in preset exists and is up-to-date
@@ -875,6 +893,10 @@ const DEFAULT_BINDING_CONFIG: BindingConfig = {
 
 function normalizeBindingConfig(config: BindingConfig): { config: BindingConfig; changed: boolean } {
     let changed = false;
+    const appDefaults = { ...(config.appDefaults ?? {}) } as Record<string, BindingSlot | undefined>;
+    for (const deadAppId of ["forum", "cocreate", "vn"]) {
+        if (deadAppId in appDefaults) { delete appDefaults[deadAppId]; changed = true; }
+    }
     const characterBindings = config.characterBindings.map(binding => {
         const appOverrides = { ...binding.appOverrides } as Record<string, BindingSlot | undefined>;
         if (appOverrides.weibo) {
@@ -887,9 +909,10 @@ function normalizeBindingConfig(config: BindingConfig): { config: BindingConfig;
             delete appOverrides.fortune;
             changed = true;
         }
-        if (appOverrides.forum) {
-            if (!appOverrides.cocreate) appOverrides.cocreate = appOverrides.forum;
+        if (appOverrides.forum || appOverrides.cocreate || appOverrides.vn) {
             delete appOverrides.forum;
+            delete appOverrides.cocreate;
+            delete appOverrides.vn;
             changed = true;
         }
         return { ...binding, appOverrides: appOverrides as CharacterBinding["appOverrides"] };
@@ -897,7 +920,7 @@ function normalizeBindingConfig(config: BindingConfig): { config: BindingConfig;
     return {
         config: {
             ...config,
-            appDefaults: config.appDefaults && typeof config.appDefaults === "object" ? config.appDefaults : {},
+            appDefaults: appDefaults as BindingConfig["appDefaults"],
             characterBindings,
         },
         changed,

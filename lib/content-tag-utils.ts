@@ -37,7 +37,6 @@ const EXTRA_TAG_LABELS: Record<string, string> = {
     notewall: "便签墙",
     notewall_reply: "便签墙回复",
     interview_magazine: "访谈",
-    cocreate: "共创",
     action: "动作",
     tool: "工具",
     host: "主持人",
@@ -143,7 +142,6 @@ export const CONTENT_SCOPE_TAG_GROUPS: TagGroupProfile[] = [
         ],
     },
     { id: "story", label: "剧情", tags: ["story"], minors: [commonMinor("story", ["story"])] },
-    { id: "vn", label: "漫卷", tags: ["vn"], minors: [commonMinor("vn", ["vn"])] },
     { id: "calendar", label: "日历", tags: ["calendar"], minors: [commonMinor("calendar", ["calendar"])] },
     { id: "adventure", label: "冒险", tags: ["adventure"], minors: [commonMinor("adventure", ["adventure"])] },
     { id: "game", label: "游戏", tags: ["game"], minors: [commonMinor("game", ["game"])] },
@@ -187,17 +185,6 @@ export const CONTENT_SCOPE_TAG_GROUPS: TagGroupProfile[] = [
             commonMinor("interview_magazine", ["interview_magazine"]),
             profile("interview_magazine", "answer", "角色回答", ["interview_magazine", "answer"]),
             profile("interview_magazine", "article", "成刊", ["interview_magazine", "article"]),
-        ],
-    },
-    {
-        id: "cocreate",
-        label: "共创",
-        tags: ["cocreate"],
-        minors: [
-            commonMinor("cocreate", ["cocreate"]),
-            profile("cocreate", "write", "正文创作", ["cocreate", "write"]),
-            profile("cocreate", "discuss", "讨论", ["cocreate", "discuss"]),
-            profile("cocreate", "action", "可执行动作", ["cocreate", "action"]),
         ],
     },
 ];

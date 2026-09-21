@@ -16,7 +16,6 @@ export const CONTENT_APP_ACCENTS: Record<ContentAppId, string> = {
     diary: "#2F80ED",
     music: "#8B5CF6",
     reading: "#2563EB",
-    forum: "#F97316",
     cocreate: "#C8B58A",
     story: "#EC4899",
     game: "#3B82F6",

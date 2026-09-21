@@ -740,7 +740,7 @@ async function readSseStream(
     let content = "";
     let rawResponse = "";
     // 时间戳剥离器会一直扣住流尾巴的 64 个字符等括号闭合，流结束才吐出来。
-    // 要求"所见即模型所写"的调用方（独家特调）把它整个关掉：增量来一个字出一个字，
+    // 要求“所见即模型所写”的调用方可把它整个关掉：增量来一个字出一个字，
     // 否则模型在末尾写机括标记行（〔记〕这类）时，整行都压在扣留窗里，看起来像卡死。
     const contentStripper = stripTimestamps
         ? createStreamingTimestampStripper()

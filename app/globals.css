@@ -9,21 +9,16 @@
 @import "../styles/character.css";
 @import "../styles/animations.css";
 @import "../styles/music.css";
-@import "../styles/mixology.css";
 @import "../styles/calendar.css";
 @import "../styles/diary.css";
 @import "../styles/story.css";
-@import "../styles/vn.css";
 @import "../styles/dwelling.css";
 @import "../styles/checkphone.css";
 @import "../styles/black-market.css";
 @import "../styles/game.css";
 @import "../styles/app-market.css";
-@import "../styles/reality-bridge.css";
 @import "../styles/xiaohongshu.css";
-@import "../styles/world-builder.css";
 @import "../styles/interview-magazine.css";
-@import "../styles/cocreate.css";
 @import "../styles/qa.css";
 
 @theme {

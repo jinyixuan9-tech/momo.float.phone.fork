@@ -30,7 +30,6 @@ import type { InstalledCustomApp } from "@/lib/custom-app-types";
 /** Map ContentAppId → IconId (only needed where they differ) */
 const APP_ICON_MAP: Partial<Record<ContentAppId, IconId>> = {
     adventure: "mapmode",
-    vn: "vnmode",
 };
 const appIconId = (appId: ContentAppId): IconId => APP_ICON_MAP[appId] ?? appId as IconId;
 import type {
