@@ -2095,11 +2095,11 @@ function MediaFileBubble({
     }
 
     if (fileType === "image" && url) {
-        const displayTitle = msg.mediaData?.imageGenerationPrompt ? "" : title;
         // 重试把状态落库为 pending（见 generated-image-retry.ts），角标据此显示——
         // 比组件内的 imageRegenerating 可靠：滚远了卸载再回来，角标还在。
         const imageRegenPending = imageRegenerating;
         const isAlbumImage = msg.mediaData?.imageSource === "album";
+        const displayTitle = isAlbumImage || msg.mediaData?.imageGenerationPrompt ? "" : title;
         const canRegenerateImage = !isAlbumImage && Boolean(msg.mediaData?.label?.trim());
         return (
             <div className="chat-generated-image-retry-stack">

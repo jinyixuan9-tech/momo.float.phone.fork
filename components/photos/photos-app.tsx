@@ -214,13 +214,25 @@ export function PhotosApp({ onClose, onNotice }: Props) {
 
   const handleFiles = (filesLike: FileList | null) => {
     if (!filesLike?.length) return;
-    const files = Array.from(filesLike).filter((file) => file.type.startsWith("image/"));
-    if (files.length === 0) {
+    const selectedFiles = Array.from(filesLike).filter((file) => file.type.startsWith("image/"));
+    if (selectedFiles.length === 0) {
       onNotice?.("请选择图片文件。");
       return;
     }
-    uploadDraft?.previewUrls.forEach((url) => URL.revokeObjectURL(url));
-    const previewUrls = files.slice(0, 12).map((file) => URL.createObjectURL(file));
+    if (uploadDraft) {
+      const existingKeys = new Set(uploadDraft.files.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+      const appendedFiles = selectedFiles.filter((file) => !existingKeys.has(`${file.name}:${file.size}:${file.lastModified}`));
+      if (appendedFiles.length > 0) {
+        setUploadDraft({
+          ...uploadDraft,
+          files: [...uploadDraft.files, ...appendedFiles],
+          previewUrls: [...uploadDraft.previewUrls, ...appendedFiles.map((file) => URL.createObjectURL(file))],
+        });
+      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    const previewUrls = selectedFiles.map((file) => URL.createObjectURL(file));
     let presetCharacterIds: string[] = [];
     let presetShared = false;
     if (scope?.type === "character") {
@@ -233,13 +245,25 @@ export function PhotosApp({ onClose, onNotice }: Props) {
       }
     }
     setUploadDraft({
-      files,
+      files: selectedFiles,
       previewUrls,
       linkedCharacterIds: presetCharacterIds,
       aiUsable: true,
       shared: presetShared,
     });
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeDraftPhoto = (index: number) => {
+    setUploadDraft((draft) => {
+      if (!draft || index < 0 || index >= draft.files.length) return draft;
+      URL.revokeObjectURL(draft.previewUrls[index]);
+      return {
+        ...draft,
+        files: draft.files.filter((_, itemIndex) => itemIndex !== index),
+        previewUrls: draft.previewUrls.filter((_, itemIndex) => itemIndex !== index),
+      };
+    });
   };
 
   const toggleDraftCharacter = (characterId: string) => {
@@ -259,6 +283,10 @@ export function PhotosApp({ onClose, onNotice }: Props) {
 
   const importPhotos = async () => {
     if (!uploadDraft || uploading) return;
+    if (uploadDraft.files.length === 0) {
+      onNotice?.("请先添加照片。");
+      return;
+    }
     if (uploadDraft.linkedCharacterIds.length === 0) {
       onNotice?.("至少关联一个角色。");
       return;
@@ -688,17 +716,25 @@ export function PhotosApp({ onClose, onNotice }: Props) {
               setUploadDraft(null);
             }} aria-label="取消"><X size={19} /></button>
             <div><strong>导入照片</strong><span>{uploadDraft.files.length} 张</span></div>
-            <button type="button" className="photos-sheet-done" disabled={uploading} onClick={() => void importPhotos()}>
+            <button type="button" className="photos-sheet-done" disabled={uploading || uploadDraft.files.length === 0} onClick={() => void importPhotos()}>
               {uploading ? `${uploadProgress.current}/${uploadProgress.total}` : "完成"}
             </button>
           </header>
 
           <div className="photos-sheet-scroll">
             <div className="photos-import-preview">
-              {uploadDraft.previewUrls.map((url, index) => <img src={url} alt="" key={`${url}_${index}`} />)}
-              {uploadDraft.files.length > uploadDraft.previewUrls.length ? (
-                <span className="photos-import-more">+{uploadDraft.files.length - uploadDraft.previewUrls.length}</span>
-              ) : null}
+              {uploadDraft.previewUrls.map((url, index) => (
+                <span className="photos-import-thumb" key={`${url}_${index}`}>
+                  <img src={url} alt="" />
+                  <button type="button" onClick={() => removeDraftPhoto(index)} aria-label={`移除第 ${index + 1} 张照片`}>
+                    <X size={12} strokeWidth={2.4} />
+                  </button>
+                </span>
+              ))}
+              <button type="button" className="photos-import-add" onClick={openPicker} aria-label="继续添加照片">
+                <Plus size={18} />
+                <span>添加</span>
+              </button>
             </div>
 
             <section className="photos-sheet-section">
