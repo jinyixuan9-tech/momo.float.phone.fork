@@ -36,6 +36,7 @@ export type MemoryConfig = {
         checkphone?: boolean;
         diary?: boolean;
         xiaohongshu?: boolean;
+        weverse?: boolean;
         interview_magazine?: boolean;
         cocreate?: boolean;
         game?: boolean;
@@ -123,6 +124,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
         checkphone: true,
         diary: true,
         xiaohongshu: true,
+        weverse: true,
         interview_magazine: true,
         cocreate: true,
         game: true,

@@ -83,6 +83,7 @@ const MEMORY_SOURCE_OPTIONS: Array<{ key: MemorySourceKey; label: string }> = [
     { key: "checkphone", label: "查手机" },
     { key: "diary", label: "手记便签" },
     { key: "xiaohongshu", label: "小红书" },
+    { key: "weverse", label: "Weverse" },
     { key: "interview_magazine", label: "在场访谈" },
     { key: "game", label: "内置小游戏" },
     { key: "story", label: "剧情小剧场" },

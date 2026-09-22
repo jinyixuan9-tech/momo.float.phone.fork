@@ -30,7 +30,7 @@ import {
 
 import { loadCharacters, CHARACTERS_UPDATED_EVENT } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
-import { resolveUserIdentity } from "@/lib/settings-storage";
+import { resolveUserIdentity, USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
 import {
   addWeverseComment,
   addWeversePost,
@@ -39,6 +39,7 @@ import {
   deleteWeversePost,
   loadWeverseState,
   updateWeversePost,
+  updateWeverseUserProfile,
   upsertWeverseCommunity,
   WEV_UPDATED_EVENT,
   type WeverseAuthorType,
@@ -47,6 +48,12 @@ import {
   type WeversePost,
   type WeverseState,
 } from "@/lib/weverse-storage";
+import { generateWeverseArtistPost, generateWeverseFanBatch } from "@/lib/weverse-engine";
+import { getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "@/lib/photo-library-resolver";
+import { recordWeverseArtistPostEvent, deleteWeverseProjectionEventsForPost } from "@/lib/weverse-memory";
+import { incrementEventCounter } from "@/lib/memory-storage";
+import { maybeRunSummarization } from "@/lib/memory-summarizer";
+import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
 
 import styles from "./weverse-app.module.css";
 
@@ -83,6 +90,12 @@ type MemberEditorDraft = {
   displayName: string;
   avatarUrl: string;
   coverUrl: string;
+  bio: string;
+};
+
+type UserProfileDraft = {
+  displayName: string;
+  avatarUrl: string;
   bio: string;
 };
 
@@ -141,6 +154,22 @@ function Avatar({
 function Verified() {
   return <span className={styles.verify}>✓</span>;
 }
+function ResolvedAssetImage({ src, className = "", alt = "" }: { src: string; className?: string; alt?: string }) {
+  const [resolved, setResolved] = useState(src.startsWith("asset://") ? "" : src);
+  useEffect(() => {
+    let cancelled = false;
+    if (!src.startsWith("asset://")) { setResolved(src); return; }
+    getChatImageFromIndexedDB(src.slice(8)).then((url) => { if (!cancelled) setResolved(url || ""); }).catch(() => { if (!cancelled) setResolved(""); });
+    return () => { cancelled = true; };
+  }, [src]);
+  if (!resolved) return <span className={styles.assetImagePlaceholder}>…</span>;
+  return <img className={className} src={resolved} alt={alt} />;
+}
+
+function WeversePostImage({ src, onClick }: { src: string; onClick?: () => void }) {
+  return <button type="button" className={styles.postImageButton} onClick={onClick}><ResolvedAssetImage src={src} className={styles.postImage} alt="WVS post" /></button>;
+}
+
 
 export function WeverseApp({ onClose, onNotice }: Props) {
   const [tab, setTab] = useState<MainTab>("feed");
@@ -164,6 +193,10 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const [communityFeedFilter, setCommunityFeedFilter] = useState<CommunityFeedFilter>("highlight");
   const [artistTab, setArtistTab] = useState<ArtistTab>("posts");
   const [searchText, setSearchText] = useState("");
+  const [userProfileDraft, setUserProfileDraft] = useState<UserProfileDraft | null>(null);
+  const [showOriginalByPost, setShowOriginalByPost] = useState<Record<string, boolean>>({});
+  const [generatingCommunityId, setGeneratingCommunityId] = useState<string | null>(null);
+  const [, setIdentityTick] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const communityAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -171,21 +204,26 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const officialAvatarInputRef = useRef<HTMLInputElement>(null);
   const memberAvatarInputRef = useRef<HTMLInputElement>(null);
   const memberCoverInputRef = useRef<HTMLInputElement>(null);
+  const userAvatarInputRef = useRef<HTMLInputElement>(null);
 
   const route = routeStack[routeStack.length - 1] ?? { type: "root" as const };
   const immersiveRoute = route.type === "community" || route.type === "artist";
   const userIdentity = resolveUserIdentity(undefined, "weverse") ?? resolveUserIdentity();
-  const userName = userIdentity?.name?.trim() || "我";
-  const userAvatar = userIdentity?.avatarUrl || "";
+  const userName = state.userProfile?.displayName?.trim() || userIdentity?.name?.trim() || "我";
+  const userAvatar = state.userProfile?.avatarUrl || userIdentity?.avatarUrl || "";
+  const userBio = state.userProfile?.bio?.trim() || userIdentity?.bio?.trim() || "Fan account";
 
   useEffect(() => {
     const reloadState = () => setState(loadWeverseState());
     const reloadCharacters = () => setCharacters(loadCharacters());
+    const reloadIdentity = () => setIdentityTick((value) => value + 1);
     window.addEventListener(WEV_UPDATED_EVENT, reloadState);
     window.addEventListener(CHARACTERS_UPDATED_EVENT, reloadCharacters);
+    window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, reloadIdentity);
     return () => {
       window.removeEventListener(WEV_UPDATED_EVENT, reloadState);
       window.removeEventListener(CHARACTERS_UPDATED_EVENT, reloadCharacters);
+      window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, reloadIdentity);
     };
   }, []);
 
@@ -233,10 +271,13 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     if (post.authorType === "user") {
       return { name: userName, avatarUrl: userAvatar, verified: false, meta: `${community?.name || "Community"} · Fan` };
     }
+    if (post.authorType === "fan") {
+      return { name: post.authorName || "匿名粉丝", avatarUrl: post.authorAvatarUrl || "", verified: false, meta: `${community?.name || "Community"} · Fan` };
+    }
     if (post.authorType === "official") {
       return {
         name: community?.official.displayName || `${community?.name || "Community"} Official`,
-        avatarUrl: community?.official.avatarUrl || community?.avatarUrl || "",
+        avatarUrl: community?.official.avatarUrl || "",
         verified: true,
         meta: `${community?.name || "Community"} · Official`,
       };
@@ -251,7 +292,8 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const resolveCommentAuthor = (comment: WeverseComment, post: WeversePost) => {
     const community = communityMap.get(post.communityId);
     if (comment.authorType === "user") return { name: userName, avatarUrl: userAvatar, verified: false };
-    if (comment.authorType === "official") return { name: community?.official.displayName || "Official", avatarUrl: community?.official.avatarUrl || community?.avatarUrl || "", verified: true };
+    if (comment.authorType === "fan") return { name: comment.authorName || "匿名粉丝", avatarUrl: comment.authorAvatarUrl || "", verified: false };
+    if (comment.authorType === "official") return { name: community?.official.displayName || "Official", avatarUrl: community?.official.avatarUrl || "", verified: true };
     if (community) {
       const member = resolveMember(community, comment.authorId);
       return { name: member.displayName, avatarUrl: member.avatarUrl, verified: true };
@@ -322,6 +364,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
   const removeCommunity = (community: WeverseCommunity) => {
     if (!window.confirm(`删除「${community.name}」Community？该社区里的 WVS 帖子也会一起删除。`)) return;
+    state.posts.filter((post) => post.communityId === community.id && post.authorType === "artist").forEach((post) => deleteWeverseProjectionEventsForPost(post.id));
     setState(deleteWeverseCommunity(community.id));
     setCommunityEditor(null);
     setCommunityMenuId(null);
@@ -366,6 +409,116 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     onNotice?.("成员 WVS 资料已保存，不影响角色本体资料");
   };
 
+  const openUserProfileEditor = () => {
+    setDrawerOpen(false);
+    setUserProfileDraft({
+      displayName: state.userProfile?.displayName || userIdentity?.name || "",
+      avatarUrl: state.userProfile?.avatarUrl || userIdentity?.avatarUrl || "",
+      bio: state.userProfile?.bio || userIdentity?.bio || "",
+    });
+  };
+
+  const saveUserProfile = () => {
+    if (!userProfileDraft) return;
+    const nextState = updateWeverseUserProfile({
+      displayName: userProfileDraft.displayName.trim() || undefined,
+      avatarUrl: userProfileDraft.avatarUrl || undefined,
+      bio: userProfileDraft.bio.trim() || undefined,
+    });
+    setState(nextState);
+    setUserProfileDraft(null);
+    onNotice?.("WVS 粉丝资料已保存，只影响 Weverse 展示");
+  };
+
+  const generateCommunityRound = async (community: WeverseCommunity) => {
+    if (generatingCommunityId) return;
+    if (!community.memberCharacterIds.length) return onNotice?.("这个 Community 还没有成员");
+    setCommunityMenuId(null);
+    setGeneratingCommunityId(community.id);
+    onNotice?.("正在生成这一轮 WVS 社区动态…");
+    try {
+      const artistCounts = new Map<string, number>();
+      for (const characterId of community.memberCharacterIds) {
+        artistCounts.set(characterId, state.posts.filter((post) => post.communityId === community.id && post.authorType === "artist" && post.authorId === characterId).length);
+      }
+      const characterId = [...community.memberCharacterIds].sort((a, b) => (artistCounts.get(a) || 0) - (artistCounts.get(b) || 0))[0];
+      const member = resolveMember(community, characterId);
+      const generated = await generateWeverseArtistPost(characterId, community);
+      let imageUrl: string | undefined;
+      let photoLibraryId: string | undefined;
+      let photoSource: WeversePost["photoSource"];
+      const strategy = getPhotoSourceStrategy("wvs");
+      if (generated.photoDescription && strategy !== "generated_only") {
+        const match = await resolvePhotoForUse({ characterId, description: generated.photoDescription, channel: "wvs", targetId: community.id }).catch(() => null);
+        if (match) {
+          imageUrl = `asset://${match.photo.assetId}`;
+          photoLibraryId = match.photo.id;
+          photoSource = "album";
+          recordPhotoUse(match, { characterId, description: generated.photoDescription, channel: "wvs", targetId: community.id });
+        }
+      }
+      const artistPost: WeversePost = {
+        id: createWeverseId("wvs_post"),
+        communityId: community.id,
+        authorType: "artist",
+        authorId: characterId,
+        body: generated.translated,
+        originalBody: generated.original !== generated.translated ? generated.original : undefined,
+        imageUrl,
+        photoLibraryId,
+        photoSource,
+        createdAt: Date.now(),
+        comments: [],
+      };
+      addWeversePost(artistPost);
+      recordWeverseArtistPostEvent({
+        characterId,
+        characterName: member.displayName,
+        communityName: community.name,
+        postId: artistPost.id,
+        body: artistPost.body,
+        originalBody: artistPost.originalBody,
+        hasPhoto: Boolean(artistPost.imageUrl),
+        timestamp: new Date(artistPost.createdAt).toISOString(),
+      });
+      incrementEventCounter(characterId);
+      maybeRunSummarization(characterId, member.displayName).catch(() => undefined);
+
+      const fanBatch = await generateWeverseFanBatch(community, [artistPost, ...state.posts]);
+      for (const item of fanBatch.posts) {
+        addWeversePost({
+          id: createWeverseId("wvs_fan_post"),
+          communityId: community.id,
+          authorType: "fan",
+          authorId: createWeverseId("fan"),
+          authorName: item.displayName,
+          body: item.body,
+          createdAt: Date.now() + Math.floor(Math.random() * 1200),
+          comments: [],
+        });
+      }
+      for (const item of fanBatch.comments) {
+        addWeverseComment(artistPost.id, {
+          id: createWeverseId("wvs_fan_comment"),
+          authorType: "fan",
+          authorId: createWeverseId("fan"),
+          authorName: item.displayName,
+          body: item.body,
+          createdAt: Date.now() + Math.floor(Math.random() * 1200),
+        });
+      }
+      setState(loadWeverseState());
+      setCommunityTab("feed");
+      setCommunityFeedFilter("highlight");
+      onNotice?.(`${member.displayName} 发了一条 Artist Post，社区也刷新了粉丝内容`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onNotice?.(`WVS 生成失败：${message}`);
+    } finally {
+      setGeneratingCommunityId(null);
+    }
+  };
+
   const openComposer = (authorType: "user" | "official", communityId: string) => {
     const community = communityMap.get(communityId);
     if (!community) return onNotice?.("Community 不存在");
@@ -394,7 +547,20 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     if (!community) return onNotice?.("请选择发布到哪个 Community");
 
     if (editingPostId) {
-      setState(updateWeversePost(editingPostId, { body, imageUrl: draftImageUrl || undefined }));
+      const existingPost = postMap.get(editingPostId);
+      setState(updateWeversePost(editingPostId, { body, originalBody: undefined, imageUrl: draftImageUrl || undefined }));
+      if (existingPost?.authorType === "artist") {
+        const character = characterMap.get(existingPost.authorId);
+        recordWeverseArtistPostEvent({
+          characterId: existingPost.authorId,
+          characterName: character?.name || "Artist",
+          communityName: community.name,
+          postId: existingPost.id,
+          body,
+          hasPhoto: Boolean(draftImageUrl),
+          timestamp: new Date(existingPost.createdAt).toISOString(),
+        });
+      }
       setComposerOpen(false);
       setEditingPostId(null);
       setDraftText("");
@@ -423,6 +589,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const removePost = (post: WeversePost) => {
     if (!window.confirm("删除这条贴文？")) return;
     setState(deleteWeversePost(post.id));
+    if (post.authorType === "artist") deleteWeverseProjectionEventsForPost(post.id);
     setPostMenuId(null);
     if (route.type === "post" && route.postId === post.id) back();
     onNotice?.("贴文已删除");
@@ -470,9 +637,9 @@ export function WeverseApp({ onClose, onNotice }: Props) {
           <button type="button" className={styles.more} onClick={() => setPostMenuId(post.id)} aria-label="贴文菜单"><MoreHorizontal size={20} /></button>
         </div>
         {post.authorType === "official" ? <div className={styles.noticeTag}>OFFICIAL</div> : null}
-        {post.body ? <div className={styles.postBody} onClick={() => !detail && navigate({ type: "post", postId: post.id })}>{post.body}</div> : null}
-        {post.imageUrl ? <button type="button" className={styles.postImageButton} onClick={() => !detail && navigate({ type: "post", postId: post.id })}><img className={styles.postImage} src={post.imageUrl} alt="WVS post" /></button> : null}
-        {post.authorType !== "user" ? <button type="button" className={styles.translateBtn} onClick={() => showTodo("原文/翻译切换")}>查看原文</button> : null}
+        {post.body ? <div className={styles.postBody} onClick={() => !detail && navigate({ type: "post", postId: post.id })}>{showOriginalByPost[post.id] && post.originalBody ? post.originalBody : post.body}</div> : null}
+        {post.imageUrl ? <WeversePostImage src={post.imageUrl} onClick={() => !detail && navigate({ type: "post", postId: post.id })} /> : null}
+        {post.originalBody && post.originalBody !== post.body ? <button type="button" className={styles.translateBtn} onClick={() => setShowOriginalByPost((prev) => ({ ...prev, [post.id]: !prev[post.id] }))}>{showOriginalByPost[post.id] ? "查看翻译" : "查看原文"}</button> : null}
         {renderPostActions(post, detail)}
       </article>
     );
@@ -530,7 +697,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       <div className={styles.communityGrid}>
         {filteredCommunities.map((community) => (
           <button type="button" className={styles.communityCard} key={community.id} onClick={() => { setCommunityTab("home"); navigate({ type: "community", id: community.id }); }}>
-            <div className={styles.communityLogo}>{community.avatarUrl || community.coverUrl ? <img src={community.avatarUrl || community.coverUrl} alt="" /> : community.name.slice(0, 2)}</div>
+            <div className={styles.communityLogo}>{community.avatarUrl || community.official.avatarUrl ? <img src={community.avatarUrl || community.official.avatarUrl} alt="" /> : community.name.slice(0, 2)}</div>
             <div className={styles.communityInfo}><b>{community.name}</b><p>{community.memberCharacterIds.length} 位成员 · {community.official.displayName}</p></div><ChevronRight size={21} />
           </button>
         ))}
@@ -589,7 +756,11 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const renderCommunityFeed = (community: WeverseCommunity) => {
     const posts = state.posts
       .filter((post) => post.communityId === community.id)
-      .filter((post) => communityFeedFilter === "highlight" || (communityFeedFilter === "fan" ? post.authorType === "user" : post.authorType === "artist" || post.authorType === "official"))
+      .filter((post) => communityFeedFilter === "highlight"
+        ? post.authorType === "artist" || post.authorType === "official"
+        : communityFeedFilter === "fan"
+          ? post.authorType === "user" || post.authorType === "fan"
+          : post.authorType === "artist")
       .sort((a, b) => b.createdAt - a.createdAt);
     return (
       <div className={styles.communityPane}>
@@ -668,7 +839,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
           </div>
         </div>
         <div className={styles.artistMediaStrip}>
-          {mediaPosts.length ? mediaPosts.map((post) => <button type="button" key={post.id} onClick={() => navigate({ type: "post", postId: post.id })}><img src={post.imageUrl} alt="" /></button>) : <button type="button" className={styles.mediaEmpty} onClick={() => showTodo("成员媒体历史")}>Media</button>}
+          {mediaPosts.length ? mediaPosts.map((post) => <button type="button" key={post.id} onClick={() => navigate({ type: "post", postId: post.id })}><ResolvedAssetImage src={post.imageUrl!} alt="" /></button>) : <button type="button" className={styles.mediaEmpty} onClick={() => showTodo("成员媒体历史")}>Media</button>}
         </div>
         <div className={styles.artistTabs}>
           {(["posts", "comments", "live"] as const).map((item) => <button type="button" key={item} className={artistTab === item ? styles.activeArtistTab : ""} onClick={() => setArtistTab(item)}>{item === "posts" ? "帖子" : item === "comments" ? "评论" : "LIVE"}</button>)}
@@ -727,11 +898,11 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) { setComposerOpen(false); setEditingPostId(null); } }}>
           <section className={styles.sheet}>
             <div className={styles.sheetHandle} />
-            <div className={styles.sheetTitle}><h2>{editingPostId ? "编辑贴文" : composerAuthorType === "official" ? "Official Post" : "Fan Post"}</h2><button type="button" className={styles.iconBtn} onClick={() => { setComposerOpen(false); setEditingPostId(null); }}><X size={20} /></button></div>
+            <div className={styles.sheetTitle}><h2>{editingPostId ? `编辑${composerAuthorType === "artist" ? " Artist" : composerAuthorType === "official" ? " Official" : ""}贴文` : composerAuthorType === "official" ? "Official Post" : "Fan Post"}</h2><button type="button" className={styles.iconBtn} onClick={() => { setComposerOpen(false); setEditingPostId(null); }}><X size={20} /></button></div>
             <label className={styles.fieldLabel}>发布到</label>
             <div className={styles.lockedCommunity}>{communityMap.get(draftCommunityId)?.name || "Community"}</div>
             <textarea className={styles.textarea} value={draftText} onChange={(event) => setDraftText(event.target.value)} placeholder={composerAuthorType === "official" ? "写一条官方公告或动态…" : "写点什么吧…"} />
-            {draftImageUrl ? <div className={styles.composePreview}><img src={draftImageUrl} alt="预览" /><button type="button" onClick={() => setDraftImageUrl("")}><X size={16} /></button></div> : null}
+            {draftImageUrl ? <div className={styles.composePreview}><ResolvedAssetImage src={draftImageUrl} alt="预览" /><button type="button" onClick={() => setDraftImageUrl("")}><X size={16} /></button></div> : null}
             <div className={styles.mediaTools}><button type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={18} /> 本地图片</button><button type="button" onClick={() => showTodo("Photos Resolver") }><Sparkles size={18} /> 照片库</button></div>
             <input ref={fileInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (event) => { const file = event.target.files?.[0]; if (file) setDraftImageUrl(await fileToDataUrl(file)); event.currentTarget.value = ""; }} />
             <button type="button" className={styles.primaryButton} onClick={publish}><Send size={18} /> {editingPostId ? "保存修改" : "发布"}</button>
@@ -748,7 +919,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       {communityMenuId ? (() => {
         const community = communityMap.get(communityMenuId);
         if (!community) return null;
-        return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommunityMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>{community.name} 管理</h2><button type="button" className={styles.iconBtn} onClick={() => setCommunityMenuId(null)}><X size={19} /></button></div><button type="button" onClick={() => { setCommunityMenuId(null); openCommunityEditor(community); }}><Settings size={18} /> 管理 Community</button><button type="button" onClick={() => { setCommunityMenuId(null); openComposer("official", community.id); }}><Send size={18} /> 用官号发布</button><button type="button" onClick={() => showTodo("Official Schedule / Calendar") }><CalendarDays size={18} /> 安排行程</button><button type="button" onClick={() => showTodo("Official LIVE") }><Radio size={18} /> 发起官方 LIVE</button><button type="button" onClick={() => setCommunityMenuId(null)}>取消</button></section></div>;
+        return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommunityMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>{community.name} 管理</h2><button type="button" className={styles.iconBtn} onClick={() => setCommunityMenuId(null)}><X size={19} /></button></div><button type="button" onClick={() => { setCommunityMenuId(null); openCommunityEditor(community); }}><Settings size={18} /> 管理 Community</button><button type="button" onClick={() => { setCommunityMenuId(null); openComposer("official", community.id); }}><Send size={18} /> 用官号发布</button><button type="button" disabled={generatingCommunityId === community.id} onClick={() => generateCommunityRound(community)}><Sparkles size={18} /> {generatingCommunityId === community.id ? "正在生成…" : "生成一轮 AI 社区动态"}</button><button type="button" onClick={() => showTodo("Official Schedule / Calendar") }><CalendarDays size={18} /> 安排行程</button><button type="button" onClick={() => showTodo("Official LIVE") }><Radio size={18} /> 发起官方 LIVE</button><button type="button" onClick={() => setCommunityMenuId(null)}>取消</button></section></div>;
       })() : null}
 
       {communityEditor ? (
@@ -756,7 +927,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
           <div className={styles.modalHeader}><button type="button" className={styles.modalBackBtn} aria-label="返回" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setCommunityEditorError(""); setCommunityEditor(null); }}><ChevronLeft size={22} /></button><b>{communityEditor.id ? "管理 Community" : "新建 Community"}</b><button type="button" className={styles.saveTextBtn} onPointerDown={(e) => e.stopPropagation()} onClick={saveCommunityEditor}>保存</button></div>
           <div className={styles.modalScroll}>
             {communityEditorError ? <div className={styles.editorError}>{communityEditorError}</div> : null}
-            <div className={styles.editorSection}><h3>Community</h3><label>名称<input value={communityEditor.name} onChange={(e) => setCommunityEditor({ ...communityEditor, name: e.target.value })} placeholder="例如 NCT WISH" /></label><label>简介<textarea value={communityEditor.description} onChange={(e) => setCommunityEditor({ ...communityEditor, description: e.target.value })} placeholder="这个 Community 的简介" /></label><div className={styles.imageEditRow}><Avatar text={communityEditor.name || "C"} imageUrl={communityEditor.avatarUrl} tone="soft" className={styles.editorAvatar} /><button type="button" onClick={() => communityAvatarInputRef.current?.click()}><Camera size={16} /> Community 头像</button>{communityEditor.avatarUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, avatarUrl: "" })}>清除</button> : null}</div><div className={styles.imageEditRow}><button type="button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={16} /> Community 大背景</button>{communityEditor.coverUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, coverUrl: "" })}>清除背景</button> : null}</div><input ref={communityAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /><input ref={coverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, coverUrl: await fileToDataUrl(file, 1400) }); e.currentTarget.value = ""; }} /></div>
+            <div className={styles.editorSection}><h3>Community</h3><label>名称<input value={communityEditor.name} onChange={(e) => setCommunityEditor({ ...communityEditor, name: e.target.value })} placeholder="例如 NCT WISH" /></label><label>简介<textarea value={communityEditor.description} onChange={(e) => setCommunityEditor({ ...communityEditor, description: e.target.value })} placeholder="这个 Community 的简介" /></label><div className={styles.imageEditRow}><Avatar text={communityEditor.name || "C"} imageUrl={communityEditor.avatarUrl || communityEditor.officialAvatarUrl} tone="soft" className={styles.editorAvatar} /><button type="button" onClick={() => communityAvatarInputRef.current?.click()}><Camera size={16} /> Community 图标</button>{communityEditor.avatarUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, avatarUrl: "" })}>清除</button> : null}</div><div className={styles.imageEditRow}><button type="button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={16} /> Community 大背景</button>{communityEditor.coverUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, coverUrl: "" })}>清除背景</button> : null}</div><input ref={communityAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /><input ref={coverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, coverUrl: await fileToDataUrl(file, 1400) }); e.currentTarget.value = ""; }} /></div>
             <div className={styles.editorSection}><h3>Official Account</h3><label>官号昵称<input value={communityEditor.officialName} onChange={(e) => setCommunityEditor({ ...communityEditor, officialName: e.target.value })} placeholder={communityEditor.name ? `${communityEditor.name} Official` : "Official Account"} /></label><label>官号简介<input value={communityEditor.officialBio} onChange={(e) => setCommunityEditor({ ...communityEditor, officialBio: e.target.value })} placeholder="公告 · Schedule · 官方 LIVE" /></label><div className={styles.imageEditRow}><Avatar text={communityEditor.officialName || communityEditor.name || "O"} imageUrl={communityEditor.officialAvatarUrl} tone="teal" className={styles.editorAvatar} /><button type="button" onClick={() => officialAvatarInputRef.current?.click()}><Camera size={16} /> 官号头像</button>{communityEditor.officialAvatarUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, officialAvatarUrl: "" })}>清除</button> : null}</div><input ref={officialAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, officialAvatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /></div>
             <div className={styles.editorSection}><h3>绑定成员</h3><p className={styles.editorHint}>只勾选真正属于这个 Community 的角色。Solo 只选 1 人也可以。</p><div className={styles.memberPicker}>{characters.map((char) => { const checked = communityEditor.selectedCharacterIds.includes(char.id); return <button type="button" key={char.id} className={`${styles.memberPickCard} ${checked ? styles.memberPickActive : ""}`} onClick={() => setCommunityEditor({ ...communityEditor, selectedCharacterIds: checked ? communityEditor.selectedCharacterIds.filter((id) => id !== char.id) : [...communityEditor.selectedCharacterIds, char.id] })}><Avatar text={char.name} imageUrl={char.avatar} tone="soft" className={styles.memberPickAvatar} /><span className={styles.memberPickName}>{char.name}</span><i>{checked ? "✓" : "+"}</i></button>; })}</div>{!characters.length ? <div className={styles.emptyMini}>当前还没有角色，请先在「角色」App 建立角色。</div> : null}</div>
             {communityEditor.id ? <div className={styles.editorSection}><h3>危险操作</h3><button type="button" className={styles.dangerButton} onClick={() => { const community = communityMap.get(communityEditor.id!); if (community) removeCommunity(community); }}><Trash2 size={16} /> 删除 Community</button></div> : null}
@@ -778,10 +949,25 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         </div>
       ) : null}
 
+      {userProfileDraft ? (
+        <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setUserProfileDraft(null); }}>
+          <section className={styles.sheet}>
+            <div className={styles.sheetHandle} />
+            <div className={styles.sheetTitle}><h2>编辑 WVS 身份</h2><button type="button" className={styles.iconBtn} onClick={() => setUserProfileDraft(null)}><X size={20} /></button></div>
+            <p className={styles.editorHint}>默认继承当前 User Identity；这里修改只影响 Weverse 里的粉丝昵称、头像和简介。</p>
+            <div className={styles.memberEditProfile}><Avatar text={userProfileDraft.displayName || userName} imageUrl={userProfileDraft.avatarUrl} className={styles.bigAvatar} /><button type="button" onClick={() => userAvatarInputRef.current?.click()}><Camera size={16} /> 换头像</button>{userProfileDraft.avatarUrl ? <button type="button" onClick={() => setUserProfileDraft({ ...userProfileDraft, avatarUrl: "" })}>清除</button> : null}</div>
+            <input ref={userAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setUserProfileDraft({ ...userProfileDraft, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} />
+            <label className={styles.fieldLabel}>WVS 昵称</label><input className={styles.select} value={userProfileDraft.displayName} onChange={(e) => setUserProfileDraft({ ...userProfileDraft, displayName: e.target.value })} placeholder={userIdentity?.name || "我的昵称"} />
+            <label className={styles.fieldLabel}>简介</label><textarea className={styles.textareaSmall} value={userProfileDraft.bio} onChange={(e) => setUserProfileDraft({ ...userProfileDraft, bio: e.target.value })} placeholder="Fan account" />
+            <button type="button" className={styles.primaryButton} onClick={saveUserProfile}>保存 WVS 身份</button><button type="button" className={styles.secondaryButton} onClick={() => { const nextState = updateWeverseUserProfile({ displayName: undefined, avatarUrl: undefined, bio: undefined }); setState(nextState); setUserProfileDraft({ displayName: userIdentity?.name || "", avatarUrl: userIdentity?.avatarUrl || "", bio: userIdentity?.bio || "" }); onNotice?.("已恢复继承 User Identity"); }}>恢复继承 User Identity</button>
+          </section>
+        </div>
+      ) : null}
+
       <div className={`${styles.drawerMask} ${drawerOpen ? styles.show : ""}`} onClick={() => setDrawerOpen(false)} />
       <aside className={`${styles.drawer} ${drawerOpen ? styles.show : ""}`}>
-        <div className={styles.userCard}><Avatar text={userName} imageUrl={userAvatar} tone="soft" className={styles.userAvatar} /><div><h3>{userName}</h3><p>Fan account</p></div></div>
-        <button type="button" className={styles.drawerItem} onClick={() => showTodo("WVS 用户资料") }><UserRound size={20} /><span>我的资料</span></button>
+        <button type="button" className={styles.userCardButton} onClick={openUserProfileEditor}><div className={styles.userCard}><Avatar text={userName} imageUrl={userAvatar} tone="soft" className={styles.userAvatar} /><div><h3>{userName}</h3><p>{userBio}</p></div></div><Pencil size={16} /></button>
+        <button type="button" className={styles.drawerItem} onClick={openUserProfileEditor}><UserRound size={20} /><span>编辑 WVS 身份</span></button>
         <button type="button" className={styles.drawerItem} onClick={() => showTodo("我的帖子与评论") }><MessageCircle size={20} /><span>我的帖子与评论</span></button>
         <button type="button" className={styles.drawerItem} onClick={() => showTodo("收藏页") }><Bookmark size={20} /><span>收藏</span></button>
         <button type="button" className={styles.drawerItem} onClick={() => showTodo("WVS 设置") }><Settings size={20} /><span>WVS 设置</span></button>

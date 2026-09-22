@@ -91,3 +91,14 @@
 - Fan 发布入口移动到 Community 内。
 - Community / Artist 页面改为 Weverse 风格，Party 移除，LIVE·Media 预留。
 - 帖子支持统一编辑/删除；Community 与成员 WVS 资料可独立维护头像/背景。
+
+## Weverse v0.3.3 · AI Community Core
+- 修正 Community 图标 / 背景 / Official 头像的职责与 fallback；Community 图标默认继承官号头像，不再继承背景。
+- Highlight 仅 Official + Artist；Fan 与 Artist 独立筛选。
+- 接入 AI 社区一轮生成：Artist Post + 少量 Fan Post / Fan Comment。
+- Artist 生成读取 Float 人设、世界书、核心/长期/近期记忆与 Calendar，并限制私人秘密公开。
+- Artist 发图接 Photos Resolver（wvs channel），WVS 暂沿用朋友圈公开发图策略。
+- Artist Post 支持原文 + 中文翻译切换。
+- 新增 Weverse memory projection，并加入原生短期时间线 / 长期总结来源；编辑删除同步清理。
+- 右上角接入 WVS 专属 user 粉丝身份编辑，默认继承 User Identity，可独立覆盖。
+- Service Worker cache version 升至 v18。

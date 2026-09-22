@@ -31,13 +31,16 @@ export type WeverseCommunity = {
   updatedAt: number;
 };
 
-export type WeverseAuthorType = "user" | "official" | "artist";
+export type WeverseAuthorType = "user" | "fan" | "official" | "artist";
 
 export type WeverseComment = {
   id: string;
   authorType: WeverseAuthorType;
   authorId: string;
+  authorName?: string;
+  authorAvatarUrl?: string;
   body: string;
+  originalBody?: string;
   createdAt: number;
 };
 
@@ -46,24 +49,36 @@ export type WeversePost = {
   communityId: string;
   authorType: WeverseAuthorType;
   authorId: string;
+  authorName?: string;
+  authorAvatarUrl?: string;
   body: string;
+  originalBody?: string;
   imageUrl?: string;
+  photoLibraryId?: string;
+  photoSource?: "album" | "generated" | "manual";
   createdAt: number;
   likedByUser?: boolean;
   bookmarkedByUser?: boolean;
   comments: WeverseComment[];
 };
 
+export type WeverseUserProfile = {
+  displayName?: string;
+  avatarUrl?: string;
+  bio?: string;
+};
+
 export type WeverseState = {
   version: 1;
   communities: WeverseCommunity[];
   posts: WeversePost[];
+  userProfile?: WeverseUserProfile;
 };
 
-const EMPTY_STATE: WeverseState = { version: 1, communities: [], posts: [] };
+const EMPTY_STATE: WeverseState = { version: 1, communities: [], posts: [], userProfile: {} };
 
 function cloneEmpty(): WeverseState {
-  return { version: 1, communities: [], posts: [] };
+  return { version: 1, communities: [], posts: [], userProfile: {} };
 }
 
 function normalizeState(raw: unknown): WeverseState {
@@ -76,7 +91,8 @@ function normalizeState(raw: unknown): WeverseState {
     ? source.posts.filter((item): item is WeversePost => Boolean(item && typeof item.id === "string" && typeof item.communityId === "string" && typeof item.body === "string"))
       .map((item) => ({ ...item, comments: Array.isArray(item.comments) ? item.comments : [] }))
     : [];
-  return { version: 1, communities, posts };
+  const userProfile = source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {};
+  return { version: 1, communities, posts, userProfile };
 }
 
 export function loadWeverseState(): WeverseState {
@@ -97,6 +113,11 @@ export function saveWeverseState(state: WeverseState): WeverseState {
     window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT));
   }
   return normalized;
+}
+
+export function updateWeverseUserProfile(patch: Partial<WeverseUserProfile>): WeverseState {
+  const state = loadWeverseState();
+  return saveWeverseState({ ...state, userProfile: { ...(state.userProfile || {}), ...patch } });
 }
 
 export function upsertWeverseCommunity(community: WeverseCommunity): WeverseState {

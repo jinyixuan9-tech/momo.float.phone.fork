@@ -20,6 +20,7 @@ import { loadDiaryEntries } from "./diary-entry-storage";
 import type { DiaryEntry, DiaryEntryBlock } from "./diary-entry-types";
 import { loadNoteWallProjectionEntries } from "./notewall-memory";
 import { loadXiaohongshuProjectionEntries } from "./xiaohongshu-memory";
+import { loadWeverseProjectionEntries } from "./weverse-memory";
 import { formatXiaohongshuShareForPrompt } from "./chat-share";
 import { loadBlackMarketTheaterProjectionEntries } from "./black-market-storage";
 import { loadInterviewMagazineProjectionEntries } from "./interview-magazine-memory";
@@ -51,8 +52,8 @@ function formatPhotoDirectiveForPrompt(msg: ChatMessage): string {
 
 export type NativeTimelineEntry = {
     id: string;
-    sourceApp: "chat" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app";
-    sourceDetail?: "direct" | "group" | "system" | "story" | "chat_offline" | "game" | "diary_entry" | "notewall" | "xiaohongshu" | "black_market_theater" | "interview_issue" | "interview_shared_issue" | "cocreate_project" | "checkphone" | "custom_app_event"; // chat sub-type: 1:1 vs group chat vs system note
+    sourceApp: "chat" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "weverse" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app";
+    sourceDetail?: "direct" | "group" | "system" | "story" | "chat_offline" | "game" | "diary_entry" | "notewall" | "xiaohongshu" | "weverse" | "black_market_theater" | "interview_issue" | "interview_shared_issue" | "cocreate_project" | "checkphone" | "custom_app_event"; // chat sub-type: 1:1 vs group chat vs system note
     authorType?: "user" | "character" | "npc"; // who authored this entry
     postAuthorType?: "user" | "character"; // for moments: who owns the parent post
     sessionId?: string;
@@ -700,6 +701,26 @@ export function loadNativeTimeline(
         });
     }
 
+    // ── Weverse projections ──
+    const weverseEntries = loadWeverseProjectionEntries(characterId, {
+        afterTimestamp: options?.afterTimestamp,
+    });
+    for (const weverseEntry of weverseEntries) {
+        entries.push({
+            id: weverseEntry.id,
+            sourceApp: "weverse",
+            sourceDetail: "weverse",
+            authorType: "character",
+            timestamp: weverseEntry.timestamp,
+            content: formatStoredPromptEventContent(weverseEntry.content, {
+                label: "Weverse",
+                timestamp: weverseEntry.timestamp,
+                timeAware,
+                timestampOptions,
+            }),
+        });
+    }
+
     // ── Check phone projections ──
     const checkPhoneEntries = loadCheckPhoneProjectionEntries(characterId, {
         afterTimestamp: options?.afterTimestamp,
@@ -792,7 +813,7 @@ export function loadNativeTimeline(
 }
 
 // Fixed order — lower = further from LLM output (appears higher in prompt)
-const FEATURE_ORDER: Record<string, number> = { map: 0, game: 0.5, moments: 1, xiaohongshu: 1.5, checkphone: 1.7, story: 2, vn: 2, theater: 2.2, interview: 2.35, cocreate: 2.4, diary_entry: 2.45, notewall: 2.5, custom_app: 2.6, group_chat: 3, chat: 4 };
+const FEATURE_ORDER: Record<string, number> = { map: 0, game: 0.5, moments: 1, xiaohongshu: 1.5, weverse: 1.6, checkphone: 1.7, story: 2, vn: 2, theater: 2.2, interview: 2.35, cocreate: 2.4, diary_entry: 2.45, notewall: 2.5, custom_app: 2.6, group_chat: 3, chat: 4 };
 // Map appId → XML tag name for the "current feature" wrapper
 const FEATURE_TAG: Record<string, string> = {
     chat: "recent_chat",
@@ -804,6 +825,7 @@ const FEATURE_TAG: Record<string, string> = {
     game: "recent_game",
     diary: "recent_notewall",
     xiaohongshu: "recent_xiaohongshu",
+    weverse: "recent_weverse",
     checkphone: "recent_checkphone",
     interview_magazine: "recent_interview",
     cocreate: "recent_cocreate",
@@ -1019,6 +1041,11 @@ export function prepareShortTermContext(
     const xiaohongshuEntries = timeline.filter(e => e.sourceApp === "xiaohongshu");
     if (xiaohongshuEntries.length > 0) {
         raw.push({ tag: "recent_xiaohongshu", order: FEATURE_ORDER.xiaohongshu, entries: xiaohongshuEntries });
+    }
+
+    const weverseTimelineEntries = timeline.filter(e => e.sourceApp === "weverse");
+    if (weverseTimelineEntries.length > 0) {
+        raw.push({ tag: "recent_weverse", order: FEATURE_ORDER.weverse, entries: weverseTimelineEntries });
     }
 
     const checkPhoneEntries = timeline.filter(e => e.sourceApp === "checkphone");
@@ -1279,6 +1306,11 @@ export function prepareGroupShortTermContext(
         raw.push({ tag: "recent_xiaohongshu", order: FEATURE_ORDER.xiaohongshu, entries: xiaohongshuEntries });
     }
 
+    const weverseTimelineEntries = timeline.filter(e => e.sourceApp === "weverse");
+    if (weverseTimelineEntries.length > 0) {
+        raw.push({ tag: "recent_weverse", order: FEATURE_ORDER.weverse, entries: weverseTimelineEntries });
+    }
+
     const checkPhoneEntries = timeline.filter(e => e.sourceApp === "checkphone");
     if (checkPhoneEntries.length > 0) {
         raw.push({ tag: "recent_checkphone", order: FEATURE_ORDER.checkphone, entries: checkPhoneEntries });
@@ -1389,6 +1421,7 @@ export function prepareGroupShortTermContext(
                         entry.sourceApp === "map" ? "recent_game" :
                             entry.sourceApp === "game" ? "recent_game" :
                                 entry.sourceApp === "xiaohongshu" ? "recent_xiaohongshu" :
+                                    entry.sourceApp === "weverse" ? "recent_weverse" :
                                     entry.sourceApp === "checkphone" ? "recent_checkphone" :
                                         entry.sourceApp === "interview_magazine" ? "recent_interview" :
                                                 entry.sourceApp === "cocreate" ? "recent_cocreate" :

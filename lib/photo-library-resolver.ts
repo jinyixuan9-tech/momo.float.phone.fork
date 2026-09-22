@@ -104,14 +104,20 @@ function scorePhoto(photo: PhotoRecord, request: PhotoResolverRequest): { score:
 
   // 已公开朋友圈的照片默认不再当“新图”私聊发给 user；朋友圈自己则不重复发同图。
   const hasMomentUse = photo.usageHistory.some((item) => item.characterId === request.characterId && item.channel === "moments");
+  const hasWvsUse = photo.usageHistory.some((item) => item.characterId === request.characterId && item.channel === "wvs");
+  const hasPublicUse = hasMomentUse || hasWvsUse;
   const hasDmUse = photo.usageHistory.some((item) => item.characterId === request.characterId && item.channel === "dm_user" && (!request.targetId || item.targetId === request.targetId));
-  if (request.channel === "dm_user" && hasMomentUse) {
+  if (request.channel === "dm_user" && hasPublicUse) {
     score -= 100;
-    reasons.push("已发朋友圈，排除主动私发");
+    reasons.push("已公开发布，排除主动私发");
   }
   if (request.channel === "moments" && hasMomentUse) {
     score -= 100;
     reasons.push("朋友圈已用过，排除重复");
+  }
+  if (request.channel === "wvs" && hasWvsUse) {
+    score -= 100;
+    reasons.push("Weverse 已用过，排除重复");
   }
   if (request.channel === "dm_user" && hasDmUse) {
     score -= 3.5;
@@ -142,9 +148,11 @@ function scorePhoto(photo: PhotoRecord, request: PhotoResolverRequest): { score:
   return { score, reasons };
 }
 
-export function getPhotoSourceStrategy(context: "chat" | "moments"): PhotoSourceStrategy {
+export function getPhotoSourceStrategy(context: "chat" | "moments" | "wvs"): PhotoSourceStrategy {
   const preferences = loadPhotoLibrary().preferences;
-  return context === "chat" ? preferences.chatStrategy : preferences.momentsStrategy;
+  if (context === "chat") return preferences.chatStrategy;
+  // WVS 暂时沿用公开发帖（朋友圈）的来源策略，后续可再拆独立开关。
+  return preferences.momentsStrategy;
 }
 
 export async function resolvePhotoForUse(request: PhotoResolverRequest): Promise<PhotoResolverMatch | null> {
