@@ -64,3 +64,11 @@
 - 导入弹窗支持继续追加选择照片；相同文件不会重复加入。
 - Service Worker 缓存版本升级为 v13，部署更新后会淘汰旧静态缓存。
 - 保持 v0.2.1 的识图批次、Resolver、朋友圈和三档发图策略不变。
+
+## v0.3.0 · Weverse UI Shell
+- 在 v0.2.2 Photos 基线上加入原生 Weverse 桌面 App 与桌面图标。
+- 第一刀先写入已确认的 UI 骨架：`Feed / + / Community` 三栏悬浮 Dock，DM / Shop / More 不占底栏。
+- 加入 My Feed、Community 列表、Community 首页、成员主页、发布 Sheet、右上角“我的”抽屉与原文/翻译切换示意。
+- 当前内置 NCT WISH / RIIZE 为 UI 测试数据；user 可在本次会话中发布测试 Fan Post。
+- 新建 Community、绑定真实 char、官号接管、AI 内容生成、记忆回写、Schedule/Calendar、LIVE 与 Photos Resolver 将在后续 WVS 迭代接入。
+- Photos 使用渠道类型预留 `wvs`，方便后续 WVS 公开发图记录复用。

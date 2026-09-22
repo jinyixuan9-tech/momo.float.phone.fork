@@ -1,6 +1,6 @@
 export type PhotoVisionStatus = "unprocessed" | "pending" | "done" | "failed";
 
-export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char" | "bubble" | "sms" | "other";
+export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char" | "bubble" | "sms" | "wvs" | "other";
 
 export type PhotoUsageRecord = {
   channel: PhotoUsageChannel;

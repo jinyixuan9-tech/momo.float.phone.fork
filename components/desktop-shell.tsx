@@ -10,6 +10,7 @@ import { bgTimerCleanup } from "@/lib/bg-timer";
 import { PhoneThemeApp } from "@/components/phone-theme-app";
 import { PhoneCharacterApp } from "@/components/phone-character-app";
 import { PhotosApp } from "@/components/photos/photos-app";
+import { WeverseApp } from "@/components/weverse/weverse-app";
 import { PhoneSettingsApp } from "@/components/phone-settings-app";
 import { PhoneChatApp } from "@/components/chat/phone-chat-app";
 import { PhonePlaceholderApp } from "@/components/phone-placeholder-app";
@@ -3898,6 +3899,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
     if (activeApp === "photos") {
       return <PhotosApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+
+    if (activeApp === "weverse") {
+      return <WeverseApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
 
     if (activeApp === "characters") {

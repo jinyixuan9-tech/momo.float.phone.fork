@@ -71,7 +71,7 @@ function normalizeUsageHistory(value: unknown): PhotoRecord["usageHistory"] {
     if (!raw || typeof raw !== "object") return [];
     const item = raw as Record<string, unknown>;
     const channel = item.channel;
-    if (!["dm_user", "moments", "dm_char", "bubble", "sms", "other"].includes(String(channel))) return [];
+    if (!["dm_user", "moments", "dm_char", "bubble", "sms", "wvs", "other"].includes(String(channel))) return [];
     if (typeof item.characterId !== "string" || !item.characterId) return [];
     const usedAt = typeof item.usedAt === "number" && Number.isFinite(item.usedAt) ? item.usedAt : Date.now();
     return [{
