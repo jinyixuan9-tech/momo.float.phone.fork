@@ -120,3 +120,9 @@
 - WVS Artist / Official / Fan / Reply 加入真实时间感知；历史生成不会写入当前近期记忆。
 - Official AI 可读取官号媒体池素材描述；官号从手机上传的素材会进入 Photos、自动识图并加入 Official Media Pool。
 - Service Worker 升级为 v20。
+
+
+## v0.3.6 · WVS Notice & Resolver Fix
+- Notice 与 Official Post 分离；公告支持列表/详情/编辑/删除且无评论区。
+- Official Post 进入官号主页；评论生成以顶级评论为主。
+- 统一 Media Resolver：允许生图但无 API/失败时降级为文字图片；album_only 匹配失败仍不伪造图片。

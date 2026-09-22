@@ -31,8 +31,10 @@ export type MediaResolverRequest = {
 };
 
 export type MediaResolverResult = {
-  imageUrl: string;
-  source: "album" | "generated";
+  imageUrl?: string;
+  /** 允许生图但当前未配置/调用失败时，沿用 Float 文字图片兜底。 */
+  placeholderDescription?: string;
+  source: "album" | "generated" | "text_placeholder";
   photoLibraryId?: string;
   debug?: {
     strategy: string;
@@ -120,7 +122,17 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
     appId: request.appId,
     useReferenceImage: request.actor.type === "character" && ["selfie", "portrait", "group"].includes(intentKind),
   }).catch(() => null);
-  if (!generated) return null;
+  if (!generated) {
+    return {
+      source: "text_placeholder",
+      placeholderDescription: request.description,
+      debug: getPhotoResolverDebugEnabled() ? {
+        strategy: getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other"),
+        intentKind,
+        reason: "当前策略允许生图，但未获得真实生成图片；回退为 Float 文字图片。",
+      } : undefined,
+    };
+  }
   const assetId = await saveChatImageToIndexedDB(generated.blob).catch(() => "");
   if (!assetId) return null;
   return {

@@ -31,6 +31,10 @@ export type GeneratedWeverseArtistPost = {
   mediaIntent?: WeverseMediaIntent;
 };
 
+export type GeneratedWeverseNotice = {
+  title: string; original: string; translated: string; photoDescription?: string; mediaIntent?: WeverseMediaIntent; preferredPhotoId?: string;
+};
+
 export type GeneratedWeverseOfficialPost = {
   original: string;
   translated: string;
@@ -254,14 +258,14 @@ export async function generateWeverseOfficialPost(
         `你正在运营 Weverse 的「${community.name}」Official Account：${community.official.displayName}。`,
         community.official.bio ? `官号简介：${community.official.bio}` : "",
         "这是公开官方账号，不是某个成员本人。不要读取、暗示或泄露任何成员私聊、私人关系、地下恋或非公开记忆。",
-        "本轮生成一条自然的 Official Post。可以是轻量公告、公开问候、幕后/现场图片分享、活动后的感谢等，但不要凭空宣布回归、演唱会、获奖、事故等重大事实。",
+        "本轮生成一条自然的 Official Post。它是社交动态，不是正式 Notice：可以是公开问候、幕后/现场图片分享、活动宣传短文、活动后的感谢等。正式规则、参与说明、长篇通知应交给 Notice，不要在这里写成公告格式。不要凭空宣布回归、演唱会、获奖、事故等重大事实。",
         "韩国 Weverse 社区默认以自然韩语作为 original；若社区语境明显更适合其他语言可以调整。始终同时提供简体中文 translated。",
         communityTimeContext(community, now),
         "时间相关措辞必须符合当前参考时间；除非内容真的涉及睡觉/深夜/早起，否则不要无缘无故写晚安、早点睡、夜宵等。",
         options?.historical ? "这是历史回填。内容必须像目标日期当时已经存在的普通公开记录，不要借用未来才发生的事件。" : "",
         officialMediaContext(community),
         options?.historical ? "历史回填时，只有当媒体池素材描述明确适合目标日期/旧内容时才使用 preferredPhotoId；不要把明显属于现在的素材倒灌到过去。" : "",
-        "如果适合配图，给出 photoDescription，并用 mediaIntent 标记：group / portrait / food / scenery / object / pet / official / other。若上面的 Official Media Pool 有自然吻合的素材，优先围绕其中一张发带图内容并把 preferredPhotoId 填成真实 photoId；纯公告/通知仍可只发文字。不要为了用图硬写帖子，也不要长期无视已经存在的媒体池。",
+        "如果适合配图，给出 photoDescription，并用 mediaIntent 标记：group / portrait / food / scenery / object / pet / official / other。若上面的 Official Media Pool 有自然吻合的素材，优先围绕其中一张发带图内容并把 preferredPhotoId 填成真实 photoId。Official Post 可以纯文字，但不要为了用图硬写帖子，也不要长期无视已经存在的媒体池。",
         `近期公开社区内容：\n${recentCommunityContext(contextPosts, community)}`,
         "只输出 JSON，不要 Markdown。格式：{\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"...或空\",\"mediaIntent\":\"official等或空\",\"preferredPhotoId\":\"photoId或空\"}",
       ].filter(Boolean).join("\n"),
@@ -290,6 +294,46 @@ export async function generateWeverseOfficialPost(
     mediaIntent: photoDescription ? mediaIntent || "official" : undefined,
     preferredPhotoId: preferredPhotoId && (community.officialMediaPhotoIds || []).includes(preferredPhotoId) ? preferredPhotoId : undefined,
   };
+}
+
+
+export async function generateWeverseOfficialNotice(
+  community: WeverseCommunity,
+  contextPosts: WeversePost[],
+  options?: { now?: Date; historical?: boolean },
+): Promise<GeneratedWeverseNotice> {
+  const resolved = await resolveCommunityApi(community);
+  const now = options?.now ?? new Date();
+  const messages: LLMMessage[] = [
+    {
+      role: "system",
+      content: [
+        `你正在运营 Weverse 的「${community.name}」官方公告（Notice）系统。`,
+        `Official Account：${community.official.displayName}`,
+        "Notice 不是普通社交动态。它用于正式说明公开事项，必须有清晰标题和完整信息，语气正式、克制、事实优先。",
+        "不要写成社交媒体碎碎念，不要用‘大家今天也辛苦啦’之类互动口吻；不要添加评论区邀请。",
+        "可以是公开活动说明、运营通知、公开日程提醒、规则/参与方式、纪念日说明等；不要凭空捏造严重事件或高风险事实。",
+        "韩国 Weverse 社区默认以自然韩语作为 original；同时提供简体中文 translated。",
+        communityTimeContext(community, now),
+        options?.historical ? "这是历史回填：内容必须符合目标日期，不引用未来事件。" : "",
+        officialMediaContext(community),
+        "如公告天然需要海报/专辑图/活动图，可提供 photoDescription 和 preferredPhotoId；不需要配图则留空。",
+        `近期公开社区内容：\n${recentCommunityContext(contextPosts, community)}`,
+        "只输出 JSON，不要 Markdown。格式：{\"title\":\"...\",\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"...或空\",\"mediaIntent\":\"official等或空\",\"preferredPhotoId\":\"photoId或空\"}",
+      ].filter(Boolean).join("\n"),
+    },
+    { role: "user", content: "现在生成一条正式 Weverse Notice。" },
+  ];
+  const raw = await sendLLMRequest(resolved.apiConfig, resolved.preset, messages, resolved.regexes, { characterName: `Weverse Notice:${community.name}` }, { appId: "weverse", appTags: ["weverse", "official-notice"], skipOutputRegex: true });
+  const parsed = extractJsonObject(raw);
+  const title = String(parsed?.title ?? "").trim();
+  const original = String(parsed?.original ?? "").trim();
+  const translated = String(parsed?.translated ?? original).trim() || original;
+  const photoDescription = String(parsed?.photoDescription ?? "").trim();
+  const mediaIntent = parseMediaIntent(parsed?.mediaIntent);
+  const preferredPhotoId = String(parsed?.preferredPhotoId ?? "").trim();
+  if (!title || (!original && !translated)) throw new ChatEngineError("这次没有生成有效 Notice，请重试。");
+  return { title, original: original || translated, translated: translated || original, photoDescription: photoDescription || undefined, mediaIntent: photoDescription ? mediaIntent || "official" : undefined, preferredPhotoId: preferredPhotoId && (community.officialMediaPhotoIds || []).includes(preferredPhotoId) ? preferredPhotoId : undefined };
 }
 
 function fanLanguageRules(): string[] {
@@ -355,8 +399,8 @@ export async function generateWeverseFanBatch(
         targetPost ? `本轮主要给这条帖子增加互动：\n${targetPost.id} | ${targetPost.authorType}: ${targetPost.originalBody || targetPost.body}` : "",
         targetPost ? `现有评论（replyToId 只能引用这里真实存在的评论 id，或留空）：\n${commentContext(targetPost)}` : "",
         includePosts ? `posts 生成 ${counts.postRange} 条；如果这轮没有自然的新粉丝帖，可以为 0。` : "posts 必须为空数组。",
-        targetPost ? `comments 生成 ${counts.commentRange} 条，允许为 0；可以回复现有粉丝/用户/艺人评论，也允许粉丝互相接话。不要假装每次艺人都会回复，艺人回复由另一个角色模型处理。` : "comments 必须为空数组；没有指定目标帖子时，本轮只负责生成 Fan Post。",
-        "若某条新评论要回复本批前面已经生成的评论，可填 replyToIndex（从 0 开始，只能指向自己前面的项）；若回复既有评论则填 replyToId；两者都不填就是顶级评论。",
+        targetPost ? `comments 生成 ${counts.commentRange} 条，允许为 0。默认大多数（至少约 70%）必须是独立顶级评论；只允许少量自然的粉丝互回小楼。不要把本批后续评论全部挂到第一条下面。艺人回复由另一个角色模型处理。` : "comments 必须为空数组；没有指定目标帖子时，本轮只负责生成 Fan Post。",
+        "若某条新评论确实需要回复本批前面已经生成的评论，可填 replyToIndex；若回复既有评论则填 replyToId；否则必须留空作为顶级评论。连续多条指向同一个 parent 是不自然的，应避免。",
         "只输出 JSON，不要 Markdown。格式：{\"posts\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\",\"replyToId\":\"现有评论id或空\",\"replyToIndex\":null或前面评论序号}]}。",
       ].filter(Boolean).join("\n"),
     },

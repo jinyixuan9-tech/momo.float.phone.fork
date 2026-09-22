@@ -1,3 +1,20 @@
+# Weverse · v0.3.6 Notice & Resolver Fix
+
+> v0.3.6 聚焦 v0.3.5 实测修正：Official Notice 与 Official Post 正式拆分、公告列表/详情/编辑/删除、Official Account 主页、评论树分布与详情滚动修正，以及统一 Media Resolver 的“允许生图但无 API → 文字图片”降级。
+
+## v0.3.6 · Notice & Resolver Fix
+
+- Notice 是独立正式公告：有标题/正文/日期，可由 AI 或用户创建，支持编辑与删除；没有点赞与评论区，不混入普通 Feed。
+- Official Post 保持社交动态语气，并统一归档到 Official Account 主页。
+- Community Home 的公告模块只读取 Notice，并提供“查看全部”。
+- AI 粉丝评论默认以独立顶级评论为主，少量形成回复楼，避免整批黏在第一条下方。
+- Post Detail 维持底部回复栏固定，评论区独立滚动。
+- Media Resolver 全局规则：仅相册模式匹配失败仍返回空；允许生图的模式下，真实生图失败/未配置 API 时返回文字图片描述占位。WVS、后续 Bubble/SMS 等可复用同一返回协议。
+- Service Worker cache 升至 v21。
+
+
+---
+
 # Weverse · v0.3.5 Living Community
 
 > v0.3.5 在 v0.3.4 的评论/媒体基础上补齐“社区已经活了一阵子”的时间线体验：固定评论输入栏、加载更多评论、艺人回复优先、主页回复关联卡、时间感知、粉丝数与模拟互动量、Official 自动用媒体池，以及 Community 历史初始化。
