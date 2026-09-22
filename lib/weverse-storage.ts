@@ -14,6 +14,7 @@ export type WeverseMemberProfile = {
   characterId: string;
   displayName?: string;
   avatarUrl?: string;
+  coverUrl?: string;
   bio?: string;
 };
 
@@ -21,6 +22,7 @@ export type WeverseCommunity = {
   id: string;
   name: string;
   description?: string;
+  avatarUrl?: string;
   coverUrl?: string;
   official: WeverseAccountProfile;
   memberCharacterIds: string[];
@@ -125,6 +127,14 @@ export function updateWeversePost(postId: string, patch: Partial<WeversePost>): 
   return saveWeverseState({
     ...state,
     posts: state.posts.map((item) => item.id === postId ? { ...item, ...patch } : item),
+  });
+}
+
+export function deleteWeversePost(postId: string): WeverseState {
+  const state = loadWeverseState();
+  return saveWeverseState({
+    ...state,
+    posts: state.posts.filter((item) => item.id !== postId),
   });
 }
 

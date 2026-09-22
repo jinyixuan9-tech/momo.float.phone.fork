@@ -84,3 +84,10 @@
 - WVS 状态纳入社交内容备份：ai_phone_weverse_state_v1。
 - AI 自动运营、翻译、Photos Resolver、Memory、Schedule/Calendar、LIVE 留待后续版本。
 - Service Worker cache version 升至 v15。
+
+
+## Weverse v0.3.2
+- Feed 仅保留 Artist / Official 动态。
+- Fan 发布入口移动到 Community 内。
+- Community / Artist 页面改为 Weverse 风格，Party 移除，LIVE·Media 预留。
+- 帖子支持统一编辑/删除；Community 与成员 WVS 资料可独立维护头像/背景。
