@@ -112,3 +112,11 @@
 - 新增统一 Media Resolver：所有类型都先查素材池；自拍/人像/合照智能模式不匹配则不偷偷生人物图，食物/风景/物品等匹配失败后可生图。
 - WVS Official 不创建 Character；Community 只维护 Photos photoId 引用作为官号媒体池。AI Official 已接入该池并支持智能回退生图。
 - Service Worker cache version 升至 v19。
+
+## v0.3.5 · WVS Living Community
+- WVS 评论页改为固定底部回复栏 + 独立评论滚动区；底部加载更多评论，Artist Reply 楼优先。
+- Artist 主页评论页保留被回复上下文并可跳回原楼。
+- Community 新增粉丝数、模拟点赞/总体评论快照，以及历史社区初始化/加载更早动态。
+- WVS Artist / Official / Fan / Reply 加入真实时间感知；历史生成不会写入当前近期记忆。
+- Official AI 可读取官号媒体池素材描述；官号从手机上传的素材会进入 Photos、自动识图并加入 Official Media Pool。
+- Service Worker 升级为 v20。

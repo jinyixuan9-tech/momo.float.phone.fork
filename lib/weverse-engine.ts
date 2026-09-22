@@ -18,6 +18,8 @@ import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { prepareShortTermContext } from "./short-term-assembler";
 import { buildCalendarScheduleMarker } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
+import { buildCharacterTimeContext, buildGroupTimeContext, getSystemTimeZone, formatZonedChineseDateTime, getZonedWeekday } from "./character-time";
+import { loadPhotoLibrary } from "./photo-library-storage";
 import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings } from "./weverse-storage";
 
 export type WeverseMediaIntent = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
@@ -34,6 +36,8 @@ export type GeneratedWeverseOfficialPost = {
   translated: string;
   photoDescription?: string;
   mediaIntent?: WeverseMediaIntent;
+  /** 若模型从当前 Official Media Pool 里看中了某张素材，直接返回 photoId。 */
+  preferredPhotoId?: string;
 };
 
 export type GeneratedWeverseFanPost = {
@@ -86,7 +90,7 @@ function parseMediaIntent(value: unknown): WeverseMediaIntent | undefined {
     : undefined;
 }
 
-async function resolveCharacterGeneration(characterId: string, community: WeverseCommunity): Promise<ResolvedGeneration> {
+async function resolveCharacterGeneration(characterId: string, community: WeverseCommunity, options?: { now?: Date; historical?: boolean }): Promise<ResolvedGeneration> {
   const character = loadCharacters().find((item) => item.id === characterId);
   if (!character) throw new ChatEngineError("找不到要生成 WVS 内容的角色。");
 
@@ -108,12 +112,15 @@ async function resolveCharacterGeneration(characterId: string, community: Wevers
   const userName = userIdentity?.name || "用户";
   const prepared = prepareShortTermContext(character.id, "weverse", { history: [] });
   const memConfig = loadMemoryConfig();
-  const [memories, coreMemories] = await Promise.all([
-    retrieveMemoriesForPrompt(character.id, prepared.wbActivationContext, memConfig).catch(() => []),
+  const historical = options?.historical === true;
+  const activationContext = historical ? "" : prepared.wbActivationContext;
+  const [memories, coreMemories] = historical ? [[], []] : await Promise.all([
+    retrieveMemoriesForPrompt(character.id, activationContext, memConfig).catch(() => []),
     retrieveCoreMemoriesForPrompt(character.id, memConfig).catch(() => []),
   ]);
 
-  const scheduleSummary = buildCalendarScheduleMarker("character", character.id, getWeekStartIso(new Date()));
+  const now = options?.now ?? new Date();
+  const scheduleSummary = historical ? "" : buildCalendarScheduleMarker("character", character.id, getWeekStartIso(now));
   const messages = assemblePromptPayload({
     character,
     history: [],
@@ -126,9 +133,10 @@ async function resolveCharacterGeneration(characterId: string, community: Wevers
     longTermMemories: formatLongTermMemories(memories),
     coreMemories: formatCoreMemories(coreMemories),
     scheduleSummary,
-    worldBookActivationContext: prepared.wbActivationContext,
-    recentBlocks: prepared.recentBlocks,
-    unifiedRecentItems: prepared.unifiedRecentItems,
+    worldBookActivationContext: activationContext,
+    recentBlocks: historical ? [] : prepared.recentBlocks,
+    unifiedRecentItems: historical ? [] : prepared.unifiedRecentItems,
+    timeContext: buildCharacterTimeContext(character.timeZone, now),
   });
 
   messages.push({
@@ -139,13 +147,16 @@ async function resolveCharacterGeneration(characterId: string, community: Wevers
       "不要主动公开地下关系、私人秘密、只在私聊里成立的称呼或对单一对象的私密承诺。",
       "说话方式必须保持本人语言习惯；不要因为平台是韩国 App 就把所有非韩国角色强行写成同一种口吻。",
       "公开内容可以很日常、短、碎碎念，也可以偶尔认真写长文；不要每次都像营业文案。",
+      buildCharacterTimeContext(character.timeZone, now).timeContext,
+      "时间相关措辞必须符合上面的真实本地时间。除非上下文真的涉及睡觉、深夜、早起，否则不要习惯性写晚安、早点睡、今天结束了、夜宵等强时间段话术。",
+      historical ? "这是历史回填：只写目标时间点当时可能公开发生的普通内容，不要引用目标日期之后才发生的近期记忆、行程或关系变化。" : "",
     ].join("\n"),
   });
   return { character, apiConfig, preset, regexes, messages, userName };
 }
 
-export async function generateWeverseArtistPost(characterId: string, community: WeverseCommunity): Promise<GeneratedWeverseArtistPost> {
-  const resolved = await resolveCharacterGeneration(characterId, community);
+export async function generateWeverseArtistPost(characterId: string, community: WeverseCommunity, options?: { now?: Date; historical?: boolean }): Promise<GeneratedWeverseArtistPost> {
+  const resolved = await resolveCharacterGeneration(characterId, community, options);
   const prompt: LLMMessage[] = [
     ...resolved.messages,
     {
@@ -194,6 +205,26 @@ function commentContext(post: WeversePost): string {
   return comments.map((comment) => `${comment.id} | ${comment.authorType} | ${comment.authorName || comment.authorId}: ${comment.originalBody || comment.body}${comment.parentId ? ` | replyTo=${comment.parentId}` : ""}`).join("\n");
 }
 
+function communityTimeContext(community: WeverseCommunity, now = new Date()): string {
+  const chars = loadCharacters().filter((item) => community.memberCharacterIds.includes(item.id));
+  if (chars.length) return buildGroupTimeContext(chars.map((item) => ({ name: item.name, timeZone: item.timeZone })), now).timeContext;
+  const zone = getSystemTimeZone();
+  return `当前社区参考时间：${formatZonedChineseDateTime(now, zone)} ${zone}，${getZonedWeekday(now, zone)}`;
+}
+
+function officialMediaContext(community: WeverseCommunity): string {
+  const allowed = new Set(community.officialMediaPhotoIds || []);
+  if (!allowed.size) return "当前 Official Media Pool 为空。";
+  const rows = loadPhotoLibrary().photos
+    .filter((photo) => allowed.has(photo.id))
+    .slice(0, 40)
+    .map((photo) => {
+      const summary = [photo.subject, photo.visionSummary, photo.appearance?.scene, ...(photo.visionTags || [])].filter(Boolean).join(" / ");
+      return `${photo.id} | ${summary || "未完成描述的官方素材"}`;
+    });
+  return rows.length ? `当前 Official Media Pool 可用素材：\n${rows.join("\n")}` : "当前 Official Media Pool 暂无可描述素材。";
+}
+
 async function resolveCommunityApi(community: WeverseCommunity): Promise<{ apiConfig: ApiConfig; preset: PresetConfig | null; regexes: RegexConfig[] }> {
   const firstMemberId = community.memberCharacterIds[0];
   const bindings = loadBindingConfig();
@@ -211,8 +242,11 @@ async function resolveCommunityApi(community: WeverseCommunity): Promise<{ apiCo
 export async function generateWeverseOfficialPost(
   community: WeverseCommunity,
   posts: WeversePost[],
+  options?: { now?: Date; historical?: boolean },
 ): Promise<GeneratedWeverseOfficialPost> {
   const resolved = await resolveCommunityApi(community);
+  const now = options?.now ?? new Date();
+  const contextPosts = options?.historical ? posts.filter((post) => post.createdAt <= now.getTime()) : posts;
   const messages: LLMMessage[] = [
     {
       role: "system",
@@ -222,9 +256,14 @@ export async function generateWeverseOfficialPost(
         "这是公开官方账号，不是某个成员本人。不要读取、暗示或泄露任何成员私聊、私人关系、地下恋或非公开记忆。",
         "本轮生成一条自然的 Official Post。可以是轻量公告、公开问候、幕后/现场图片分享、活动后的感谢等，但不要凭空宣布回归、演唱会、获奖、事故等重大事实。",
         "韩国 Weverse 社区默认以自然韩语作为 original；若社区语境明显更适合其他语言可以调整。始终同时提供简体中文 translated。",
-        "如果适合配图，给出 photoDescription，并用 mediaIntent 标记：group / portrait / food / scenery / object / pet / official / other。媒体来源不要由你决定，宿主会先查官号素材池再决定是否生图。",
-        `近期公开社区内容：\n${recentCommunityContext(posts, community)}`,
-        "只输出 JSON，不要 Markdown。格式：{\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"...或空\",\"mediaIntent\":\"official等或空\"}",
+        communityTimeContext(community, now),
+        "时间相关措辞必须符合当前参考时间；除非内容真的涉及睡觉/深夜/早起，否则不要无缘无故写晚安、早点睡、夜宵等。",
+        options?.historical ? "这是历史回填。内容必须像目标日期当时已经存在的普通公开记录，不要借用未来才发生的事件。" : "",
+        officialMediaContext(community),
+        options?.historical ? "历史回填时，只有当媒体池素材描述明确适合目标日期/旧内容时才使用 preferredPhotoId；不要把明显属于现在的素材倒灌到过去。" : "",
+        "如果适合配图，给出 photoDescription，并用 mediaIntent 标记：group / portrait / food / scenery / object / pet / official / other。若上面的 Official Media Pool 有自然吻合的素材，优先围绕其中一张发带图内容并把 preferredPhotoId 填成真实 photoId；纯公告/通知仍可只发文字。不要为了用图硬写帖子，也不要长期无视已经存在的媒体池。",
+        `近期公开社区内容：\n${recentCommunityContext(contextPosts, community)}`,
+        "只输出 JSON，不要 Markdown。格式：{\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"...或空\",\"mediaIntent\":\"official等或空\",\"preferredPhotoId\":\"photoId或空\"}",
       ].filter(Boolean).join("\n"),
     },
     { role: "user", content: "现在发布一条新的 Official Post。" },
@@ -242,12 +281,14 @@ export async function generateWeverseOfficialPost(
   const translated = String(parsed?.translated ?? original).trim() || original;
   const photoDescription = String(parsed?.photoDescription ?? "").trim();
   const mediaIntent = parseMediaIntent(parsed?.mediaIntent);
+  const preferredPhotoId = String(parsed?.preferredPhotoId ?? "").trim();
   if (!original && !translated) throw new ChatEngineError("这次没有生成有效 Official 内容，请重试。");
   return {
     original: original || translated,
     translated: translated || original,
     photoDescription: photoDescription || undefined,
     mediaIntent: photoDescription ? mediaIntent || "official" : undefined,
+    preferredPhotoId: preferredPhotoId && (community.officialMediaPhotoIds || []).includes(preferredPhotoId) ? preferredPhotoId : undefined,
   };
 }
 
@@ -287,13 +328,15 @@ function activityCounts(activity: WeverseSettings["fanActivity"]): { postRange: 
 export async function generateWeverseFanBatch(
   community: WeverseCommunity,
   posts: WeversePost[],
-  options?: { activity?: WeverseSettings["fanActivity"]; includePosts?: boolean; targetPost?: WeversePost },
+  options?: { activity?: WeverseSettings["fanActivity"]; includePosts?: boolean; targetPost?: WeversePost; now?: Date; historical?: boolean },
 ): Promise<{ posts: GeneratedWeverseFanPost[]; comments: GeneratedWeverseFanComment[] }> {
   const resolved = await resolveCommunityApi(community);
   const memberNames = community.memberCharacterIds.map((id) => loadCharacters().find((item) => item.id === id)?.name).filter(Boolean).join("、");
   const counts = activityCounts(options?.activity || "normal");
   const includePosts = options?.includePosts !== false;
   const targetPost = options?.targetPost;
+  const now = options?.now ?? new Date();
+  const contextPosts = options?.historical ? posts.filter((post) => post.createdAt <= now.getTime()) : posts;
   const messages: LLMMessage[] = [
     {
       role: "system",
@@ -302,14 +345,17 @@ export async function generateWeverseFanBatch(
         `Community：${community.name}`,
         `成员：${memberNames || "未提供"}`,
         ...fanLanguageRules(),
+        communityTimeContext(community, now),
+        "不要把整批粉丝都写成同一时间段的口吻。除非目标帖子/评论明确涉及睡觉或深夜，否则不要集体说晚安、早点睡、快去睡等。",
+        options?.historical ? "这是历史回填：请写成目标日期当时的公开粉丝内容，不要引用未来事件。" : "",
         "粉丝昵称要像真实网络昵称，可用韩文、拉丁字母、少量日文/中文；不要全部叫匿名粉丝。",
         "内容要有轻重差异：有人认真，有人只留一句，有人聊造型/舞台/吃饭/天气，也可以粉丝之间互相接话。不要模板化复制。",
         "不要编造严重绯闻、违法事件或重大官方消息，不要替艺人本人宣布未发生的官方事项。",
-        `近期社区内容：\n${recentCommunityContext(posts, community)}`,
+        `近期社区内容：\n${recentCommunityContext(contextPosts, community)}`,
         targetPost ? `本轮主要给这条帖子增加互动：\n${targetPost.id} | ${targetPost.authorType}: ${targetPost.originalBody || targetPost.body}` : "",
         targetPost ? `现有评论（replyToId 只能引用这里真实存在的评论 id，或留空）：\n${commentContext(targetPost)}` : "",
         includePosts ? `posts 生成 ${counts.postRange} 条；如果这轮没有自然的新粉丝帖，可以为 0。` : "posts 必须为空数组。",
-        targetPost ? `comments 生成 ${counts.commentRange} 条，允许为 0；可以回复现有粉丝/用户/艺人评论，也允许粉丝互相接话。不要假装每次艺人都会回复，艺人回复由另一个角色模型处理。` : `comments 生成 0~${counts.maxComments} 条，围绕近期 Artist Post 即可。`,
+        targetPost ? `comments 生成 ${counts.commentRange} 条，允许为 0；可以回复现有粉丝/用户/艺人评论，也允许粉丝互相接话。不要假装每次艺人都会回复，艺人回复由另一个角色模型处理。` : "comments 必须为空数组；没有指定目标帖子时，本轮只负责生成 Fan Post。",
         "若某条新评论要回复本批前面已经生成的评论，可填 replyToIndex（从 0 开始，只能指向自己前面的项）；若回复既有评论则填 replyToId；两者都不填就是顶级评论。",
         "只输出 JSON，不要 Markdown。格式：{\"posts\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\",\"replyToId\":\"现有评论id或空\",\"replyToIndex\":null或前面评论序号}]}。",
       ].filter(Boolean).join("\n"),
@@ -335,8 +381,9 @@ export async function generateWeverseArtistReply(
   community: WeverseCommunity,
   post: WeversePost,
   targetComment: WeverseComment,
+  options?: { now?: Date; historical?: boolean },
 ): Promise<GeneratedWeverseArtistReply | null> {
-  const resolved = await resolveCharacterGeneration(characterId, community);
+  const resolved = await resolveCharacterGeneration(characterId, community, options);
   const authorLabel = targetComment.authorType === "user" ? "这个用户" : targetComment.authorName || "一位粉丝";
   const raw = await sendLLMRequest(
     resolved.apiConfig,

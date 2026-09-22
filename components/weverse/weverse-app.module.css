@@ -421,3 +421,43 @@
 .settingGroup select { max-width: 132px; border: 0; background: #f2f4f4; border-radius: 10px; padding: 7px 8px; font-size: 10px; outline: none; }
 .settingGroup input[type="checkbox"] { width: 18px; height: 18px; accent-color: #22cbb4; }
 .settingReadOnly em { font-style: normal; color: #128a77; background: #e7fbf7; border-radius: 9px; padding: 5px 7px; font-size: 9px; font-weight: 800; }
+
+/* v0.3.5 · living community */
+.postDetailPage { height: 100%; min-height: 0; display: flex; flex-direction: column; background: #fff; overflow: hidden; }
+.postDetailPost { flex: 0 1 auto; max-height: 48%; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; border-bottom: 1px solid #eceeef; }
+.postDetailPost::-webkit-scrollbar { display: none; }
+.postDetailPost .post { margin-bottom: 0; border-bottom: 0; }
+.commentsTitleRow { flex: 0 0 auto; padding-right: 0; border-bottom: 1px solid #f0f1f2; }
+.commentsScroller { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; background: #fff; }
+.commentsScroller::-webkit-scrollbar { display: none; }
+.commentsList { padding-bottom: 2px; }
+.loadMoreComments { width: calc(100% - 28px); margin: 8px 14px 14px; min-height: 38px; border: 0; background: transparent; color: #8a9094; font-size: 10px; letter-spacing: .2px; }
+.loadMoreComments:disabled { opacity: .58; }
+.commentsExhausted { margin: 8px 14px 18px; min-height: 32px; display: grid; place-items: center; color: #b0b5b8; font-size: 9px; }
+.commentComposer { position: relative; bottom: auto; flex: 0 0 auto; padding-bottom: max(9px, env(safe-area-inset-bottom)); z-index: 10; }
+.replyingBar { position: relative; bottom: auto; flex: 0 0 auto; z-index: 9; }
+.commentReplyNode { border-top: 0 !important; }
+.commentReplyNode > .commentCard { border-left: 2px solid #eef0f1; padding-left: 9px; }
+.commentDeepReplyNode > .commentCard { border-left: 0; padding-left: 9px; }
+.replyContextLine { margin: 3px 0 2px; color: #8a9094; font-size: 9px; }
+
+.artistCommentActivity { padding: 12px; gap: 11px; }
+.artistReplyCard { background: #fff; border-radius: 18px; padding: 14px 14px 13px; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,.02); }
+.artistReplyTop { display: flex; gap: 10px; align-items: flex-start; }
+.artistReplyTop > div { min-width: 0; flex: 1; }
+.artistReplyName { font-size: 11px; font-weight: 820; margin-bottom: 5px; }
+.artistReplyTop p, .artistReplyContext p { margin: 0; white-space: pre-wrap; font-size: 12px; line-height: 1.55; color: #26292b; }
+.artistReplyTop button, .artistReplyContext button { border: 0; background: transparent; color: #7b8286; font-size: 9px; padding: 5px 0 0; }
+.artistReplyTop small, .artistReplyContext small { display: block; margin-top: 6px; color: #9aa0a4; font-size: 9px; }
+.artistReplyContext { display: grid; grid-template-columns: 18px 1fr; gap: 4px; margin: 12px 0 0 19px; min-width: 0; }
+.artistReplyContext > div { min-width: 0; }
+.artistReplyContext b { display: block; margin-bottom: 4px; font-size: 10px; color: #646b70; }
+.replyRail { width: 12px; height: 100%; min-height: 48px; border-left: 1.5px solid #dfe3e5; border-bottom: 1.5px solid #dfe3e5; border-radius: 0 0 0 10px; align-self: stretch; }
+
+.historyLoad { width: calc(100% - 28px); margin: 8px 14px 18px; min-height: 42px; border: 1px solid #e2e5e6; background: #fff; border-radius: 15px; color: #737a7e; font-size: 11px; font-weight: 700; }
+.historyLoad:disabled { opacity: .55; }
+.historyStatus { margin: 0 14px 12px; padding: 9px 11px; background: #eefbf8; border-radius: 12px; color: #4e7d75; font-size: 9px; line-height: 1.45; }
+.officialMediaActions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.officialMediaActions button { border: 1px solid #dfe4e4; background: #fff; border-radius: 14px; min-height: 42px; color: #4e575a; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 10px; font-weight: 730; }
+.historyEditorRow { display: grid; gap: 8px; margin-top: 9px; }
+.historyEditorRow select { width: 100%; border: 1px solid #e0e4e6; border-radius: 13px; background: #f8f9fa; padding: 10px 11px; font-size: 11px; outline: none; }

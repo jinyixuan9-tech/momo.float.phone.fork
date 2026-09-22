@@ -17,6 +17,8 @@ export type OfficialMediaActor = {
   photoIds: string[];
   /** WVS 已经公开用过的官方素材；用于避免官号重复把旧图当新图。 */
   excludedPhotoIds?: string[];
+  /** Official 生成时若模型明确从媒体池看中了某一张，可以优先命中它。 */
+  preferredPhotoId?: string;
 };
 
 export type MediaResolverRequest = {
@@ -84,7 +86,15 @@ function photoText(photo: PhotoRecord): string {
 async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor: OfficialMediaActor }): Promise<{ photo: PhotoRecord; dataUrl: string; score: number } | null> {
   const allowed = new Set(request.actor.photoIds);
   const excluded = new Set(request.actor.excludedPhotoIds || []);
-  const candidates = loadPhotoLibrary().photos
+  const all = loadPhotoLibrary().photos;
+  const preferred = request.actor.preferredPhotoId
+    ? all.find((photo) => photo.id === request.actor.preferredPhotoId && allowed.has(photo.id) && !excluded.has(photo.id) && photo.aiUsable && photo.visionStatus === "done")
+    : undefined;
+  if (preferred) {
+    const dataUrl = await getChatImageFromIndexedDB(preferred.assetId).catch(() => null);
+    if (dataUrl) return { photo: preferred, dataUrl, score: 1 };
+  }
+  const candidates = all
     .filter((photo) => allowed.has(photo.id))
     .filter((photo) => !excluded.has(photo.id))
     .filter((photo) => photo.aiUsable && photo.visionStatus === "done")

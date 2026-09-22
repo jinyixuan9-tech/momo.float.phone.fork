@@ -1,4 +1,16 @@
-# Weverse · v0.3.4 Community Interaction + Media Resolver
+# Weverse · v0.3.5 Living Community
+
+> v0.3.5 在 v0.3.4 的评论/媒体基础上补齐“社区已经活了一阵子”的时间线体验：固定评论输入栏、加载更多评论、艺人回复优先、主页回复关联卡、时间感知、粉丝数与模拟互动量、Official 自动用媒体池，以及 Community 历史初始化。
+
+## v0.3.5 · Living Community
+- Community 新增“当前粉丝数”，新生成帖的点赞/总评论数按 Community 规模、作者类型与内容随机生成并持久化；`commentCount` 与真正展开的 `comments[]` 分离。
+- 评论详情只滚评论区，底部回复栏固定；滑到底出现“加载更多评论”，追加可见样本但不改总体评论数。
+- 被 Artist 回复的整楼优先展示；Artist 主页“评论”改成 Artist Reply + 被回复上下文的关联卡，并可跳回原楼。
+- WVS Artist / Official / Fan / Artist Reply 全链路加入当前时间锚点，避免下午集体说晚安；历史回填使用目标过去时间。
+- Official AI 在生成前可读取当前 Official Media Pool 的识图描述并优先选择自然吻合素材；手工官号上传会直接写入 Photos、自动识图并同时加入当前官号媒体池。
+- 创建/管理 Community 可选择“新社区 / 已运营一段时间 / 自定义开始日期”。历史模式会先生成少量 Official、Artist、较热闹的 Fan 旧内容，使用过去时间戳，不写入当前近期记忆；Feed 底部可继续“加载更早动态”。
+- 旧 v0.3.4 帖子在迁移到 state v3 时会补上稳定的模拟互动数字，不清空已有社区、帖子、评论、收藏或媒体池。
+
 
 这一版以 v0.3.3 为稳定基线，重点补齐评论生态、AI 生成入口、用户自己的 WVS 使用闭环，以及统一媒体解析的第一版。
 
