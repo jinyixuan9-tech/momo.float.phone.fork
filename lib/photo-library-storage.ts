@@ -15,8 +15,10 @@ export const PHOTO_LIBRARY_UPDATED_EVENT = "photo-library-updated";
 registerKvMigration(PHOTO_LIBRARY_STORAGE_KEY);
 
 export const DEFAULT_PHOTO_LIBRARY_PREFERENCES: PhotoLibraryPreferences = {
+  mediaStrategy: "album_then_generated",
   chatStrategy: "album_then_generated",
   momentsStrategy: "album_then_generated",
+  resolverDebug: false,
 };
 
 const EMPTY_STATE: PhotoLibraryState = {
@@ -160,8 +162,10 @@ function normalizeState(parsed: unknown): PhotoLibraryState {
     photos: rawPhotos.map(normalizePhoto).filter((photo): photo is PhotoRecord => Boolean(photo)),
     currentTraitsByCharacter: normalizeCurrentTraits(root.currentTraitsByCharacter),
     preferences: {
-      chatStrategy: normalizeStrategy(rawPreferences.chatStrategy),
-      momentsStrategy: normalizeStrategy(rawPreferences.momentsStrategy),
+      mediaStrategy: normalizeStrategy(rawPreferences.mediaStrategy ?? (rawPreferences.chatStrategy === rawPreferences.momentsStrategy ? rawPreferences.chatStrategy : "album_then_generated")),
+      chatStrategy: normalizeStrategy(rawPreferences.chatStrategy ?? rawPreferences.mediaStrategy),
+      momentsStrategy: normalizeStrategy(rawPreferences.momentsStrategy ?? rawPreferences.mediaStrategy),
+      resolverDebug: rawPreferences.resolverDebug === true,
     },
   };
 }
@@ -271,8 +275,10 @@ export function setPhotoLibraryPreferences(patch: Partial<PhotoLibraryPreference
   savePhotoLibrary({
     ...current,
     preferences: {
-      chatStrategy: normalizeStrategy(patch.chatStrategy ?? current.preferences.chatStrategy),
-      momentsStrategy: normalizeStrategy(patch.momentsStrategy ?? current.preferences.momentsStrategy),
+      mediaStrategy: normalizeStrategy(patch.mediaStrategy ?? current.preferences.mediaStrategy),
+      chatStrategy: normalizeStrategy(patch.chatStrategy ?? patch.mediaStrategy ?? current.preferences.chatStrategy),
+      momentsStrategy: normalizeStrategy(patch.momentsStrategy ?? patch.mediaStrategy ?? current.preferences.momentsStrategy),
+      resolverDebug: patch.resolverDebug ?? current.preferences.resolverDebug,
     },
   });
 }

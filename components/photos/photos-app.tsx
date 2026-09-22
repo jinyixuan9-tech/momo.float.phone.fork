@@ -383,8 +383,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     setCharacterCurrentTraits(characterId, text);
   };
 
-  const updateStrategy = (context: "chat" | "moments", value: PhotoSourceStrategy) => {
-    setPhotoLibraryPreferences(context === "chat" ? { chatStrategy: value } : { momentsStrategy: value });
+  const updateStrategy = (value: PhotoSourceStrategy) => {
+    setPhotoLibraryPreferences({ mediaStrategy: value });
   };
 
   const toggleDetailCharacter = (characterId: string) => {
@@ -805,8 +805,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
             <section className="photos-strategy-card">
               <div className="photos-strategy-head">
                 <div>
-                  <strong>角色发图策略</strong>
-                  <span>用于测试相册匹配；不会在聊天前端显示图片来源标签。</span>
+                  <strong>媒体解析策略</strong>
+                  <span>Chat / 朋友圈 / WVS / 后续 Bubble、SMS 共用；智能混合会先查素材池，再按内容意图决定是否生图。</span>
                 </div>
                 {photos.some((photo) => photo.visionStatus !== "done") ? (
                   <button type="button" className="photos-mini-action" onClick={() => void analyzePendingPhotos()}>
@@ -816,19 +816,18 @@ export function PhotosApp({ onClose, onNotice }: Props) {
                 ) : null}
               </div>
               <label>
-                <span>聊天</span>
-                <select value={preferences.chatStrategy} onChange={(event) => updateStrategy("chat", event.target.value as PhotoSourceStrategy)}>
-                  <option value="album_only">仅匹配相册</option>
-                  <option value="generated_only">仅生图</option>
-                  <option value="album_then_generated">优先相册，匹配不到再生图</option>
+                <span>媒体来源</span>
+                <select value={preferences.mediaStrategy} onChange={(event) => updateStrategy(event.target.value as PhotoSourceStrategy)}>
+                  <option value="album_only">强制仅相册（测试匹配）</option>
+                  <option value="generated_only">强制仅生图（测试生成）</option>
+                  <option value="album_then_generated">智能混合（推荐）</option>
                 </select>
               </label>
               <label>
-                <span>朋友圈</span>
-                <select value={preferences.momentsStrategy} onChange={(event) => updateStrategy("moments", event.target.value as PhotoSourceStrategy)}>
-                  <option value="album_only">仅匹配相册</option>
-                  <option value="generated_only">仅生图</option>
-                  <option value="album_then_generated">优先相册，匹配不到再生图</option>
+                <span>解析调试</span>
+                <select value={preferences.resolverDebug ? "on" : "off"} onChange={(event) => setPhotoLibraryPreferences({ resolverDebug: event.target.value === "on" })}>
+                  <option value="off">关闭</option>
+                  <option value="on">开启</option>
                 </select>
               </label>
             </section>

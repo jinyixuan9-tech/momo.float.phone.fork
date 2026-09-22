@@ -101,6 +101,17 @@ export function recordWeverseArtistReplyEvent(input: {
   });
 }
 
+export function deleteWeverseProjectionEventForComment(commentId: string): void {
+  if (!commentId || typeof window === "undefined") return;
+  for (const key of kvKeysWithPrefix(WEV_EVENT_PREFIX)) {
+    const current = loadEventsByKey(key);
+    const next = current.filter((entry) => entry.commentId !== commentId && entry.id !== `weverse_reply_${commentId}`);
+    if (next.length === current.length) continue;
+    if (next.length === 0) kvRemove(key);
+    else saveEventsByKey(key, next);
+  }
+}
+
 export function deleteWeverseProjectionEventsForPost(postId: string): void {
   if (!postId || typeof window === "undefined") return;
   for (const key of kvKeysWithPrefix(WEV_EVENT_PREFIX)) {

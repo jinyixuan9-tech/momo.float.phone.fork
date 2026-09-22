@@ -102,3 +102,13 @@
 - 新增 Weverse memory projection，并加入原生短期时间线 / 长期总结来源；编辑删除同步清理。
 - 右上角接入 WVS 专属 user 粉丝身份编辑，默认继承 User Identity，可独立覆盖。
 - Service Worker cache version 升至 v18。
+
+## Weverse v0.3.4 · Community Interaction + Media Resolver
+- 评论升级为持久化树状互动：AI Fan 评论数量不固定，可粉丝互回、艺人概率回复、user 参与、追加生成不覆盖、原文/中文切换、删除占位保留子回复。
+- 右上角「我的」新增我的帖子 / 我的评论 / 收藏；WVS 设置保存翻译、社区活跃度、KR MIX 粉丝语言与通知偏好。
+- 蓝绿色星星改为 AI 生成入口；Community 可生成 Artist / Fan / Official 内容，Post 详情可追加评论。
+- AI Fan 默认 75%~90% 韩语，少量日语 / 英语 / 中文；Artist 保持角色本人自然语言。
+- Photos 图片策略改为全局统一：强制仅相册 / 强制仅生图 / 智能混合；Chat、朋友圈、WVS 以及未来 Bubble / SMS 共用。
+- 新增统一 Media Resolver：所有类型都先查素材池；自拍/人像/合照智能模式不匹配则不偷偷生人物图，食物/风景/物品等匹配失败后可生图。
+- WVS Official 不创建 Character；Community 只维护 Photos photoId 引用作为官号媒体池。AI Official 已接入该池并支持智能回退生图。
+- Service Worker cache version 升至 v19。

@@ -148,11 +148,14 @@ function scorePhoto(photo: PhotoRecord, request: PhotoResolverRequest): { score:
   return { score, reasons };
 }
 
-export function getPhotoSourceStrategy(context: "chat" | "moments" | "wvs"): PhotoSourceStrategy {
+export function getPhotoSourceStrategy(_context: "chat" | "moments" | "wvs" | "bubble" | "sms" | "other"): PhotoSourceStrategy {
   const preferences = loadPhotoLibrary().preferences;
-  if (context === "chat") return preferences.chatStrategy;
-  // WVS 暂时沿用公开发帖（朋友圈）的来源策略，后续可再拆独立开关。
-  return preferences.momentsStrategy;
+  // v0.3.4：改为一个统一媒体策略。旧 chat/moments 字段只做数据迁移兼容。
+  return preferences.mediaStrategy || preferences.chatStrategy || preferences.momentsStrategy || "album_then_generated";
+}
+
+export function getPhotoResolverDebugEnabled(): boolean {
+  return loadPhotoLibrary().preferences.resolverDebug === true;
 }
 
 export async function resolvePhotoForUse(request: PhotoResolverRequest): Promise<PhotoResolverMatch | null> {

@@ -66,8 +66,12 @@ export type PhotoRecord = {
 };
 
 export type PhotoLibraryPreferences = {
+  /** v0.3.4 起统一给 Chat / Moments / WVS / 后续 Bubble、SMS 使用。 */
+  mediaStrategy: PhotoSourceStrategy;
+  /** 旧字段保留用于迁移兼容，不再作为新 App 的独立策略入口。 */
   chatStrategy: PhotoSourceStrategy;
   momentsStrategy: PhotoSourceStrategy;
+  resolverDebug: boolean;
 };
 
 export type PhotoLibraryState = {
