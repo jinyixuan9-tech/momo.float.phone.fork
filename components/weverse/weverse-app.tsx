@@ -140,6 +140,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const [composerMode, setComposerMode] = useState<"user" | "official">("user");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [communityEditor, setCommunityEditor] = useState<CommunityEditorDraft | null>(null);
+  const [communityEditorError, setCommunityEditorError] = useState("");
   const [memberEditor, setMemberEditor] = useState<MemberEditorDraft | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftImageUrl, setDraftImageUrl] = useState("");
@@ -226,6 +227,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   };
 
   const openCommunityEditor = (community?: WeverseCommunity) => {
+    setCommunityEditorError("");
     setCommunityEditor({
       id: community?.id,
       name: community?.name || "",
@@ -241,8 +243,17 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const saveCommunityEditor = () => {
     if (!communityEditor) return;
     const name = communityEditor.name.trim();
-    if (!name) return onNotice?.("先填写 Community 名称");
-    if (communityEditor.selectedCharacterIds.length === 0) return onNotice?.("至少选择 1 个成员角色");
+    if (!name) {
+      setCommunityEditorError("先填写 Community 名称");
+      onNotice?.("先填写 Community 名称");
+      return;
+    }
+    if (communityEditor.selectedCharacterIds.length === 0) {
+      setCommunityEditorError("至少选择 1 个成员角色");
+      onNotice?.("至少选择 1 个成员角色");
+      return;
+    }
+    setCommunityEditorError("");
     const existing = communityEditor.id ? communityMap.get(communityEditor.id) : undefined;
     const now = Date.now();
     const id = existing?.id || createWeverseId("wvs_community");
@@ -268,6 +279,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     const nextState = upsertWeverseCommunity(next);
     setState(nextState);
     setCommunityEditor(null);
+    setCommunityEditorError("");
     setDraftCommunityId(id);
     onNotice?.(existing ? "Community 已更新" : "Community 已创建");
   };
@@ -600,11 +612,12 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       {communityEditor ? (
         <div className={styles.fullModal}>
-          <div className={styles.modalHeader}><button type="button" className={styles.iconBtn} onClick={() => setCommunityEditor(null)}><ChevronLeft size={22} /></button><b>{communityEditor.id ? "管理 Community" : "新建 Community"}</b><button type="button" className={styles.saveTextBtn} onClick={saveCommunityEditor}>保存</button></div>
+          <div className={styles.modalHeader}><button type="button" className={styles.modalBackBtn} aria-label="返回" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setCommunityEditorError(""); setCommunityEditor(null); }}><ChevronLeft size={22} /></button><b>{communityEditor.id ? "管理 Community" : "新建 Community"}</b><button type="button" className={styles.saveTextBtn} onPointerDown={(e) => e.stopPropagation()} onClick={saveCommunityEditor}>保存</button></div>
           <div className={styles.modalScroll}>
+            {communityEditorError ? <div className={styles.editorError}>{communityEditorError}</div> : null}
             <div className={styles.editorSection}><h3>Community</h3><label>名称<input value={communityEditor.name} onChange={(e) => setCommunityEditor({ ...communityEditor, name: e.target.value })} placeholder="例如 NCT WISH" /></label><label>简介<textarea value={communityEditor.description} onChange={(e) => setCommunityEditor({ ...communityEditor, description: e.target.value })} placeholder="这个 Community 的简介" /></label><div className={styles.imageEditRow}><Avatar text={communityEditor.name || "C"} imageUrl={communityEditor.coverUrl} tone="soft" className={styles.editorAvatar} /><button type="button" onClick={() => coverInputRef.current?.click()}><Camera size={16} /> Community 封面</button>{communityEditor.coverUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, coverUrl: "" })}>清除</button> : null}</div><input ref={coverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, coverUrl: await fileToDataUrl(file, 1200) }); e.currentTarget.value = ""; }} /></div>
             <div className={styles.editorSection}><h3>Official Account</h3><label>官号昵称<input value={communityEditor.officialName} onChange={(e) => setCommunityEditor({ ...communityEditor, officialName: e.target.value })} placeholder={communityEditor.name ? `${communityEditor.name} Official` : "Official Account"} /></label><label>官号简介<input value={communityEditor.officialBio} onChange={(e) => setCommunityEditor({ ...communityEditor, officialBio: e.target.value })} placeholder="公告 · Schedule · 官方 LIVE" /></label><div className={styles.imageEditRow}><Avatar text={communityEditor.officialName || communityEditor.name || "O"} imageUrl={communityEditor.officialAvatarUrl} tone="teal" className={styles.editorAvatar} /><button type="button" onClick={() => officialAvatarInputRef.current?.click()}><Camera size={16} /> 官号头像</button>{communityEditor.officialAvatarUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, officialAvatarUrl: "" })}>清除</button> : null}</div><input ref={officialAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, officialAvatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /></div>
-            <div className={styles.editorSection}><h3>绑定成员</h3><p className={styles.editorHint}>只勾选真正属于这个 Community 的角色。Solo 只选 1 人也可以。</p><div className={styles.memberPicker}>{characters.map((char) => { const checked = communityEditor.selectedCharacterIds.includes(char.id); return <button type="button" key={char.id} className={`${styles.memberPickCard} ${checked ? styles.memberPickActive : ""}`} onClick={() => setCommunityEditor({ ...communityEditor, selectedCharacterIds: checked ? communityEditor.selectedCharacterIds.filter((id) => id !== char.id) : [...communityEditor.selectedCharacterIds, char.id] })}><Avatar text={char.name} imageUrl={char.avatar} tone="soft" /><span>{char.name}</span><i>{checked ? "✓" : "+"}</i></button>; })}</div>{!characters.length ? <div className={styles.emptyMini}>当前还没有角色，请先在「角色」App 建立角色。</div> : null}</div>
+            <div className={styles.editorSection}><h3>绑定成员</h3><p className={styles.editorHint}>只勾选真正属于这个 Community 的角色。Solo 只选 1 人也可以。</p><div className={styles.memberPicker}>{characters.map((char) => { const checked = communityEditor.selectedCharacterIds.includes(char.id); return <button type="button" key={char.id} className={`${styles.memberPickCard} ${checked ? styles.memberPickActive : ""}`} onClick={() => setCommunityEditor({ ...communityEditor, selectedCharacterIds: checked ? communityEditor.selectedCharacterIds.filter((id) => id !== char.id) : [...communityEditor.selectedCharacterIds, char.id] })}><Avatar text={char.name} imageUrl={char.avatar} tone="soft" className={styles.memberPickAvatar} /><span className={styles.memberPickName}>{char.name}</span><i>{checked ? "✓" : "+"}</i></button>; })}</div>{!characters.length ? <div className={styles.emptyMini}>当前还没有角色，请先在「角色」App 建立角色。</div> : null}</div>
             {communityEditor.id ? <div className={styles.editorSection}><h3>官号操作</h3><button type="button" className={styles.manageAction} onClick={() => { const id = communityEditor.id!; setCommunityEditor(null); openComposer("official", id); }}>用官号发布动态</button><button type="button" className={styles.dangerButton} onClick={() => { const community = communityMap.get(communityEditor.id!); if (community) removeCommunity(community); }}><Trash2 size={16} /> 删除 Community</button></div> : null}
           </div>
         </div>
