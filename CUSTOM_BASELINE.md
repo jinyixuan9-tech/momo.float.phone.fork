@@ -72,3 +72,15 @@
 - 当前内置 NCT WISH / RIIZE 为 UI 测试数据；user 可在本次会话中发布测试 Fan Post。
 - 新建 Community、绑定真实 char、官号接管、AI 内容生成、记忆回写、Schedule/Calendar、LIVE 与 Photos Resolver 将在后续 WVS 迭代接入。
 - Photos 使用渠道类型预留 `wvs`，方便后续 WVS 公开发图记录复用。
+
+
+## v0.3.1 · Weverse Community Core
+- 修复 WVS 内部返回：按实际访问栈逐级返回，根页返回桌面。
+- Community 改为真实持久化数据，可新建/编辑/删除。
+- 创建流程支持 Community 名称、简介、封面、Official 昵称/头像/简介，并从现有角色勾选成员。
+- 成员 WVS 显示昵称/头像/简介可独立覆盖，不修改角色本体。
+- Feed / Community / Artist 页面读取真实 Community 数据。
+- user Fan Post 与 Official Post 可实际发布并持久化；支持本地图片、点赞、收藏、帖子详情与 user 评论。
+- WVS 状态纳入社交内容备份：ai_phone_weverse_state_v1。
+- AI 自动运营、翻译、Photos Resolver、Memory、Schedule/Calendar、LIVE 留待后续版本。
+- Service Worker cache version 升至 v15。
