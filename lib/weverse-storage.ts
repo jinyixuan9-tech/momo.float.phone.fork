@@ -44,6 +44,8 @@ export type WeverseNotice = {
 };
 export type WeversePost = {
   id: string; communityId: string; authorType: WeverseAuthorType; authorId: string; authorName?: string; authorAvatarUrl?: string;
+  /** Artist Post can be published as a compact voice post. The transcript stays in body/originalBody. */
+  postType?: "text" | "voice";
   body: string; originalBody?: string; imageUrl?: string; photoLibraryId?: string; photoSource?: "album" | "generated" | "manual"; photoDescription?: string;
   createdAt: number; likedByUser?: boolean; bookmarkedByUser?: boolean;
   /** 公开 UI 展示的模拟互动总量；和 comments[] 可见样本数量分开。 */
@@ -55,6 +57,7 @@ export type WeversePost = {
 
 export type WeverseLiveOrientation = "landscape";
 export type WeverseLiveStatus = "live" | "ended";
+export type WeverseLiveType = "visual" | "voice";
 export type WeverseLiveSegmentKind = "speech" | "action" | "system";
 export type WeverseLiveSegment = {
   id: string;
@@ -89,7 +92,7 @@ export type WeverseLive = {
   activeCharacterIds: string[];
   participantPresence: WeverseLivePresence[];
   viewerPresence: WeverseLivePresence[];
-  liveType: "visual";
+  liveType: WeverseLiveType;
   orientation: WeverseLiveOrientation;
   status: WeverseLiveStatus;
   title: string;
@@ -117,14 +120,14 @@ export type WeverseSettings = {
   generationScope: "current" | "all";
   notifications: { artistReply: boolean; fanReply: boolean; artistPost: boolean; officialPost: boolean; live: boolean };
 };
-export type WeverseState = { version: 6; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
+export type WeverseState = { version: 7; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
 
 export const DEFAULT_WEV_SETTINGS: WeverseSettings = {
   translationDefault: "translated", autoTranslateComments: true, fanActivity: "normal", fanLanguagePreset: "korean_mixed", generationScope: "current",
   notifications: { artistReply: true, fanReply: true, artistPost: true, officialPost: true, live: true },
 };
-const EMPTY_STATE: WeverseState = { version: 6, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
-function cloneEmpty(): WeverseState { return { version: 6, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
+const EMPTY_STATE: WeverseState = { version: 7, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
+function cloneEmpty(): WeverseState { return { version: 7, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
 function uniqueStrings(value: unknown): string[] { return Array.isArray(value) ? Array.from(new Set(value.filter((v): v is string => typeof v === "string" && Boolean(v.trim())).map(v => v.trim()))) : []; }
 function finiteNonNegative(value: unknown, fallback = 0): number { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback; }
 function normalizeSettings(value: unknown): WeverseSettings {
@@ -189,7 +192,7 @@ function normalizeLive(raw: unknown): WeverseLive | null {
   const viewerPresenceRaw = Array.isArray((item as any).viewerPresence) ? (item as any).viewerPresence : [];
   const viewerPresence = viewerPresenceRaw.map(normalizeLivePresence).filter((v: WeverseLivePresence | null): v is WeverseLivePresence => Boolean(v));
   return {
-    id: item.id, communityId: item.communityId, hostCharacterIds, activeCharacterIds, participantPresence, viewerPresence, liveType: "visual", orientation: "landscape",
+    id: item.id, communityId: item.communityId, hostCharacterIds, activeCharacterIds, participantPresence, viewerPresence, liveType: item.liveType === "voice" ? "voice" : "visual", orientation: "landscape",
     status, title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "LIVE",
     theme: typeof item.theme === "string" && item.theme.trim() ? item.theme.trim() : undefined,
     coverUrl: typeof (item as any).coverUrl === "string" && (item as any).coverUrl ? (item as any).coverUrl : undefined, startedAt,
@@ -235,14 +238,15 @@ function normalizeState(raw: unknown): WeverseState {
   const posts = Array.isArray(source.posts) ? source.posts.filter((item): item is WeversePost => Boolean(item && typeof item.id === "string" && typeof item.communityId === "string" && typeof item.body === "string")).map((item) => {
     const comments = Array.isArray(item.comments) ? item.comments.map(normalizeComment).filter((c): c is WeverseComment => Boolean(c)) : [];
     const fallback = legacyCounts(item.id, item.authorType, communityMap.get(item.communityId)?.fanCount || 100000, comments.length);
-    return { ...item, comments, likeCount: finiteNonNegative(item.likeCount, fallback.likeCount), commentCount: finiteNonNegative(item.commentCount, fallback.commentCount), historical: item.historical === true, photoDescription: typeof item.photoDescription === "string" ? item.photoDescription : undefined };
+    const postType: WeversePost["postType"] = item.postType === "voice" && item.authorType === "artist" ? "voice" : "text";
+    return { ...item, postType, comments, likeCount: finiteNonNegative(item.likeCount, fallback.likeCount), commentCount: finiteNonNegative(item.commentCount, fallback.commentCount), historical: item.historical === true, photoDescription: typeof item.photoDescription === "string" ? item.photoDescription : undefined };
   }) : [];
   const rawNotices = Array.isArray((source as any).notices) ? (source as any).notices : [];
   const notices: WeverseNotice[] = rawNotices.filter((item: any) => item && typeof item.id === "string" && typeof item.communityId === "string" && typeof item.title === "string").map((item: any) => ({
     id: item.id, communityId: item.communityId, title: item.title, body: typeof item.body === "string" ? item.body : "", originalBody: typeof item.originalBody === "string" ? item.originalBody : undefined, imageUrl: typeof item.imageUrl === "string" ? item.imageUrl : undefined, photoLibraryId: typeof item.photoLibraryId === "string" ? item.photoLibraryId : undefined, photoSource: item.photoSource === "album" || item.photoSource === "generated" || item.photoSource === "manual" ? item.photoSource : undefined, photoDescription: typeof item.photoDescription === "string" ? item.photoDescription : undefined, createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(), historical: item.historical === true,
   }));
   const lives = Array.isArray((source as any).lives) ? (source as any).lives.map(normalizeLive).filter((v: WeverseLive | null): v is WeverseLive => Boolean(v)) : [];
-  return { version: 6, communities, posts, notices, lives, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
+  return { version: 7, communities, posts, notices, lives, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
 }
 export function loadWeverseState(): WeverseState { if (typeof window === "undefined") return EMPTY_STATE; try { const raw=kvGet(WEV_STATE_KEY); return raw ? normalizeState(JSON.parse(raw)) : cloneEmpty(); } catch { return cloneEmpty(); } }
 export function saveWeverseState(state: WeverseState): WeverseState { const normalized=normalizeState(state); if (typeof window !== "undefined") { kvSet(WEV_STATE_KEY, JSON.stringify(normalized)); window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT)); } return normalized; }

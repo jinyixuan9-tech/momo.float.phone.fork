@@ -249,3 +249,11 @@
 - 多人连线仍按该条 speech 的 `characterId` 使用对应角色的 Weverse 语音绑定；正在合成/播放的那条按钮显示独立状态，点击同一条可停止，点击另一条会切换到另一条。
 - 保留 v0.5.3 的语音缓存，因此同一句重复点播不必重新合成。
 - Service Worker cache version 升至 v35。
+
+### v0.5.5 · WVS Voice LIVE / Voice Post
+- 成员 LIVE 新增 `visual / voice` 正式类型。手动生成时可明确选择露脸 LIVE、纯语音 LIVE，或交给角色按人设、当时状态与主题自行决定。
+- 纯语音 LIVE 复用现有懒播放、评论、小飞机推进、爱心、同 Community 艺人围观/艺人评论、多人连线、记忆与回放数据；生成层彻底禁止 action，只保存角色 speech。
+- 语音 LIVE 观看壳改为渐变舞台：顶部显示观看/点赞，中央显示当前发言悬浮文字卡和参与成员头像，下方评论直接在渐变背景内滚动。点击成员头像手动点播该成员最近一段原话，不自动播放，翻译不朗读。
+- 语音 LIVE 外部回放卡继续使用现有封面、时长、标题与数据样式；点进回放后按 `liveType` 恢复语音壳。
+- AI Artist Post 新增 `voice` 类型。语音动态沿用普通 Feed 卡片头部与互动区，只把正文替换成轻量语音条；点击后手动 TTS 并展开原话，再由独立按钮展开中文翻译。
+- 旧 WVS 数据自动迁移：旧 Live 默认为 `visual`，旧 Post 默认为 `text`，不改变 v0.5.4 已有内容与回放。Weverse state version 升至 v7；Service Worker cache version 升至 v36。

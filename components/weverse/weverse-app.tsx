@@ -88,6 +88,7 @@ import type { PhotoRecord } from "@/lib/photo-library-types";
 import { analyzePhotosInBackground } from "@/lib/photo-library-vision";
 import { createWeverseEngagement } from "@/lib/weverse-engagement";
 import { WeverseLiveView } from "./weverse-live-view";
+import { WeverseVoicePost } from "./weverse-voice-post";
 
 import styles from "./weverse-app.module.css";
 
@@ -153,6 +154,7 @@ type NoticeEditorDraft = {
 type LiveCreatorDraft = {
   communityId: string;
   characterId: string;
+  liveType: "auto" | "visual" | "voice";
   theme: string;
   coverUrl: string;
 };
@@ -561,7 +563,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     const active = state.lives.find((live) => live.communityId === community.id && live.status === "live" && (live.activeCharacterIds || live.hostCharacterIds).includes(chosen));
     if (active) return navigate({ type: "live", liveId: active.id });
     const member = resolveMember(community, chosen);
-    setLiveCreator({ communityId: community.id, characterId: chosen, theme: "", coverUrl: member.liveCoverUrl || "" });
+    setLiveCreator({ communityId: community.id, characterId: chosen, liveType: "auto", theme: "", coverUrl: member.liveCoverUrl || "" });
   };
 
   const scheduleLiveSegments = (
@@ -664,7 +666,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     onNotice?.("正在准备 LIVE…");
     try {
       const requestAt = Date.now();
-      const generated = await generateWeverseLiveOpening(liveCreator.characterId, community, { theme: liveCreator.theme.trim() || undefined, now: new Date(requestAt) });
+      const generated = await generateWeverseLiveOpening(liveCreator.characterId, community, { theme: liveCreator.theme.trim() || undefined, liveType: liveCreator.liveType, now: new Date(requestAt) });
       const member = resolveMember(community, liveCreator.characterId);
       const viewerBase = Math.max(1000, community.fanCount || 100000);
       const viewerCount = Math.max(320, Math.round(viewerBase * (0.018 + Math.random() * 0.05)));
@@ -674,7 +676,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       const comments = scheduleLiveFanComments(generated.comments, playbackStart);
       const live: WeverseLive = {
         id: createWeverseId("wvs_live"), communityId: community.id, hostCharacterIds: [liveCreator.characterId], activeCharacterIds: [liveCreator.characterId],
-        participantPresence: [{ characterId: liveCreator.characterId, joinedAt: playbackStart }], viewerPresence: [], liveType: "visual", orientation: "landscape",
+        participantPresence: [{ characterId: liveCreator.characterId, joinedAt: playbackStart }], viewerPresence: [], liveType: generated.liveType || (liveCreator.liveType === "voice" ? "voice" : "visual"), orientation: "landscape",
         status: "live", title: generated.title || `${member.displayName} LIVE`, theme: liveCreator.theme.trim() || undefined,
         coverUrl: liveCreator.coverUrl || member.liveCoverUrl || undefined, startedAt: playbackStart,
         viewerCount, peakViewerCount: viewerCount, heartCount: Math.max(120, Math.round(viewerCount * (1.5 + Math.random() * 3.5))), roundCount: 0,
@@ -910,6 +912,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       communityId: community.id,
       authorType: "artist",
       authorId: characterId,
+      postType: generated.postType,
       body: generated.translated,
       originalBody: generated.original !== generated.translated ? generated.original : undefined,
       imageUrl,
@@ -1480,9 +1483,9 @@ export function WeverseApp({ onClose, onNotice }: Props) {
           <button type="button" className={styles.more} onClick={() => setPostMenuId(post.id)} aria-label="贴文菜单"><MoreHorizontal size={20} /></button>
         </div>
         {post.authorType === "official" ? <div className={styles.noticeTag}>OFFICIAL</div> : null}
-        {post.body ? <div className={styles.postBody} onClick={() => !detail && navigate({ type: "post", postId: post.id })}>{showOriginal && post.originalBody ? post.originalBody : post.body}</div> : null}
+        {post.postType === "voice" && post.authorType === "artist" ? <WeverseVoicePost post={post} onNotice={onNotice} /> : post.body ? <div className={styles.postBody} onClick={() => !detail && navigate({ type: "post", postId: post.id })}>{showOriginal && post.originalBody ? post.originalBody : post.body}</div> : null}
         {post.imageUrl ? <WeversePostImage src={post.imageUrl} onClick={() => !detail && navigate({ type: "post", postId: post.id })} /> : post.photoDescription ? <div className={styles.textPhoto} onClick={() => !detail && navigate({ type: "post", postId: post.id })}><span>图片</span><p>{post.photoDescription}</p></div> : null}
-        {post.originalBody && post.originalBody !== post.body ? <button type="button" className={styles.translateBtn} onClick={() => setShowOriginalByPost((prev) => ({ ...prev, [post.id]: !showOriginal }))}>{showOriginal ? "查看翻译" : "查看原文"}</button> : null}
+        {post.postType !== "voice" && post.originalBody && post.originalBody !== post.body ? <button type="button" className={styles.translateBtn} onClick={() => setShowOriginalByPost((prev) => ({ ...prev, [post.id]: !showOriginal }))}>{showOriginal ? "查看翻译" : "查看原文"}</button> : null}
         {renderPostActions(post, detail)}
       </article>
     );
@@ -1735,7 +1738,8 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     const hostId = live.hostCharacterIds[0];
     if (!community || !hostId) return <div className={styles.emptyState}><b>这场 LIVE 的成员信息不存在</b><button type="button" onClick={back}>返回</button></div>;
     const speakerNames = Object.fromEntries(community.memberCharacterIds.map((characterId) => [characterId, resolveMember(community, characterId).displayName]));
-    return <WeverseLiveView live={live} speakerNames={speakerNames} userName={userName} busy={generatingLiveId === live.id} onBack={back} onAdvance={() => advanceLive(live)} onSendComment={(body) => sendLiveUserComment(live, body)} onHeart={() => addLiveHeart(live)} onFinalizeEnd={() => finalizeLive(live)} onManualEnd={() => manuallyEndLive(live)} />;
+    const speakerAvatars = Object.fromEntries(community.memberCharacterIds.map((characterId) => [characterId, resolveMember(community, characterId).avatarUrl]));
+    return <WeverseLiveView live={live} speakerNames={speakerNames} speakerAvatars={speakerAvatars} userName={userName} busy={generatingLiveId === live.id} onBack={back} onAdvance={() => advanceLive(live)} onSendComment={(body) => sendLiveUserComment(live, body)} onHeart={() => addLiveHeart(live)} onFinalizeEnd={() => finalizeLive(live)} onManualEnd={() => manuallyEndLive(live)} />;
   };
 
   const renderContent = () => {
@@ -1809,6 +1813,12 @@ export function WeverseApp({ onClose, onNotice }: Props) {
             <div className={styles.sheetHandle} />
             <div className={styles.sheetTitle}><h2>生成成员 LIVE</h2><button type="button" className={styles.iconBtn} disabled={startingLive} onClick={() => setLiveCreator(null)}><X size={20} /></button></div>
             <div className={styles.liveCreatorMember}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><div><b>{member.displayName}</b><span>{community.name}</span></div></div>
+            <label className={styles.fieldLabel}>直播类型</label>
+            <div className={styles.liveTypePicker}>
+              <button type="button" className={liveCreator.liveType === "auto" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "auto" })}><Sparkles size={15} /><b>角色决定</b><small>按人设和当时状态选择</small></button>
+              <button type="button" className={liveCreator.liveType === "visual" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "visual" })}><Video size={15} /><b>露脸 LIVE</b><small>原来的横屏文字舞台</small></button>
+              <button type="button" className={liveCreator.liveType === "voice" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "voice" })}><Radio size={15} /><b>语音 LIVE</b><small>头像、发言气泡与评论</small></button>
+            </div>
             <label className={styles.fieldLabel}>本场主题 · 可不填</label>
             <textarea className={styles.textareaSmall} value={liveCreator.theme} onChange={(e) => setLiveCreator({ ...liveCreator, theme: e.target.value })} placeholder={"留空：让角色自己决定为什么开播\n也可以写：活动后台 / 吃饭 / 睡前聊聊天 / 推歌…"} />
             <label className={styles.fieldLabel}>本场回放封面</label>
@@ -1817,7 +1827,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
               <div><button type="button" onClick={() => liveCreatorCoverInputRef.current?.click()}><ImagePlus size={15} /> 更换本场封面</button>{member.liveCoverUrl && liveCreator.coverUrl !== member.liveCoverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: member.liveCoverUrl })}>使用角色默认封面</button> : null}{liveCreator.coverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: "" })}>本场不使用封面</button> : null}</div>
             </div>
             <input ref={liveCreatorCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setLiveCreator({ ...liveCreator, coverUrl: await fileToDataUrl(file, 1400, 0.88) }); e.currentTarget.value = ""; }} />
-            <p className={styles.editorHint}>只保留横屏 LIVE。主题只是软方向；直播多久、聊多少、什么时候下播，以及同 Community 成员是否来围观或连线，都按人设和当次情境决定。</p>
+            <p className={styles.editorHint}>主题只是软方向；直播多久、聊多少、什么时候下播，以及同 Community 成员是否来围观或连线，都按人设和当次情境决定。选择“角色决定”时，角色会自己判断露脸还是只开语音。</p>
             <button type="button" className={styles.primaryButton} disabled={startingLive} onClick={startLive}><Radio size={18} /> {startingLive ? "正在准备 LIVE…" : "开始生成 LIVE"}</button>
           </section>
         </div>;

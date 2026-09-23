@@ -25,6 +25,7 @@ import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, We
 export type WeverseMediaIntent = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
 
 export type GeneratedWeverseArtistPost = {
+  postType: "text" | "voice";
   original: string;
   translated: string;
   photoDescription?: string;
@@ -167,10 +168,12 @@ export async function generateWeverseArtistPost(characterId: string, community: 
       role: "system",
       content: [
         "现在生成一条新的 Artist Post。",
+        "你可以按角色当时的状态自然选择普通文字动态 text 或语音动态 voice。语音动态表示角色不打字，直接发一段短语音；适合懒得打字、想让粉丝听语气、随口分享或简短问候，但不要为了新功能每次都选 voice。",
+        "若 postType=voice，不配图，正文内容就是这段语音的逐字稿；保持口语、自然、适合直接念出来。若 postType=text，则沿用普通 Artist Post。",
         "如果自然适合配图，给出 photoDescription，并用 mediaIntent 标记想发的图是什么：selfie / portrait / group / food / scenery / object / pet / other。若不需要配图，photoDescription 与 mediaIntent 留空。",
         "mediaIntent 只表达内容意图，不决定相册还是生图；图片来源由宿主 Media Resolver 决定。",
         "必须使用角色本人最自然的语言作为 original；若 original 不是简体中文，同时给出忠实自然的简体中文 translated；若 original 本身就是简体中文，两者相同。",
-        "只输出 JSON，不要 Markdown。格式：{\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"...或空\",\"mediaIntent\":\"selfie等或空\"}",
+        "只输出 JSON，不要 Markdown。格式：{\"postType\":\"text或voice\",\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"...或空\",\"mediaIntent\":\"selfie等或空\"}",
       ].join("\n"),
     },
     { role: "user", content: "现在发一条新的 Weverse Artist Post。" },
@@ -188,12 +191,14 @@ export async function generateWeverseArtistPost(characterId: string, community: 
   const translated = String(parsed?.translated ?? original).trim() || original;
   const photoDescription = String(parsed?.photoDescription ?? "").trim();
   const mediaIntent = parseMediaIntent(parsed?.mediaIntent);
+  const postType: "text" | "voice" = parsed?.postType === "voice" ? "voice" : "text";
   if (!original && !translated) throw new ChatEngineError("这次没有生成有效 WVS 内容，请重试。");
   return {
+    postType,
     original: original || translated,
     translated: translated || original,
-    photoDescription: photoDescription || undefined,
-    mediaIntent: photoDescription ? mediaIntent || "other" : undefined,
+    photoDescription: postType === "voice" ? undefined : photoDescription || undefined,
+    mediaIntent: postType === "voice" ? undefined : photoDescription ? mediaIntent || "other" : undefined,
   };
 }
 
@@ -485,6 +490,7 @@ export type GeneratedWeverseLiveArtistComment = {
 };
 
 export type GeneratedWeverseLiveRound = {
+  liveType?: "visual" | "voice";
   title?: string;
   segments: GeneratedWeverseLiveSegment[];
   comments: GeneratedWeverseLiveComment[];
@@ -587,16 +593,20 @@ function liveTranscriptContext(live: WeverseLive, community: WeverseCommunity): 
   return [segments.length ? `最近直播内容：\n${segments.join("\n")}` : "", comments.length ? `最近弹幕：\n${comments.join("\n")}` : ""].filter(Boolean).join("\n\n");
 }
 
-function liveFormatRules(opening = false): string[] {
+function liveFormatRules(opening = false, liveType: "visual" | "voice" | "auto" = "visual"): string[] {
   return [
     "这是 Weverse 的成员私人 LIVE，不是私聊，也不是正式节目主持。角色可以随意聊天、吃饭、推荐歌、等人进来、发呆、准备工作或睡前陪粉丝一会儿。",
     "直播持续多久完全按角色人设与当次情境决定：有人会黏很久，有人活动后台只匆匆播几分钟。不要预设固定轮数。",
     opening
       ? "现在是刚开播阶段。通常先调一下状态、等观众陆续进来、随口说几句；不要一开场就进入高强度问答或大型节目。"
       : "这是直播中途的一小段推进。延续之前的话题与状态，不要像新开一场直播一样重新自我介绍。",
-    "当前只使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
-    "角色语言与动作分开输出。speech 使用该角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。",
-    "action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。例如：伸手碰了碰摄像头把位置架高，拿起冰美式喝了一口。",
+    liveType === "voice"
+      ? "这是纯语音 LIVE：前台只有渐变语音舞台、成员头像、当前发言文字气泡与评论，不露脸、不展示环境。所有 segment 必须为 speech，绝对不要输出 action 或任何动作/画面描写。"
+      : liveType === "auto"
+        ? "本场类型尚未指定。请按角色当时状态自然选择露脸 visual 或纯语音 voice；若选择 voice，所有 segment 必须为 speech，绝对不要输出 action 或画面描写。"
+        : "这是露脸 LIVE，使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
+    "speech 使用该角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。",
+    liveType === "voice" ? "纯语音 LIVE 不输出动作。" : "visual 模式下 action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。",
     "粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。韩语为主，少量日语、英语、中文；不要人人都像资深粉丝。",
     opening
       ? "开场留言以轻松即时反应为主，例如终于开播、爱你、今天好帅/可爱、最近吃什么、是不是瘦了胖了、最近在忙什么等；不要一上来全是深度问题。"
@@ -610,11 +620,12 @@ function liveFormatRules(opening = false): string[] {
 export async function generateWeverseLiveOpening(
   characterId: string,
   community: WeverseCommunity,
-  options?: { theme?: string; now?: Date },
+  options?: { theme?: string; now?: Date; liveType?: "visual" | "voice" | "auto" },
 ): Promise<GeneratedWeverseLiveRound> {
   const now = options?.now ?? new Date();
   const resolved = await resolveCharacterGeneration(characterId, community, { now });
   const theme = String(options?.theme || "").trim();
+  const requestedLiveType = options?.liveType === "voice" || options?.liveType === "visual" ? options.liveType : "auto";
   const raw = await sendLLMRequest(
     resolved.apiConfig,
     resolved.preset,
@@ -623,12 +634,13 @@ export async function generateWeverseLiveOpening(
       {
         role: "system",
         content: [
-          ...liveFormatRules(true),
+          ...liveFormatRules(true, requestedLiveType),
           theme ? `用户给了一个软主题：${theme}。这是方向，不是脚本；按人设自然发挥、允许跑题。` : "用户没有指定主题。请结合人设、近期经历、当前时间与状态，自然决定为什么突然开播以及想聊什么。",
           "开场先只让最初开播者自己在 Stage 上，不要立刻安排其他艺人连线。",
-          "生成本场直播标题、开场的 3~5 个短 segment（以说话为主；只有确实出现新的动作时才插入 action，不要求动作与说话交错）和 9~14 条初始观众留言。",
+          requestedLiveType === "voice" ? "生成本场直播标题、开场的 3~5 个短 speech segment 和 9~14 条初始观众留言。" : "生成本场直播标题、开场的 3~5 个短 segment（以说话为主；visual 模式只有确实出现新动作时才插入 action）和 9~14 条初始观众留言。",
           `每个 segment 都可以带 characterId；当前只能是最初开播者 ${characterId}。`,
-          "只输出 JSON，不要 Markdown。格式：{\"title\":\"...\",\"segments\":[{\"kind\":\"action\",\"characterId\":\"角色ID\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"characterId\":\"角色ID\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
+          requestedLiveType === "auto" ? "必须返回 liveType，值只能是 visual 或 voice；按人设和当时情境自然选择，不要永远固定一种。" : `liveType 固定为 ${requestedLiveType}。`,
+          "只输出 JSON，不要 Markdown。格式：{\"liveType\":\"visual或voice\",\"title\":\"...\",\"segments\":[{\"kind\":\"speech\",\"characterId\":\"角色ID\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
         ].join("\n"),
       },
       { role: "user", content: theme ? `现在按这个主题开一场 LIVE：${theme}` : "现在自然地开一场 Weverse LIVE。" },
@@ -638,12 +650,13 @@ export async function generateWeverseLiveOpening(
     { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
   );
   const parsed = extractJsonObject(raw);
+  const liveType: "visual" | "voice" = requestedLiveType === "auto" ? (parsed?.liveType === "voice" ? "voice" : "visual") : requestedLiveType;
   const allowed = new Set([characterId]);
-  const segments = normalizeLiveSegments(parsed?.segments, allowed, characterId);
+  const segments = normalizeLiveSegments(parsed?.segments, allowed, characterId).filter((segment) => liveType === "visual" || segment.kind === "speech");
   const comments = normalizeLiveComments(parsed?.comments).slice(0, 14);
   const title = String(parsed?.title ?? "").trim() || `${resolved.character.name} LIVE`;
   if (!segments.length) throw new ChatEngineError("这次没有生成有效 LIVE 开场，请重试。");
-  return { title, segments, comments, artistComments: [], viewerJoins: [], viewerLeaves: [], participantJoins: [], participantLeaves: [], shouldEnd: false };
+  return { liveType, title, segments, comments, artistComments: [], viewerJoins: [], viewerLeaves: [], participantJoins: [], participantLeaves: [], shouldEnd: false };
 }
 
 export async function generateWeverseLiveContinuation(
@@ -669,7 +682,7 @@ export async function generateWeverseLiveContinuation(
       {
         role: "system",
         content: [
-          ...liveFormatRules(false),
+          ...liveFormatRules(false, live.liveType),
           `本场 LIVE 标题：${live.title}`,
           live.theme ? `最初的软主题：${live.theme}` : "本场没有预设主题。",
           `这已经是第 ${Math.max(1, live.roundCount + 1)} 段推进。`,
@@ -682,7 +695,7 @@ export async function generateWeverseLiveContinuation(
           "艺人活动不是每轮必有。大多数时候可以完全没有 viewerJoins / artistComments / participantJoins。只有按关系、当时空闲程度和直播内容自然时才发生。",
           "允许某个同 Community 成员中途进入直播围观；如果留言，写入 artistComments。艺人评论会在普通评论流里出现，同时被收进独立的‘艺人评论’入口。",
           "允许普通围观艺人随后被主播邀请或自己接入连线：把角色 ID 放进 participantJoins；加入后该角色本轮即可在 segments 里说话。也允许已连线的非最初开播者中途离开，放进 participantLeaves。最初开播者若要离开，应直接 shouldEnd=true，而不是 participantLeaves。",
-          "如果 participantJoins 发生，不需要视频分屏描述；仍然是同一个文字 Live Stage。多人 Stage 里不要机械轮流说话，谁说几句、谁沉默都按现场自然发生。",
+          live.liveType === "voice" ? "如果 participantJoins 发生，仍然留在同一个语音 Stage，以成员头像和每段 characterId 区分；不要生成动作。" : "如果 participantJoins 发生，不需要视频分屏描述；仍然是同一个文字 Live Stage。多人 Stage 里不要机械轮流说话，谁说几句、谁沉默都按现场自然发生。",
           liveTranscriptContext(live, community),
           userComments.length ? `用户自上次推进后已经公开发到直播间的评论如下。它们来自同一个普通观众，但你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有新的公开评论，只是在继续观看。",
           "生成接下来的 2~5 个短 segment 和 7~12 条新普通观众留言。以说话为主；只有确实有新动作时才生成 action。",
@@ -713,7 +726,7 @@ export async function generateWeverseLiveContinuation(
   for (const id of participantJoins) viewerPoolForComments.delete(id);
   const viewerLeaves = normalizeCharacterIds(parsed?.viewerLeaves, viewerPoolForComments, { max: 2 });
 
-  const segments = normalizeLiveSegments(parsed?.segments, activeForSegments, primaryHost);
+  const segments = normalizeLiveSegments(parsed?.segments, activeForSegments, primaryHost).filter((segment) => live.liveType === "visual" || segment.kind === "speech");
   const comments = normalizeLiveComments(parsed?.comments).slice(0, 12);
   const artistComments = normalizeLiveArtistComments(parsed?.artistComments, validCommunityIds, activeForSegments)
     .filter((item) => !viewerLeaves.includes(item.characterId))

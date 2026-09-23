@@ -9,6 +9,7 @@ import styles from "./weverse-app.module.css";
 type Props = {
   live: WeverseLive;
   speakerNames: Record<string, string>;
+  speakerAvatars: Record<string, string>;
   userName: string;
   busy?: boolean;
   onBack: () => void;
@@ -49,7 +50,7 @@ function liveElapsed(startedAt: number, endAt: number): string {
   return `${String(min).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, onAdvance, onSendComment, onHeart, onFinalizeEnd, onManualEnd }: Props) {
+export function WeverseLiveView({ live, speakerNames, speakerAvatars, userName, busy, onBack, onAdvance, onSendComment, onHeart, onFinalizeEnd, onManualEnd }: Props) {
   const [clock, setClock] = useState(() => Date.now());
   const [draft, setDraft] = useState("");
   const [exitSheetOpen, setExitSheetOpen] = useState(false);
@@ -58,6 +59,7 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
   const [heartBursts, setHeartBursts] = useState<Array<{ id: number; x: number }>>([]);
   const [voiceLoadingSegmentId, setVoiceLoadingSegmentId] = useState<string | null>(null);
   const [playingVoiceSegmentId, setPlayingVoiceSegmentId] = useState<string | null>(null);
+  const [selectedVoiceSegmentId, setSelectedVoiceSegmentId] = useState<string | null>(null);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const heartIdRef = useRef(0);
   const voiceRequestIdRef = useRef(0);
@@ -87,6 +89,14 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
     [live.comments, clock],
   );
   const visibleArtistComments = useMemo(() => visibleComments.filter((item) => item.authorType === "artist"), [visibleComments]);
+  const isVoiceLive = live.liveType === "voice";
+  const latestVoiceSegment = useMemo(() => [...visibleSegments].reverse().find((item) => item.kind === "speech"), [visibleSegments]);
+  const displayedVoiceSegment = useMemo(() => visibleSegments.find((item) => item.id === selectedVoiceSegmentId && item.kind === "speech") || latestVoiceSegment, [latestVoiceSegment, selectedVoiceSegmentId, visibleSegments]);
+  const latestVoiceSystem = useMemo(() => [...visibleSegments].reverse().find((item) => item.kind === "system"), [visibleSegments]);
+  const voiceParticipantIds = useMemo(() => {
+    const ids = live.status === "live" && live.activeCharacterIds.length ? live.activeCharacterIds : live.hostCharacterIds;
+    return [...new Set(ids)].slice(0, 4);
+  }, [live.activeCharacterIds, live.hostCharacterIds, live.status]);
   const bufferedUntil = Math.max(live.startedAt, ...live.segments.map((item) => item.createdAt), ...live.comments.map((item) => item.createdAt));
   const isPlaying = live.status === "live" && bufferedUntil > clock;
   const isEnding = live.status === "live" && Boolean(live.endedAt);
@@ -94,6 +104,8 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
   useEffect(() => {
     if (live.status === "live" && live.endedAt && clock >= live.endedAt) onFinalizeEnd();
   }, [clock, live.status, live.endedAt, onFinalizeEnd]);
+
+  useEffect(() => { setSelectedVoiceSegmentId(null); }, [visibleSegments.length]);
 
   useEffect(() => {
     const box = commentBoxRef.current;
@@ -206,8 +218,38 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
         <button type="button" onClick={() => live.status === "live" ? setExitSheetOpen(true) : onBack()} aria-label="关闭"><X size={25} /></button>
       </header>
 
-      <section className={styles.liveStage}>
-        <div ref={transcriptRef} className={styles.liveTranscript} onScroll={(event) => {
+      <section className={`${styles.liveStage} ${isVoiceLive ? styles.voiceLiveStage : ""}`}>
+        {isVoiceLive ? <>
+          <div className={styles.voiceLiveMetrics}>
+            <span><Play size={12} fill="currentColor" /> {compact(live.viewerCount)}</span>
+            <span><Heart size={13} fill="currentColor" /> {compact(live.heartCount)}</span>
+          </div>
+          <div className={styles.voiceLiveFocus}>
+            {displayedVoiceSegment ? <div className={styles.voiceLiveBubble}>
+              <b>{displayedVoiceSegment.characterId ? (speakerNames[displayedVoiceSegment.characterId] || displayedVoiceSegment.characterId) : "LIVE"}</b>
+              <p>{displayedVoiceSegment.original}</p>
+              {displayedVoiceSegment.translated && displayedVoiceSegment.translated !== displayedVoiceSegment.original ? <small>{displayedVoiceSegment.translated}</small> : null}
+            </div> : <div className={styles.voiceLiveBubble}><p>正在连接语音 LIVE…</p></div>}
+            <div className={styles.voiceLiveAvatars}>{voiceParticipantIds.map((characterId) => {
+              const segment = [...visibleSegments].reverse().find((item) => item.kind === "speech" && item.characterId === characterId);
+              const active = Boolean(segment && (voiceLoadingSegmentId === segment.id || playingVoiceSegmentId === segment.id));
+              return <button type="button" key={characterId} className={active ? styles.voiceLiveAvatarActive : ""} onClick={() => { if (segment) { setSelectedVoiceSegmentId(segment.id); void playSegmentVoice(segment); } }} aria-label={`播放 ${speakerNames[characterId] || characterId} 的当前发言`}>
+                {speakerAvatars[characterId] ? <img src={speakerAvatars[characterId]} alt="" /> : <span>{(speakerNames[characterId] || characterId).slice(0,1)}</span>}
+                <i>{active ? (voiceLoadingSegmentId === segment?.id ? <LoaderCircle size={16} className={styles.liveVoiceSpinner} /> : <Square size={12} fill="currentColor" />) : <Volume2 size={16} />}</i>
+              </button>;
+            })}</div>
+            {latestVoiceSystem ? <div className={styles.voiceLiveSystem}>{latestVoiceSystem.original}</div> : null}
+          </div>
+          <div ref={commentBoxRef} className={`${styles.liveComments} ${styles.voiceLiveComments}`}>
+            {visibleComments.map((comment) => (
+              <div key={comment.id} className={`${styles.liveComment} ${comment.authorType === "user" ? styles.liveCommentMe : ""} ${comment.authorType === "artist" ? styles.liveCommentArtist : ""}`}>
+                {comment.authorType === "artist" ? <span className={styles.liveArtistCommentAvatar}>{comment.authorAvatarUrl ? <img src={comment.authorAvatarUrl} alt="" /> : comment.authorName.slice(0,1)}</span> : null}
+                <div className={styles.liveCommentBody}><div className={styles.liveCommentMeta}><b>{comment.authorType === "user" ? userName : comment.authorName}{comment.authorType === "artist" ? <BadgeCheck size={12} fill="currentColor" /> : null}</b><time>{new Date(comment.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}</time></div><p>{comment.originalBody || comment.body}</p>{comment.originalBody && comment.originalBody !== comment.body ? <small>{comment.body}</small> : null}</div>
+              </div>
+            ))}
+            {!visibleComments.length ? <div className={styles.liveWaiting}>观众正在进来…</div> : null}
+          </div>
+        </> : <div ref={transcriptRef} className={styles.liveTranscript} onScroll={(event) => {
           const box = event.currentTarget;
           setTranscriptPinned(box.scrollHeight - box.scrollTop - box.clientHeight < 38);
         }}>
@@ -232,15 +274,15 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
               {segment.kind === "speech" && segment.translated && segment.translated !== segment.original ? <small className={styles.liveSpeechTranslation}>{segment.translated}</small> : null}
             </div>;
           }) : <div className={styles.liveConnecting}>正在连接 LIVE…</div>}
-        </div>
+        </div>}
         <time className={styles.liveStageTime}>{liveElapsed(live.startedAt, live.status === "ended" && live.endedAt ? live.endedAt : clock)}</time>
         {voiceNotice ? <div className={styles.liveVoiceNotice}>{voiceNotice}</div> : null}
       </section>
 
-      <div className={styles.liveMetricRow}>
+      {!isVoiceLive ? <div className={styles.liveMetricRow}>
         <span><Play size={13} fill="currentColor" /> {compact(live.viewerCount)}</span>
         <span><Heart size={14} /> {compact(live.heartCount)}</span>
-      </div>
+      </div> : null}
 
       {visibleArtistComments.length ? <button
         type="button"
@@ -260,7 +302,7 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
         </article>)}</div>
       </div> : null}
 
-      <div ref={commentBoxRef} className={styles.liveComments}>
+      {!isVoiceLive ? <div ref={commentBoxRef} className={styles.liveComments}>
         {visibleComments.map((comment) => (
           <div key={comment.id} className={`${styles.liveComment} ${comment.authorType === "user" ? styles.liveCommentMe : ""} ${comment.authorType === "artist" ? styles.liveCommentArtist : ""}`}>
             {comment.authorType === "artist" ? <span className={styles.liveArtistCommentAvatar}>{comment.authorAvatarUrl ? <img src={comment.authorAvatarUrl} alt="" /> : comment.authorName.slice(0,1)}</span> : null}
@@ -272,7 +314,7 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
           </div>
         ))}
         {!visibleComments.length ? <div className={styles.liveWaiting}>观众正在进来…</div> : null}
-      </div>
+      </div> : null}
 
       <div className={styles.liveBottomPanel}>
         {live.status === "live" ? <div className={styles.liveComposer}>
