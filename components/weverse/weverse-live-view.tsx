@@ -16,6 +16,7 @@ type Props = {
   onSummon: (comments: string[]) => void;
   onHeart: () => void;
   onFinalizeEnd: () => void;
+  onManualEnd: () => void;
 };
 
 function compact(value: number): string {
@@ -35,11 +36,14 @@ function liveElapsed(startedAt: number, endAt: number): string {
   return `${String(min).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy, onBack, onContinue, onSummon, onHeart, onFinalizeEnd }: Props) {
+export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy, onBack, onContinue, onSummon, onHeart, onFinalizeEnd, onManualEnd }: Props) {
   const [clock, setClock] = useState(() => Date.now());
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string[]>([]);
+  const [exitSheetOpen, setExitSheetOpen] = useState(false);
+  const [transcriptPinned, setTranscriptPinned] = useState(true);
   const commentBoxRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 450);
@@ -48,7 +52,6 @@ export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy,
 
   const visibleSegments = useMemo(() => live.segments.filter((item) => item.createdAt <= clock), [live.segments, clock]);
   const visibleComments = useMemo(() => live.comments.filter((item) => item.createdAt <= clock), [live.comments, clock]);
-  const stageSegments = visibleSegments.slice(-5);
   const bufferedUntil = Math.max(live.startedAt, ...live.segments.map((item) => item.createdAt), ...live.comments.map((item) => item.createdAt));
   const isPlaying = live.status === "live" && bufferedUntil > clock;
   const isEnding = live.status === "live" && Boolean(live.endedAt);
@@ -62,6 +65,12 @@ export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy,
     if (!box) return;
     box.scrollTop = box.scrollHeight;
   }, [visibleComments.length]);
+
+  useEffect(() => {
+    const box = transcriptRef.current;
+    if (!box || !transcriptPinned) return;
+    box.scrollTop = box.scrollHeight;
+  }, [visibleSegments.length, transcriptPinned]);
 
   const queueComment = () => {
     const value = draft.trim();
@@ -93,7 +102,7 @@ export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy,
   return (
     <div className={`${styles.liveRoom} ${live.orientation === "portrait" ? styles.livePortrait : styles.liveLandscape}`}>
       <header className={styles.liveHeader}>
-        <button type="button" onClick={onBack} aria-label="返回"><ChevronLeft size={23} /></button>
+        <button type="button" onClick={() => live.status === "live" ? setExitSheetOpen(true) : onBack()} aria-label="返回"><ChevronLeft size={23} /></button>
         <div className={styles.liveHostMini}>
           <span className={styles.liveHostAvatar}>{hostAvatarUrl ? <img src={hostAvatarUrl} alt="" /> : hostName.slice(0,1)}</span>
           <div><b>{hostName}</b><small>{live.status === "live" ? "LIVE" : "REPLAY"}</small></div>
@@ -103,8 +112,8 @@ export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy,
 
       <section className={styles.liveStage}>
         <div className={styles.liveStageTop}><span className={live.status === "live" ? styles.liveBadge : styles.replayBadge}>{live.status === "live" ? "LIVE" : "REPLAY"}</span><span>{liveElapsed(live.startedAt, live.status === "ended" && live.endedAt ? live.endedAt : clock)}</span></div>
-        <div className={styles.liveTranscript}>
-          {stageSegments.length ? stageSegments.map((segment) => (
+        <div ref={transcriptRef} className={styles.liveTranscript} onScroll={(event) => { const box = event.currentTarget; setTranscriptPinned(box.scrollHeight - box.scrollTop - box.clientHeight < 36); }}>
+          {visibleSegments.length ? visibleSegments.map((segment) => (
             <div key={segment.id} className={segment.kind === "action" ? styles.liveActionLine : segment.kind === "system" ? styles.liveSystemLine : styles.liveSpeechLine}>
               {segment.kind === "speech" ? <b>{hostName}</b> : null}
               <p>{segment.original}</p>
@@ -116,7 +125,7 @@ export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy,
       </section>
 
       {live.orientation === "landscape" ? <div className={styles.liveBelowStage}>
-        <div className={styles.liveTitleRow}><div><h2>{live.title}</h2><p>{live.theme ? `主题 · ${live.theme}` : "成员私人 LIVE"}</p></div><div><span><Eye size={14} /> {compact(live.viewerCount)}</span><span><Heart size={14} /> {compact(live.heartCount)}</span></div></div>
+        <div className={styles.liveTitleRow}><div><h2>{live.title}</h2><p>{live.theme ? `主题 · ${live.theme}` : "成员私人 LIVE"}</p></div></div>
         {commentsNode}
       </div> : <div className={styles.livePortraitTitle}><b>{live.title}</b><span>{live.theme || "成员私人 LIVE"}</span></div>}
 
@@ -132,6 +141,17 @@ export function WeverseLiveView({ live, hostName, hostAvatarUrl, userName, busy,
           <button type="button" className={styles.liveHeartButton} onClick={onHeart}><Heart size={18} /></button>
         </div>
       </div>
+
+      {exitSheetOpen ? <div className={styles.liveExitMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setExitSheetOpen(false); }}>
+        <section className={styles.liveExitSheet}>
+          <div className={styles.liveExitHandle} />
+          <h3>退出直播？</h3>
+          <p>可以只退出页面并保留后台播放，或者直接关闭本场直播。</p>
+          <button type="button" className={styles.liveExitKeepBtn} onClick={() => { setExitSheetOpen(false); onBack(); }}>仅退出，保留后台播放</button>
+          <button type="button" className={styles.liveExitEndBtn} disabled={busy} onClick={() => { setExitSheetOpen(false); onManualEnd(); }}>关闭直播</button>
+          <button type="button" className={styles.liveExitCancelBtn} onClick={() => setExitSheetOpen(false)}>取消</button>
+        </section>
+      </div> : null}
     </div>
   );
 }

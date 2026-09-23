@@ -615,6 +615,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       const segments = scheduleLiveSegments(characterId, generated.segments, now + 350);
       const comments = scheduleLiveFanComments(generated.comments, now + 550);
       const current = loadWeverseState().lives.find((item) => item.id === live.id) || workingLive;
+      if (current.status !== "live") return;
       const early = current.roundCount < 3;
       const factor = early ? (1.08 + Math.random() * 0.24) : (0.96 + Math.random() * 0.16);
       const viewerCount = Math.max(120, Math.round(current.viewerCount * factor));
@@ -638,6 +639,19 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   };
 
   const addLiveHeart = (live: WeverseLive) => setState(updateWeverseLive(live.id, { heartCount: live.heartCount + 1 }));
+
+  const manuallyEndLive = (live: WeverseLive) => {
+    const now = Date.now();
+    const current = loadWeverseState().lives.find((item) => item.id === live.id) || live;
+    setState(updateWeverseLive(live.id, {
+      status: "ended",
+      endedAt: now,
+      segments: current.segments.filter((item) => item.createdAt <= now),
+      comments: current.comments.filter((item) => item.createdAt <= now),
+    }));
+    back();
+    onNotice?.("LIVE 已结束");
+  };
 
   const pickArtistForCommunity = (community: WeverseCommunity): string | null => {
     if (!community.memberCharacterIds.length) return null;
@@ -1476,7 +1490,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     const hostId = live.hostCharacterIds[0];
     if (!community || !hostId) return <div className={styles.emptyState}><b>这场 LIVE 的成员信息不存在</b><button type="button" onClick={back}>返回</button></div>;
     const member = resolveMember(community, hostId);
-    return <WeverseLiveView live={live} hostName={member.displayName} hostAvatarUrl={member.avatarUrl} userName={userName} busy={generatingLiveId === live.id} onBack={back} onContinue={() => advanceLive(live)} onSummon={(comments) => advanceLive(live, comments)} onHeart={() => addLiveHeart(live)} onFinalizeEnd={() => setState(updateWeverseLive(live.id, { status: "ended" }))} />;
+    return <WeverseLiveView live={live} hostName={member.displayName} hostAvatarUrl={member.avatarUrl} userName={userName} busy={generatingLiveId === live.id} onBack={back} onContinue={() => advanceLive(live)} onSummon={(comments) => advanceLive(live, comments)} onHeart={() => addLiveHeart(live)} onFinalizeEnd={() => setState(updateWeverseLive(live.id, { status: "ended" }))} onManualEnd={() => manuallyEndLive(live)} />;
   };
 
   const renderContent = () => {

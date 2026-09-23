@@ -530,7 +530,7 @@ function liveFormatRules(orientation: WeverseLiveOrientation, opening = false): 
     opening
       ? "现在是刚开播阶段。通常先调一下状态、等观众陆续进来、随口说几句；不要一开场就进入高强度问答或大型节目。"
       : "这是直播中途的一小段推进。延续之前的话题与状态，不要像新开一场直播一样重新自我介绍。",
-    "角色语言与动作分开输出。speech 使用角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。action 是第三人称环境/动作旁白，只写简体中文，不要做双语。",
+    "角色语言与动作分开输出。speech 使用角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；若动作没有变化或没有新动作，完全省略 action，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。例如：伸手碰了碰摄像头把位置架高，拿起冰美式喝了一口。",
     `当前直播画面模板为${orientation === "portrait" ? "竖屏" : "横屏"}。这只影响镜头/动作的自然感，不要描述真实视频文件或画质技术。`,
     "粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。韩语为主，少量日语、英语、中文；不要人人都像资深粉丝。",
     opening
@@ -560,7 +560,7 @@ export async function generateWeverseLiveOpening(
         content: [
           ...liveFormatRules(orientation, true),
           theme ? `用户给了一个软主题：${theme}。这是方向，不是脚本；按人设自然发挥、允许跑题。` : "用户没有指定主题。请结合人设、近期经历、当前时间与状态，自然决定为什么突然开播以及想聊什么。",
-          "生成本场直播标题、开场的 3~5 个短 segment（动作与说话交错即可）和 9~14 条初始观众留言。",
+          "生成本场直播标题、开场的 3~5 个短 segment（以说话为主；只有确实出现新的动作时才插入 action，不要求动作与说话交错）和 9~14 条初始观众留言。",
           "只输出 JSON，不要 Markdown。格式：{\"title\":\"...\",\"segments\":[{\"kind\":\"action\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
         ].join("\n"),
       },
@@ -601,7 +601,7 @@ export async function generateWeverseLiveContinuation(
           `这已经是第 ${Math.max(1, live.roundCount + 1)} 段推进。`,
           liveTranscriptContext(live),
           userComments.length ? `用户刚刚准备发送的多条弹幕如下。它们属于同一个观众，但你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有发弹幕，只是在继续观看。",
-          "生成接下来的 2~5 个短 segment 和 7~12 条新观众留言。根据角色人设与当前情境判断是否已经自然到收尾时机。若该下播，shouldEnd=true，并让最后的 segment 自然告别；否则 false。",
+          "生成接下来的 2~5 个短 segment 和 7~12 条新观众留言。以说话为主；只有角色确实做了新的动作、改变姿态或操作环境时才生成 action，动作没变就不要写 action。根据角色人设与当前情境判断是否已经自然到收尾时机。若该下播，shouldEnd=true，并让最后的 segment 自然告别；否则 false。",
           "不要因为用户点了继续播放就机械延长；也不要因为已经播了几轮就强制结束。",
           "只输出 JSON，不要 Markdown。格式：{\"segments\":[{\"kind\":\"action\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":true或false,\"endingReason\":\"可空\"}",
         ].filter(Boolean).join("\n"),
