@@ -1203,7 +1203,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const renderCommunityHome = (community: WeverseCommunity) => {
     const notices = state.notices.filter((notice) => notice.communityId === community.id).sort((a, b) => b.createdAt - a.createdAt);
     return <div className={styles.communityPane}>
-      <section className={styles.homeSection}><div className={styles.sectionTitleRow}><h3>公告</h3><button type="button" onClick={() => navigate({ type: "notices", communityId: community.id })}>查看全部</button></div><button type="button" className={styles.homeCard} onClick={() => notices[0] ? navigate({ type: "notice", noticeId: notices[0].id }) : openNoticeEditor(community.id)}><div><b>{notices[0]?.title || `请查看 ${community.name} 公告`}</b><small>{notices[0] ? new Date(notices[0].createdAt).toLocaleDateString("zh-CN") : "暂无公告"}</small></div><ChevronRight size={20} /></button></section>
+      <section className={styles.homeSection}><div className={styles.sectionTitleRow}><h3>公告</h3><button type="button" onClick={() => navigate({ type: "notices", communityId: community.id })}>查看全部</button></div><button type="button" className={styles.homeCard} onClick={() => notices[0] ? navigate({ type: "notice", noticeId: notices[0].id }) : onNotice?.("暂无公告")}><div><b>{notices[0]?.title || `请查看 ${community.name} 公告`}</b><small>{notices[0] ? new Date(notices[0].createdAt).toLocaleDateString("zh-CN") : "暂无公告"}</small></div><ChevronRight size={20} /></button></section>
       <section className={styles.homeSection}><h3>Calendar</h3><button type="button" className={styles.homeCard} onClick={() => showTodo("WVS Schedule → 原生日历联动")}><div><b>请查看 {community.name} 的日程</b><small>Schedule / Calendar 将在后续版本接入</small></div><ChevronRight size={20} /></button></section>
       <section className={styles.homeSection}><h3>About</h3><div className={styles.aboutCard}><div className={styles.aboutMembers}>{community.memberCharacterIds.map((characterId) => { const member = resolveMember(community, characterId); return <button type="button" key={characterId} onClick={() => { setArtistTab("posts"); navigate({ type: "artist", communityId: community.id, characterId }); }}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><span>{member.displayName}</span></button>; })}</div><p>{community.description || `${community.name} Official Community`}</p></div></section>
     </div>;
@@ -1322,11 +1322,13 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       return b.createdAt - a.createdAt;
     });
     return <div className={styles.postDetailPage}>
-      <div className={styles.postDetailPost}>{renderPost(post, true)}</div>
-      <div className={styles.commentsTitleRow}><div className={styles.commentsTitle}>Comments <span>{formatCompactCount(post.commentCount)}</span></div></div>
-      <div className={styles.commentsScroller}>
-        <div className={styles.commentsList}>{roots.map((comment) => renderCommentNode(post, comment, childrenByParent))}{!post.comments.length ? <div className={styles.emptyComment}>还没有展开评论</div> : null}</div>
-        {post.commentCount > post.comments.filter((comment) => !comment.deleted).length ? <button type="button" className={styles.loadMoreComments} disabled={generatingCommentsPostId === post.id} onClick={() => generateMoreComments(post)}>{generatingCommentsPostId === post.id ? "─── 加载中… ───" : "─── 加载更多评论 ───"}</button> : <div className={styles.commentsExhausted}>─── 已加载全部评论 ───</div>}
+      <div className={styles.postDetailScroller}>
+        <div className={styles.postDetailPost}>{renderPost(post, true)}</div>
+        <div className={styles.commentsTitleRow}><div className={styles.commentsTitle}>Comments <span>{formatCompactCount(post.commentCount)}</span></div></div>
+        <div className={styles.commentsScroller}>
+          <div className={styles.commentsList}>{roots.map((comment) => renderCommentNode(post, comment, childrenByParent))}{!post.comments.length ? <div className={styles.emptyComment}>还没有展开评论</div> : null}</div>
+          {post.commentCount > post.comments.filter((comment) => !comment.deleted).length ? <button type="button" className={styles.loadMoreComments} disabled={generatingCommentsPostId === post.id} onClick={() => generateMoreComments(post)}>{generatingCommentsPostId === post.id ? "─── 加载中… ───" : "─── 加载更多评论 ───"}</button> : <div className={styles.commentsExhausted}>─── 已加载全部评论 ───</div>}
+        </div>
       </div>
       {replyTarget?.postId === post.id ? <div className={styles.replyingBar}>正在回复 {replyTarget.name}<button type="button" onClick={() => setReplyTarget(null)}><X size={14} /></button></div> : null}
       <div className={styles.commentComposer}><input id="wvs-comment-input" value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder={replyTarget?.postId === post.id ? `回复 ${replyTarget.name}…` : "留下评论…"} onKeyDown={(e) => { if (e.key === "Enter") submitComment(post); }} /><button type="button" onClick={() => submitComment(post)}><Send size={17} /></button></div>

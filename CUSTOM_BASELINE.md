@@ -126,3 +126,11 @@
 - Notice 与 Official Post 分离；公告支持列表/详情/编辑/删除且无评论区。
 - Official Post 进入官号主页；评论生成以顶级评论为主。
 - 统一 Media Resolver：允许生图但无 API/失败时降级为文字图片；album_only 匹配失败仍不伪造图片。
+
+## v0.3.7 · WVS Post Scroll & Notice Empty-State Fix
+- Post 详情恢复整页单一纵向滚动：Artist / 正文 / 图片 / Comments / 评论连续滚动，评论区不再独立滚动。
+- 底部评论输入栏继续固定；加载更多保持在评论末尾。
+- Community Home 无公告时点击仅提示“暂无公告”，不再误开“发布公告”；“查看全部 → 新建”保持不变。
+- 移除详情图 230px 限高。
+- Service Worker cache version 升至 v22。
+

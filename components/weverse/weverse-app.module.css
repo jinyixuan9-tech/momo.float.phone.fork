@@ -424,12 +424,12 @@
 
 /* v0.3.5 · living community */
 .postDetailPage { height: 100%; min-height: 0; display: flex; flex-direction: column; background: #fff; overflow: hidden; }
-.postDetailPost { flex: 0 1 auto; max-height: 48%; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; border-bottom: 1px solid #eceeef; }
-.postDetailPost::-webkit-scrollbar { display: none; }
+.postDetailScroller { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; touch-action: pan-y; background: #fff; }
+.postDetailScroller::-webkit-scrollbar { display: none; }
+.postDetailPost { overflow: visible; border-bottom: 1px solid #eceeef; }
 .postDetailPost .post { margin-bottom: 0; border-bottom: 0; }
-.commentsTitleRow { flex: 0 0 auto; padding-right: 0; border-bottom: 1px solid #f0f1f2; }
-.commentsScroller { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; background: #fff; }
-.commentsScroller::-webkit-scrollbar { display: none; }
+.commentsTitleRow { padding-right: 0; border-bottom: 1px solid #f0f1f2; }
+.commentsScroller { overflow: visible; background: #fff; }
 .commentsList { padding-bottom: 2px; }
 .loadMoreComments { width: calc(100% - 28px); margin: 8px 14px 14px; min-height: 38px; border: 0; background: transparent; color: #8a9094; font-size: 10px; letter-spacing: .2px; }
 .loadMoreComments:disabled { opacity: .58; }
@@ -462,10 +462,8 @@
 .historyEditorRow { display: grid; gap: 8px; margin-top: 9px; }
 .historyEditorRow select { width: 100%; border: 1px solid #e0e4e6; border-radius: 13px; background: #f8f9fa; padding: 10px 11px; font-size: 11px; outline: none; }
 
-/* v0.3.6 · notice + comment scroll cleanup */
-.postDetailPost { flex: 0 0 auto; max-height: 42%; overflow: hidden; }
-.postDetailPost .postImage { max-height: 230px; }
-.commentsScroller { overflow-y: auto; overflow-x: hidden; min-height: 0; touch-action: pan-y; }
+/* v0.3.7 · post detail single-scroll + notice empty-state fix */
+/* Post 正文、图片、Comments 与评论共享 .postDetailScroller 一条滚动链；评论区本身不再独立滚动。 */
 .textPhoto { margin-top: 9px; border-radius: 16px; min-height: 150px; padding: 18px; background: linear-gradient(145deg,#f1f3f4,#e8ebec); display: flex; flex-direction: column; justify-content: flex-end; gap: 7px; color: #3f4548; }
 .textPhoto span { align-self: flex-start; background: rgba(255,255,255,.78); border-radius: 999px; padding: 4px 8px; font-size: 9px; font-weight: 850; }
 .textPhoto p { margin: 0; white-space: pre-wrap; font-size: 12px; line-height: 1.55; }

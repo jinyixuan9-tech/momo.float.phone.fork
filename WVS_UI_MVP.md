@@ -1,3 +1,17 @@
+# Weverse · v0.3.7 Post Scroll & Notice Empty-State Fix
+
+> v0.3.7 是针对 v0.3.6 实测问题的定点修复：恢复 Post Detail 的整页单一滚动逻辑，并移除 Community Home 空公告卡片误触“发布公告”的入口。
+
+## v0.3.7 · Post Scroll & Notice Empty-State Fix
+
+- Post Detail 改为唯一滚动链：Artist / 正文 / 图片 / Comments / 全部评论按页面自然顺序连续滚动；评论列表不再拥有独立固定高度或独立 overflow。
+- 底部评论输入栏继续固定在详情页底部；“加载更多评论”保持在评论内容末尾。
+- Community Home 没有公告时，点击公告卡片只提示“暂无公告”，不再打开“发布公告”；“查看全部”页右上角“新建”继续保留。
+- 移除 v0.3.6 对 Post 图片 230px 的详情页限高，避免修滚动时连带压缩正文图片。
+- Service Worker cache 升至 v22。
+
+---
+
 # Weverse · v0.3.6 Notice & Resolver Fix
 
 > v0.3.6 聚焦 v0.3.5 实测修正：Official Notice 与 Official Post 正式拆分、公告列表/详情/编辑/删除、Official Account 主页、评论树分布与详情滚动修正，以及统一 Media Resolver 的“允许生图但无 API → 文字图片”降级。
