@@ -144,3 +144,10 @@
 - Chat Profile 纳入数据管理/备份键；旧角色无 Profile 时自动回退，无需迁移旧数据。
 - 本版只补 Chat Profile 基础层，暂未加入角色主动自主改昵称/头像的 AI 行为。
 - Service Worker cache version 升至 v23。
+
+
+## v0.3.9 · Chat Bubble Avatar Sync Fix
+- 修复 Chat Profile 头像修改后，聊天室消息气泡仍显示 Character 原头像的问题。
+- 单聊历史消息/新消息头像统一读取 Chat Profile 头像并实时跟随资料更新。
+- 群聊成员消息与群聊流式预览也按各自角色 Chat Profile 解析头像；无覆盖时继续回退 Character.avatar。
+- Service Worker cache version 升至 v24。

@@ -6066,11 +6066,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                             : character;
                                                         if (targetChar) sendRichMessage("poke", { pokeTarget: targetChar.name });
                                                     }} className="w-[40px] h-[40px] rounded-[20px] bg-[var(--c-input)] overflow-hidden cursor-pointer">
-                                                        {senderChar?.avatar ? (
-                                                            <img src={senderChar.avatar} className="w-full h-full object-cover" alt="" />
-                                                        ) : (
-                                                            <ChatFallbackAvatar />
-                                                        )}
+                                                        {(() => {
+                                                            const senderAvatar = senderChar ? resolveChatCharacterAvatar(senderChar) : null;
+                                                            return senderAvatar ? (
+                                                                <img src={senderAvatar} className="w-full h-full object-cover" alt="" />
+                                                            ) : (
+                                                                <ChatFallbackAvatar />
+                                                            );
+                                                        })()}
                                                     </div>
                                                             </>
                                                         );
@@ -6249,7 +6252,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         <div key={`stream-${part.characterId}-${i}-${j}`} className="chat-msg-wrapper" data-role="assistant">
                                             <div className="chat-msg-avatar flex flex-col items-center gap-1 shrink-0">
                                                 <div className="w-[40px] h-[40px] rounded-[20px] bg-[var(--c-input)] overflow-hidden">
-                                                    {senderChar?.avatar ? <img src={senderChar.avatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                                                    {senderChar && resolveChatCharacterAvatar(senderChar) ? <img src={resolveChatCharacterAvatar(senderChar) || ""} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
                                                 </div>
                                             </div>
                                             <div className="chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%]">
