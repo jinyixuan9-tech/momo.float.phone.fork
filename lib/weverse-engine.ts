@@ -20,7 +20,7 @@ import { buildCalendarScheduleMarker } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext, buildGroupTimeContext, getSystemTimeZone, formatZonedChineseDateTime, getZonedWeekday } from "./character-time";
 import { loadPhotoLibrary } from "./photo-library-storage";
-import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, WeverseLive, WeverseLiveOrientation } from "./weverse-storage";
+import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, WeverseLive } from "./weverse-storage";
 
 export type WeverseMediaIntent = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
 
@@ -467,6 +467,7 @@ export async function generateWeverseArtistReply(
 
 export type GeneratedWeverseLiveSegment = {
   kind: "speech" | "action";
+  characterId?: string;
   original: string;
   translated?: string;
 };
@@ -477,15 +478,26 @@ export type GeneratedWeverseLiveComment = {
   translated: string;
 };
 
+export type GeneratedWeverseLiveArtistComment = {
+  characterId: string;
+  original: string;
+  translated: string;
+};
+
 export type GeneratedWeverseLiveRound = {
   title?: string;
   segments: GeneratedWeverseLiveSegment[];
   comments: GeneratedWeverseLiveComment[];
+  artistComments: GeneratedWeverseLiveArtistComment[];
+  viewerJoins: string[];
+  viewerLeaves: string[];
+  participantJoins: string[];
+  participantLeaves: string[];
   shouldEnd: boolean;
   endingReason?: string;
 };
 
-function normalizeLiveSegments(value: unknown): GeneratedWeverseLiveSegment[] {
+function normalizeLiveSegments(value: unknown, allowedIds?: Set<string>, fallbackId?: string): GeneratedWeverseLiveSegment[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((raw) => {
     if (!raw || typeof raw !== "object") return [];
@@ -494,8 +506,10 @@ function normalizeLiveSegments(value: unknown): GeneratedWeverseLiveSegment[] {
     const original = String(item.original ?? item.text ?? "").trim();
     const translated = String(item.translated ?? "").trim();
     if (!original) return [];
-    return [{ kind, original, translated: kind === "speech" && translated && translated !== original ? translated : undefined }];
-  }).slice(0, 8);
+    const requestedId = String(item.characterId ?? "").trim();
+    const characterId = requestedId && (!allowedIds || allowedIds.has(requestedId)) ? requestedId : fallbackId;
+    return [{ kind, characterId, original, translated: kind === "speech" && translated && translated !== original ? translated : undefined }];
+  }).slice(0, 10);
 }
 
 function normalizeLiveComments(value: unknown): GeneratedWeverseLiveComment[] {
@@ -514,29 +528,81 @@ function normalizeLiveComments(value: unknown): GeneratedWeverseLiveComment[] {
   }).slice(0, 18);
 }
 
-function liveTranscriptContext(live: WeverseLive): string {
-  const segments = live.segments.slice(-14).map((segment) => {
-    const kind = segment.kind === "action" ? "动作" : segment.kind === "system" ? "系统" : "角色";
-    return `${kind}: ${segment.original}${segment.translated ? ` / ${segment.translated}` : ""}`;
+function normalizeLiveArtistComments(value: unknown, validIds: Set<string>, activeIds: Set<string>): GeneratedWeverseLiveArtistComment[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const characterId = String(item.characterId ?? "").trim();
+    if (!characterId || !validIds.has(characterId) || activeIds.has(characterId)) return [];
+    const original = String(item.original ?? item.body ?? "").trim();
+    const translated = String(item.translated ?? original).trim() || original;
+    if (!original && !translated) return [];
+    const key = `${characterId}:${original || translated}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ characterId, original: original || translated, translated: translated || original }];
+  }).slice(0, 4);
+}
+
+function normalizeCharacterIds(value: unknown, validIds: Set<string>, options?: { exclude?: Set<string>; max?: number }): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const raw of value) {
+    const id = String(raw ?? "").trim();
+    if (!id || !validIds.has(id) || options?.exclude?.has(id) || out.includes(id)) continue;
+    out.push(id);
+    if (out.length >= (options?.max ?? 3)) break;
+  }
+  return out;
+}
+
+function liveMemberName(community: WeverseCommunity, characterId: string): string {
+  const character = loadCharacters().find((item) => item.id === characterId);
+  return community.memberProfiles[characterId]?.displayName?.trim() || character?.name || characterId;
+}
+
+function liveCommunityRosterContext(community: WeverseCommunity): string {
+  const all = loadCharacters();
+  const rows = community.memberCharacterIds.map((characterId) => {
+    const character = all.find((item) => item.id === characterId);
+    const name = community.memberProfiles[characterId]?.displayName?.trim() || character?.name || characterId;
+    const brief = (character?.briefPersona || character?.personality || character?.persona || "").replace(/\s+/g, " ").trim().slice(0, 700);
+    return `- ${characterId} | ${name}${brief ? ` | ${brief}` : ""}`;
   });
-  const comments = live.comments.slice(-20).map((comment) => `${comment.authorType === "user" ? "用户" : comment.authorName}: ${comment.originalBody || comment.body}`);
+  return rows.length ? rows.join("\n") : "（无其他成员）";
+}
+
+function liveTranscriptContext(live: WeverseLive, community: WeverseCommunity): string {
+  const segments = [...live.segments].sort((a, b) => a.createdAt - b.createdAt).slice(-18).map((segment) => {
+    const kind = segment.kind === "action" ? "动作" : segment.kind === "system" ? "系统" : "发言";
+    const who = segment.characterId ? liveMemberName(community, segment.characterId) : "LIVE";
+    return `${kind}[${who}]: ${segment.original}${segment.translated ? ` / ${segment.translated}` : ""}`;
+  });
+  const comments = [...live.comments].sort((a, b) => a.createdAt - b.createdAt).slice(-24).map((comment) => {
+    const type = comment.authorType === "user" ? "用户" : comment.authorType === "artist" ? `艺人 ${comment.authorName}` : comment.authorName;
+    return `${type}: ${comment.originalBody || comment.body}`;
+  });
   return [segments.length ? `最近直播内容：\n${segments.join("\n")}` : "", comments.length ? `最近弹幕：\n${comments.join("\n")}` : ""].filter(Boolean).join("\n\n");
 }
 
-function liveFormatRules(orientation: WeverseLiveOrientation, opening = false): string[] {
+function liveFormatRules(opening = false): string[] {
   return [
     "这是 Weverse 的成员私人 LIVE，不是私聊，也不是正式节目主持。角色可以随意聊天、吃饭、推荐歌、等人进来、发呆、准备工作或睡前陪粉丝一会儿。",
     "直播持续多久完全按角色人设与当次情境决定：有人会黏很久，有人活动后台只匆匆播几分钟。不要预设固定轮数。",
     opening
       ? "现在是刚开播阶段。通常先调一下状态、等观众陆续进来、随口说几句；不要一开场就进入高强度问答或大型节目。"
       : "这是直播中途的一小段推进。延续之前的话题与状态，不要像新开一场直播一样重新自我介绍。",
-    "角色语言与动作分开输出。speech 使用角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；若动作没有变化或没有新动作，完全省略 action，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。例如：伸手碰了碰摄像头把位置架高，拿起冰美式喝了一口。",
-    `当前直播画面模板为${orientation === "portrait" ? "竖屏" : "横屏"}。这只影响镜头/动作的自然感，不要描述真实视频文件或画质技术。`,
+    "当前只使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
+    "角色语言与动作分开输出。speech 使用该角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。",
+    "action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。例如：伸手碰了碰摄像头把位置架高，拿起冰美式喝了一口。",
     "粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。韩语为主，少量日语、英语、中文；不要人人都像资深粉丝。",
     opening
       ? "开场留言以轻松即时反应为主，例如终于开播、爱你、今天好帅/可爱、最近吃什么、是不是瘦了胖了、最近在忙什么等；不要一上来全是深度问题。"
       : "中途留言可以逐渐更具体，但仍要混入很短的感叹、路人式发言、造型/吃饭/近况问题，避免所有评论都像采访提纲。",
-    "角色不需要回应每条评论。即使用户发了多条，也可以只看到其中一条、综合回应、完全没看到，或继续自己原本的话题。",
+    "角色不需要回应每条普通观众评论。即使用户发了多条，也可以只看到其中一条、综合回应、完全没看到，或继续自己原本的话题。",
+    "同 Community 艺人的评论比普通观众评论更容易被主播注意到，主播通常会回应，但仍然不要机械逐条必回；关系、人设、当时是否看到和正在做什么都可以影响回应。",
     "不要公开地下关系、私人秘密、只在私聊成立的称呼或单一对象的私密承诺。",
   ];
 }
@@ -544,10 +610,9 @@ function liveFormatRules(orientation: WeverseLiveOrientation, opening = false): 
 export async function generateWeverseLiveOpening(
   characterId: string,
   community: WeverseCommunity,
-  options?: { theme?: string; orientation?: WeverseLiveOrientation; now?: Date },
+  options?: { theme?: string; now?: Date },
 ): Promise<GeneratedWeverseLiveRound> {
   const now = options?.now ?? new Date();
-  const orientation = options?.orientation === "portrait" ? "portrait" : "landscape";
   const resolved = await resolveCharacterGeneration(characterId, community, { now });
   const theme = String(options?.theme || "").trim();
   const raw = await sendLLMRequest(
@@ -558,10 +623,12 @@ export async function generateWeverseLiveOpening(
       {
         role: "system",
         content: [
-          ...liveFormatRules(orientation, true),
+          ...liveFormatRules(true),
           theme ? `用户给了一个软主题：${theme}。这是方向，不是脚本；按人设自然发挥、允许跑题。` : "用户没有指定主题。请结合人设、近期经历、当前时间与状态，自然决定为什么突然开播以及想聊什么。",
+          "开场先只让最初开播者自己在 Stage 上，不要立刻安排其他艺人连线。",
           "生成本场直播标题、开场的 3~5 个短 segment（以说话为主；只有确实出现新的动作时才插入 action，不要求动作与说话交错）和 9~14 条初始观众留言。",
-          "只输出 JSON，不要 Markdown。格式：{\"title\":\"...\",\"segments\":[{\"kind\":\"action\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
+          `每个 segment 都可以带 characterId；当前只能是最初开播者 ${characterId}。`,
+          "只输出 JSON，不要 Markdown。格式：{\"title\":\"...\",\"segments\":[{\"kind\":\"action\",\"characterId\":\"角色ID\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"characterId\":\"角色ID\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
         ].join("\n"),
       },
       { role: "user", content: theme ? `现在按这个主题开一场 LIVE：${theme}` : "现在自然地开一场 Weverse LIVE。" },
@@ -571,11 +638,12 @@ export async function generateWeverseLiveOpening(
     { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
   );
   const parsed = extractJsonObject(raw);
-  const segments = normalizeLiveSegments(parsed?.segments);
+  const allowed = new Set([characterId]);
+  const segments = normalizeLiveSegments(parsed?.segments, allowed, characterId);
   const comments = normalizeLiveComments(parsed?.comments).slice(0, 14);
   const title = String(parsed?.title ?? "").trim() || `${resolved.character.name} LIVE`;
   if (!segments.length) throw new ChatEngineError("这次没有生成有效 LIVE 开场，请重试。");
-  return { title, segments, comments, shouldEnd: false };
+  return { title, segments, comments, artistComments: [], viewerJoins: [], viewerLeaves: [], participantJoins: [], participantLeaves: [], shouldEnd: false };
 }
 
 export async function generateWeverseLiveContinuation(
@@ -586,7 +654,13 @@ export async function generateWeverseLiveContinuation(
 ): Promise<GeneratedWeverseLiveRound> {
   const now = options?.now ?? new Date();
   const resolved = await resolveCharacterGeneration(characterId, community, { now });
-  const userComments = (options?.userComments || []).map((item) => item.trim()).filter(Boolean).slice(0, 8);
+  const userComments = (options?.userComments || []).map((item) => item.trim()).filter(Boolean).slice(0, 12);
+  const validCommunityIds = new Set(community.memberCharacterIds);
+  const currentActiveIds = new Set((live.activeCharacterIds?.length ? live.activeCharacterIds : [characterId]).filter((id) => validCommunityIds.has(id)));
+  currentActiveIds.add(characterId);
+  const currentViewerIds = new Set(live.viewerPresence.filter((item) => !item.leftAt && validCommunityIds.has(item.characterId) && !currentActiveIds.has(item.characterId)).map((item) => item.characterId));
+  const activeLabel = [...currentActiveIds].map((id) => `${id}(${liveMemberName(community, id)})`).join("、") || `${characterId}(${resolved.character.name})`;
+  const viewerLabel = [...currentViewerIds].map((id) => `${id}(${liveMemberName(community, id)})`).join("、") || "无";
   const raw = await sendLLMRequest(
     resolved.apiConfig,
     resolved.preset,
@@ -595,28 +669,63 @@ export async function generateWeverseLiveContinuation(
       {
         role: "system",
         content: [
-          ...liveFormatRules(live.orientation, false),
+          ...liveFormatRules(false),
           `本场 LIVE 标题：${live.title}`,
           live.theme ? `最初的软主题：${live.theme}` : "本场没有预设主题。",
           `这已经是第 ${Math.max(1, live.roundCount + 1)} 段推进。`,
-          liveTranscriptContext(live),
-          userComments.length ? `用户刚刚准备发送的多条弹幕如下。它们属于同一个观众，但你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有发弹幕，只是在继续观看。",
-          "生成接下来的 2~5 个短 segment 和 7~12 条新观众留言。以说话为主；只有角色确实做了新的动作、改变姿态或操作环境时才生成 action，动作没变就不要写 action。根据角色人设与当前情境判断是否已经自然到收尾时机。若该下播，shouldEnd=true，并让最后的 segment 自然告别；否则 false。",
-          "不要因为用户点了继续播放就机械延长；也不要因为已经播了几轮就强制结束。",
-          "只输出 JSON，不要 Markdown。格式：{\"segments\":[{\"kind\":\"action\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":true或false,\"endingReason\":\"可空\"}",
+          `当前正在 Stage 连线中的角色：${activeLabel}。`,
+          `当前作为普通艺人观众围观、但没有连线的角色：${viewerLabel}。`,
+          "只有同一个 Community 的成员才允许围观、发艺人评论或加入连线；严禁引入其他 Community 的角色。",
+          "同 Community 成员清单如下。characterId 必须严格从这些 ID 中选择；简略人设仅用于避免明显 OOC：",
+          liveCommunityRosterContext(community),
+          "艺人围观和艺人连线是两种不同状态：围观者只能在 artistComments 里留言，不可直接出现在 Stage 发言；只有 activeCharacterIds 或本轮 participantJoins 的角色才能出现在 segments。",
+          "艺人活动不是每轮必有。大多数时候可以完全没有 viewerJoins / artistComments / participantJoins。只有按关系、当时空闲程度和直播内容自然时才发生。",
+          "允许某个同 Community 成员中途进入直播围观；如果留言，写入 artistComments。艺人评论会在普通评论流里出现，同时被收进独立的‘艺人评论’入口。",
+          "允许普通围观艺人随后被主播邀请或自己接入连线：把角色 ID 放进 participantJoins；加入后该角色本轮即可在 segments 里说话。也允许已连线的非最初开播者中途离开，放进 participantLeaves。最初开播者若要离开，应直接 shouldEnd=true，而不是 participantLeaves。",
+          "如果 participantJoins 发生，不需要视频分屏描述；仍然是同一个文字 Live Stage。多人 Stage 里不要机械轮流说话，谁说几句、谁沉默都按现场自然发生。",
+          liveTranscriptContext(live, community),
+          userComments.length ? `用户自上次推进后已经公开发到直播间的评论如下。它们来自同一个普通观众，但你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有新的公开评论，只是在继续观看。",
+          "生成接下来的 2~5 个短 segment 和 7~12 条新普通观众留言。以说话为主；只有确实有新动作时才生成 action。",
+          "每个 segment 必须尽量提供 characterId。speech 的 characterId 只能来自当前 Stage 角色或本轮 participantJoins。action 若属于某个角色也给 characterId。",
+          "可以生成 0~2 条艺人评论；artistComments 里的角色不能是当前 Stage 角色。主播通常会更容易注意艺人评论并自然回应，但不是强制。",
+          "根据角色人设与当前情境判断是否自然到收尾时机。若该下播，shouldEnd=true，并让最后的 segment 自然告别；否则 false。不要因为用户点了继续播放就机械延长，也不要因为已经播了几轮就强制结束。",
+          "只输出 JSON，不要 Markdown。格式：{\"segments\":[{\"kind\":\"speech\",\"characterId\":\"角色ID\",\"original\":\"原话\",\"translated\":\"中文\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"artistComments\":[{\"characterId\":\"同社区角色ID\",\"original\":\"艺人原话\",\"translated\":\"中文\"}],\"viewerJoins\":[\"角色ID\"],\"viewerLeaves\":[\"角色ID\"],\"participantJoins\":[\"角色ID\"],\"participantLeaves\":[\"角色ID\"],\"shouldEnd\":true或false,\"endingReason\":\"可空\"}",
         ].filter(Boolean).join("\n"),
       },
-      { role: "user", content: userComments.length ? "把这些弹幕放进直播间并继续这一小段 LIVE。" : "继续播放下一小段 LIVE。" },
+      { role: "user", content: userComments.length ? "这些评论已经发在直播间里。结合它们和当前现场，继续这一小段 LIVE。" : "继续播放下一小段 LIVE。" },
     ],
     resolved.regexes,
     { characterName: `Weverse LIVE:${resolved.character.name}`, userName: resolved.userName },
     { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
   );
   const parsed = extractJsonObject(raw);
-  const segments = normalizeLiveSegments(parsed?.segments);
+
+  const primaryHost = live.hostCharacterIds[0] || characterId;
+  const participantJoinExclude = new Set(currentActiveIds);
+  const participantJoins = normalizeCharacterIds(parsed?.participantJoins, validCommunityIds, { exclude: participantJoinExclude, max: 2 });
+  const activeForSegments = new Set([...currentActiveIds, ...participantJoins]);
+  const participantLeaveEligible = new Set([...currentActiveIds].filter((id) => id !== primaryHost));
+  const participantLeaves = normalizeCharacterIds(parsed?.participantLeaves, participantLeaveEligible, { max: 2 });
+
+  const viewerJoinExclude = new Set([...activeForSegments, ...currentViewerIds]);
+  const viewerJoins = normalizeCharacterIds(parsed?.viewerJoins, validCommunityIds, { exclude: viewerJoinExclude, max: 2 });
+  const viewerPoolForComments = new Set([...currentViewerIds, ...viewerJoins]);
+  for (const id of participantJoins) viewerPoolForComments.delete(id);
+  const viewerLeaves = normalizeCharacterIds(parsed?.viewerLeaves, viewerPoolForComments, { max: 2 });
+
+  const segments = normalizeLiveSegments(parsed?.segments, activeForSegments, primaryHost);
   const comments = normalizeLiveComments(parsed?.comments).slice(0, 12);
+  const artistComments = normalizeLiveArtistComments(parsed?.artistComments, validCommunityIds, activeForSegments)
+    .filter((item) => !viewerLeaves.includes(item.characterId))
+    .slice(0, 3);
+  for (const item of artistComments) {
+    if (!currentViewerIds.has(item.characterId) && !viewerJoins.includes(item.characterId)) viewerJoins.push(item.characterId);
+  }
+
   const shouldEnd = parsed?.shouldEnd === true || String(parsed?.shouldEnd).toLowerCase() === "true";
   const endingReason = String(parsed?.endingReason ?? "").trim() || undefined;
-  if (!segments.length && !comments.length) throw new ChatEngineError("这次 LIVE 没有生成新的内容，请重试。");
-  return { segments, comments, shouldEnd, endingReason };
+  if (!segments.length && !comments.length && !artistComments.length && !participantJoins.length && !participantLeaves.length) {
+    throw new ChatEngineError("这次 LIVE 没有生成新的内容，请重试。");
+  }
+  return { segments, comments, artistComments, viewerJoins, viewerLeaves, participantJoins, participantLeaves, shouldEnd, endingReason };
 }

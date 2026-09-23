@@ -10,6 +10,7 @@ export type WeverseMemberProfile = {
   displayName?: string;
   avatarUrl?: string;
   coverUrl?: string;
+  liveCoverUrl?: string;
   bio?: string;
   /** 仅记录角色自主修改，用于低频冷却；用户手动编辑/推荐头像不占用。 */
   lastAutonomousNameAt?: number;
@@ -52,7 +53,7 @@ export type WeversePost = {
   comments: WeverseComment[];
 };
 
-export type WeverseLiveOrientation = "landscape" | "portrait";
+export type WeverseLiveOrientation = "landscape";
 export type WeverseLiveStatus = "live" | "ended";
 export type WeverseLiveSegmentKind = "speech" | "action" | "system";
 export type WeverseLiveSegment = {
@@ -65,28 +66,44 @@ export type WeverseLiveSegment = {
 };
 export type WeverseLiveComment = {
   id: string;
-  authorType: "user" | "fan";
+  authorType: "user" | "fan" | "artist";
   authorId: string;
   authorName: string;
+  authorAvatarUrl?: string;
   body: string;
   originalBody?: string;
   createdAt: number;
 };
+export type WeverseLivePresence = {
+  characterId: string;
+  joinedAt: number;
+  leftAt?: number;
+  commented?: boolean;
+};
 export type WeverseLive = {
   id: string;
   communityId: string;
+  /** 本场实际作为主播/连线嘉宾出现过的全部角色。第一个始终是最初开播者。 */
   hostCharacterIds: string[];
+  /** 当前仍在 Stage 上的角色；结束后为空。 */
+  activeCharacterIds: string[];
+  participantPresence: WeverseLivePresence[];
+  viewerPresence: WeverseLivePresence[];
   liveType: "visual";
   orientation: WeverseLiveOrientation;
   status: WeverseLiveStatus;
   title: string;
   theme?: string;
+  /** Live 列表/回放卡片封面；正在直播页不重复展示。 */
+  coverUrl?: string;
   startedAt: number;
   endedAt?: number;
   viewerCount: number;
   peakViewerCount: number;
   heartCount: number;
   roundCount: number;
+  /** 已经提交给角色处理过的用户评论时间上界。 */
+  lastConsumedUserCommentAt?: number;
   segments: WeverseLiveSegment[];
   comments: WeverseLiveComment[];
 };
@@ -100,14 +117,14 @@ export type WeverseSettings = {
   generationScope: "current" | "all";
   notifications: { artistReply: boolean; fanReply: boolean; artistPost: boolean; officialPost: boolean; live: boolean };
 };
-export type WeverseState = { version: 5; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
+export type WeverseState = { version: 6; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
 
 export const DEFAULT_WEV_SETTINGS: WeverseSettings = {
   translationDefault: "translated", autoTranslateComments: true, fanActivity: "normal", fanLanguagePreset: "korean_mixed", generationScope: "current",
   notifications: { artistReply: true, fanReply: true, artistPost: true, officialPost: true, live: true },
 };
-const EMPTY_STATE: WeverseState = { version: 5, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
-function cloneEmpty(): WeverseState { return { version: 5, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
+const EMPTY_STATE: WeverseState = { version: 6, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
+function cloneEmpty(): WeverseState { return { version: 6, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
 function uniqueStrings(value: unknown): string[] { return Array.isArray(value) ? Array.from(new Set(value.filter((v): v is string => typeof v === "string" && Boolean(v.trim())).map(v => v.trim()))) : []; }
 function finiteNonNegative(value: unknown, fallback = 0): number { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback; }
 function normalizeSettings(value: unknown): WeverseSettings {
@@ -136,30 +153,51 @@ function normalizeLiveComment(raw: unknown): WeverseLiveComment | null {
   if (typeof item.id !== "string") return null;
   const body = typeof item.body === "string" ? item.body.trim() : "";
   if (!body) return null;
+  const authorType: WeverseLiveComment["authorType"] = item.authorType === "user" || item.authorType === "artist" ? item.authorType : "fan";
   return {
-    id: item.id, authorType: item.authorType === "user" ? "user" : "fan",
-    authorId: typeof item.authorId === "string" && item.authorId ? item.authorId : "fan",
-    authorName: typeof item.authorName === "string" && item.authorName.trim() ? item.authorName.trim() : "익명팬",
+    id: item.id, authorType,
+    authorId: typeof item.authorId === "string" && item.authorId ? item.authorId : authorType === "artist" ? "artist" : "fan",
+    authorName: typeof item.authorName === "string" && item.authorName.trim() ? item.authorName.trim() : authorType === "artist" ? "Artist" : "익명팬",
+    authorAvatarUrl: typeof item.authorAvatarUrl === "string" && item.authorAvatarUrl ? item.authorAvatarUrl : undefined,
     body, originalBody: typeof item.originalBody === "string" && item.originalBody.trim() ? item.originalBody.trim() : undefined,
     createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
   };
+}
+function normalizeLivePresence(raw: unknown): WeverseLivePresence | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Partial<WeverseLivePresence>;
+  if (typeof item.characterId !== "string" || !item.characterId.trim()) return null;
+  const joinedAt = typeof item.joinedAt === "number" && Number.isFinite(item.joinedAt) ? item.joinedAt : Date.now();
+  return { characterId: item.characterId.trim(), joinedAt, leftAt: typeof item.leftAt === "number" && Number.isFinite(item.leftAt) ? item.leftAt : undefined, commented: item.commented === true };
 }
 function normalizeLive(raw: unknown): WeverseLive | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Partial<WeverseLive>;
   if (typeof item.id !== "string" || typeof item.communityId !== "string") return null;
   const startedAt = typeof item.startedAt === "number" && Number.isFinite(item.startedAt) ? item.startedAt : Date.now();
+  const status: WeverseLiveStatus = item.status === "ended" ? "ended" : "live";
   const segments = Array.isArray(item.segments) ? item.segments.map(normalizeLiveSegment).filter((v): v is WeverseLiveSegment => Boolean(v)) : [];
   const comments = Array.isArray(item.comments) ? item.comments.map(normalizeLiveComment).filter((v): v is WeverseLiveComment => Boolean(v)) : [];
   const viewerCount = finiteNonNegative(item.viewerCount, 0);
+  const hostCharacterIds = uniqueStrings(item.hostCharacterIds);
+  const activeCharacterIds = status === "ended" ? [] : (uniqueStrings((item as any).activeCharacterIds).length ? uniqueStrings((item as any).activeCharacterIds) : hostCharacterIds.slice());
+  const participantPresenceRaw = Array.isArray((item as any).participantPresence) ? (item as any).participantPresence : [];
+  const participantPresence = participantPresenceRaw.map(normalizeLivePresence).filter((v: WeverseLivePresence | null): v is WeverseLivePresence => Boolean(v));
+  if (!participantPresence.length) {
+    for (const characterId of hostCharacterIds) participantPresence.push({ characterId, joinedAt: startedAt, leftAt: status === "ended" ? (typeof item.endedAt === "number" ? item.endedAt : startedAt) : undefined });
+  }
+  const viewerPresenceRaw = Array.isArray((item as any).viewerPresence) ? (item as any).viewerPresence : [];
+  const viewerPresence = viewerPresenceRaw.map(normalizeLivePresence).filter((v: WeverseLivePresence | null): v is WeverseLivePresence => Boolean(v));
   return {
-    id: item.id, communityId: item.communityId, hostCharacterIds: uniqueStrings(item.hostCharacterIds), liveType: "visual",
-    orientation: item.orientation === "portrait" ? "portrait" : "landscape",
-    status: item.status === "ended" ? "ended" : "live", title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "LIVE",
-    theme: typeof item.theme === "string" && item.theme.trim() ? item.theme.trim() : undefined, startedAt,
+    id: item.id, communityId: item.communityId, hostCharacterIds, activeCharacterIds, participantPresence, viewerPresence, liveType: "visual", orientation: "landscape",
+    status, title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "LIVE",
+    theme: typeof item.theme === "string" && item.theme.trim() ? item.theme.trim() : undefined,
+    coverUrl: typeof (item as any).coverUrl === "string" && (item as any).coverUrl ? (item as any).coverUrl : undefined, startedAt,
     endedAt: typeof item.endedAt === "number" && Number.isFinite(item.endedAt) ? item.endedAt : undefined,
     viewerCount, peakViewerCount: Math.max(viewerCount, finiteNonNegative(item.peakViewerCount, viewerCount)),
-    heartCount: finiteNonNegative(item.heartCount, 0), roundCount: finiteNonNegative(item.roundCount, 0), segments, comments,
+    heartCount: finiteNonNegative(item.heartCount, 0), roundCount: finiteNonNegative(item.roundCount, 0),
+    lastConsumedUserCommentAt: typeof (item as any).lastConsumedUserCommentAt === "number" && Number.isFinite((item as any).lastConsumedUserCommentAt) ? (item as any).lastConsumedUserCommentAt : startedAt - 1,
+    segments, comments,
   };
 }
 
@@ -204,7 +242,7 @@ function normalizeState(raw: unknown): WeverseState {
     id: item.id, communityId: item.communityId, title: item.title, body: typeof item.body === "string" ? item.body : "", originalBody: typeof item.originalBody === "string" ? item.originalBody : undefined, imageUrl: typeof item.imageUrl === "string" ? item.imageUrl : undefined, photoLibraryId: typeof item.photoLibraryId === "string" ? item.photoLibraryId : undefined, photoSource: item.photoSource === "album" || item.photoSource === "generated" || item.photoSource === "manual" ? item.photoSource : undefined, photoDescription: typeof item.photoDescription === "string" ? item.photoDescription : undefined, createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(), historical: item.historical === true,
   }));
   const lives = Array.isArray((source as any).lives) ? (source as any).lives.map(normalizeLive).filter((v: WeverseLive | null): v is WeverseLive => Boolean(v)) : [];
-  return { version: 5, communities, posts, notices, lives, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
+  return { version: 6, communities, posts, notices, lives, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
 }
 export function loadWeverseState(): WeverseState { if (typeof window === "undefined") return EMPTY_STATE; try { const raw=kvGet(WEV_STATE_KEY); return raw ? normalizeState(JSON.parse(raw)) : cloneEmpty(); } catch { return cloneEmpty(); } }
 export function saveWeverseState(state: WeverseState): WeverseState { const normalized=normalizeState(state); if (typeof window !== "undefined") { kvSet(WEV_STATE_KEY, JSON.stringify(normalized)); window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT)); } return normalized; }

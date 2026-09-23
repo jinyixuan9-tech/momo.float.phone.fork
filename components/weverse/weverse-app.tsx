@@ -43,6 +43,7 @@ import {
   deleteWeverseCommunity,
   deleteWeversePost,
   deleteWeverseNotice,
+  deleteWeverseLive,
   loadWeverseState,
   updateWeversePost,
   updateWeverseNotice,
@@ -59,7 +60,6 @@ import {
   type WeverseSettings,
   type WeverseHistoryMode,
   type WeverseLive,
-  type WeverseLiveOrientation,
   type WeverseState,
 } from "@/lib/weverse-storage";
 import {
@@ -75,6 +75,8 @@ import { resolveMediaForUse } from "@/lib/media-resolver";
 import {
   recordWeverseArtistPostEvent,
   recordWeverseArtistReplyEvent,
+  recordWeverseLiveParticipationEvent,
+  recordWeverseLiveViewerEvent,
   deleteWeverseProjectionEventForComment,
   deleteWeverseProjectionEventsForPost,
 } from "@/lib/weverse-memory";
@@ -131,6 +133,7 @@ type MemberEditorDraft = {
   displayName: string;
   avatarUrl: string;
   coverUrl: string;
+  liveCoverUrl: string;
   bio: string;
 };
 
@@ -151,7 +154,7 @@ type LiveCreatorDraft = {
   communityId: string;
   characterId: string;
   theme: string;
-  orientation: WeverseLiveOrientation;
+  coverUrl: string;
 };
 
 type AiMenuContext =
@@ -213,6 +216,14 @@ function formatCompactCount(value: number): string {
   }
   const n = count / 100000000;
   return `${n.toFixed(n >= 10 ? 1 : 1).replace(/\.0$/, "")}亿`;
+}
+
+function formatLiveDuration(startedAt: number, endedAt?: number): string {
+  const seconds = Math.max(0, Math.floor(((endedAt || Date.now()) - startedAt) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 function dateInputValue(ts?: number): string {
@@ -291,6 +302,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const [liveCreator, setLiveCreator] = useState<LiveCreatorDraft | null>(null);
   const [generatingLiveId, setGeneratingLiveId] = useState<string | null>(null);
   const [startingLive, setStartingLive] = useState(false);
+  const [editingReplayCoverId, setEditingReplayCoverId] = useState<string | null>(null);
 
   const [draftText, setDraftText] = useState("");
   const [draftImageUrl, setDraftImageUrl] = useState("");
@@ -316,6 +328,9 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const officialAvatarInputRef = useRef<HTMLInputElement>(null);
   const memberAvatarInputRef = useRef<HTMLInputElement>(null);
   const memberCoverInputRef = useRef<HTMLInputElement>(null);
+  const memberLiveCoverInputRef = useRef<HTMLInputElement>(null);
+  const liveCreatorCoverInputRef = useRef<HTMLInputElement>(null);
+  const replayCoverInputRef = useRef<HTMLInputElement>(null);
   const userAvatarInputRef = useRef<HTMLInputElement>(null);
   const officialMediaUploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -391,6 +406,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       displayName: override?.displayName?.trim() || char?.name?.trim() || "未命名成员",
       avatarUrl: override?.avatarUrl || char?.avatar || "",
       coverUrl: override?.coverUrl || community.coverUrl || "",
+      liveCoverUrl: override?.liveCoverUrl || "",
       bio: override?.bio || "",
     };
   };
@@ -496,7 +512,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
   const openMemberEditor = (community: WeverseCommunity, characterId: string) => {
     const member = resolveMember(community, characterId);
-    setMemberEditor({ communityId: community.id, characterId, displayName: member.displayName, avatarUrl: member.avatarUrl, coverUrl: community.memberProfiles[characterId]?.coverUrl || "", bio: member.bio });
+    setMemberEditor({ communityId: community.id, characterId, displayName: member.displayName, avatarUrl: member.avatarUrl, coverUrl: community.memberProfiles[characterId]?.coverUrl || "", liveCoverUrl: community.memberProfiles[characterId]?.liveCoverUrl || "", bio: member.bio });
   };
 
   const saveMemberEditor = () => {
@@ -514,6 +530,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
           displayName: memberEditor.displayName.trim() || char?.name || "成员",
           avatarUrl: memberEditor.avatarUrl || undefined,
           coverUrl: memberEditor.coverUrl || undefined,
+          liveCoverUrl: memberEditor.liveCoverUrl || undefined,
           bio: memberEditor.bio.trim() || undefined,
         },
       },
@@ -541,28 +558,101 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const openLiveCreator = (community: WeverseCommunity, characterId?: string) => {
     const chosen = characterId || community.memberCharacterIds[0] || "";
     if (!chosen) return onNotice?.("这个 Community 还没有成员");
-    const active = state.lives.find((live) => live.communityId === community.id && live.status === "live" && live.hostCharacterIds.includes(chosen));
+    const active = state.lives.find((live) => live.communityId === community.id && live.status === "live" && (live.activeCharacterIds || live.hostCharacterIds).includes(chosen));
     if (active) return navigate({ type: "live", liveId: active.id });
-    setLiveCreator({ communityId: community.id, characterId: chosen, theme: "", orientation: "landscape" });
+    const member = resolveMember(community, chosen);
+    setLiveCreator({ communityId: community.id, characterId: chosen, theme: "", coverUrl: member.liveCoverUrl || "" });
   };
 
-  const scheduleLiveSegments = (characterId: string, items: Array<{ kind: "speech" | "action"; original: string; translated?: string }>, startAt: number) => {
+  const scheduleLiveSegments = (
+    defaultCharacterId: string,
+    items: Array<{ kind: "speech" | "action"; characterId?: string; original: string; translated?: string }>,
+    startAt: number,
+  ) => {
     let cursor = startAt;
     return items.map((item, index) => {
-      cursor += index === 0 ? 250 : item.kind === "action" ? 1150 : 1850;
-      return { id: createWeverseId("wvs_live_segment"), kind: item.kind, characterId: item.kind === "speech" ? characterId : undefined, original: item.original, translated: item.translated, createdAt: cursor } as const;
+      const textWeight = Math.min(1800, Math.max(0, item.original.length - 18) * 28);
+      const gap = item.kind === "action" ? 1200 + Math.round(Math.random() * 700) : 2100 + Math.round(Math.random() * 1100) + textWeight;
+      cursor += index === 0 ? 650 : gap;
+      return {
+        id: createWeverseId("wvs_live_segment"), kind: item.kind, characterId: item.characterId || defaultCharacterId,
+        original: item.original, translated: item.translated, createdAt: cursor,
+      } as const;
     });
   };
 
   const scheduleLiveFanComments = (items: Array<{ displayName: string; original: string; translated: string }>, startAt: number) => {
-    let cursor = startAt + 650;
+    let cursor = startAt + 420;
     return items.map((item) => {
-      cursor += 650 + Math.round(Math.random() * 700);
+      cursor += 850 + Math.round(Math.random() * 900);
       return {
         id: createWeverseId("wvs_live_fan"), authorType: "fan" as const, authorId: createWeverseId("live_fan"), authorName: item.displayName,
         body: item.translated, originalBody: item.original !== item.translated ? item.original : undefined, createdAt: cursor,
       };
     });
+  };
+
+  const scheduleLiveArtistComments = (
+    community: WeverseCommunity,
+    items: Array<{ characterId: string; original: string; translated: string }>,
+    startAt: number,
+  ) => {
+    let cursor = startAt + 900;
+    return items.map((item) => {
+      cursor += 1100 + Math.round(Math.random() * 1400);
+      const member = resolveMember(community, item.characterId);
+      return {
+        id: createWeverseId("wvs_live_artist"), authorType: "artist" as const, authorId: item.characterId, authorName: member.displayName,
+        authorAvatarUrl: member.avatarUrl || undefined,
+        body: item.translated, originalBody: item.original !== item.translated ? item.original : undefined, createdAt: cursor,
+      };
+    });
+  };
+
+  const recordLiveMemories = (live: WeverseLive) => {
+    const community = communityMap.get(live.communityId);
+    if (!community) return;
+    const participantIds = new Set(live.participantPresence.map((item) => item.characterId));
+    const participantNames = live.hostCharacterIds.map((id) => resolveMember(community, id).displayName);
+    for (const presence of live.participantPresence) {
+      const member = resolveMember(community, presence.characterId);
+      const ownSpeech = live.segments
+        .filter((segment) => segment.kind === "speech" && segment.characterId === presence.characterId)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-3)
+        .map((segment) => segment.original);
+      recordWeverseLiveParticipationEvent({
+        liveId: live.id,
+        characterId: presence.characterId,
+        characterName: member.displayName,
+        communityName: community.name,
+        startedAt: presence.joinedAt,
+        endedAt: presence.leftAt || live.endedAt,
+        role: live.hostCharacterIds[0] === presence.characterId ? "host" : "guest",
+        coParticipants: participantNames.filter((name) => name !== member.displayName),
+        ownSpeech,
+        title: live.title,
+      });
+    }
+    for (const presence of live.viewerPresence) {
+      if (participantIds.has(presence.characterId)) continue;
+      const member = resolveMember(community, presence.characterId);
+      const ownComments = live.comments
+        .filter((comment) => comment.authorType === "artist" && comment.authorId === presence.characterId)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-3)
+        .map((comment) => comment.originalBody || comment.body);
+      recordWeverseLiveViewerEvent({
+        liveId: live.id,
+        characterId: presence.characterId,
+        characterName: member.displayName,
+        communityName: community.name,
+        hostNames: participantNames,
+        watchedAt: presence.leftAt || live.endedAt || presence.joinedAt,
+        comments: ownComments,
+        title: live.title,
+      });
+    }
   };
 
   const startLive = async () => {
@@ -573,17 +663,22 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     setStartingLive(true);
     onNotice?.("正在准备 LIVE…");
     try {
-      const now = Date.now();
-      const generated = await generateWeverseLiveOpening(liveCreator.characterId, community, { theme: liveCreator.theme.trim() || undefined, orientation: liveCreator.orientation, now: new Date(now) });
+      const requestAt = Date.now();
+      const generated = await generateWeverseLiveOpening(liveCreator.characterId, community, { theme: liveCreator.theme.trim() || undefined, now: new Date(requestAt) });
       const member = resolveMember(community, liveCreator.characterId);
       const viewerBase = Math.max(1000, community.fanCount || 100000);
       const viewerCount = Math.max(320, Math.round(viewerBase * (0.018 + Math.random() * 0.05)));
-      const segments = scheduleLiveSegments(liveCreator.characterId, generated.segments, now);
-      const comments = scheduleLiveFanComments(generated.comments, now);
+      // 关键：LLM 返回后才开始排播放时间，避免生成耗时把整轮内容“提前播完”。
+      const playbackStart = Date.now() + 250;
+      const segments = scheduleLiveSegments(liveCreator.characterId, generated.segments, playbackStart);
+      const comments = scheduleLiveFanComments(generated.comments, playbackStart);
       const live: WeverseLive = {
-        id: createWeverseId("wvs_live"), communityId: community.id, hostCharacterIds: [liveCreator.characterId], liveType: "visual", orientation: liveCreator.orientation,
-        status: "live", title: generated.title || `${member.displayName} LIVE`, theme: liveCreator.theme.trim() || undefined, startedAt: now,
-        viewerCount, peakViewerCount: viewerCount, heartCount: Math.max(120, Math.round(viewerCount * (1.5 + Math.random() * 3.5))), roundCount: 0, segments, comments,
+        id: createWeverseId("wvs_live"), communityId: community.id, hostCharacterIds: [liveCreator.characterId], activeCharacterIds: [liveCreator.characterId],
+        participantPresence: [{ characterId: liveCreator.characterId, joinedAt: playbackStart }], viewerPresence: [], liveType: "visual", orientation: "landscape",
+        status: "live", title: generated.title || `${member.displayName} LIVE`, theme: liveCreator.theme.trim() || undefined,
+        coverUrl: liveCreator.coverUrl || member.liveCoverUrl || undefined, startedAt: playbackStart,
+        viewerCount, peakViewerCount: viewerCount, heartCount: Math.max(120, Math.round(viewerCount * (1.5 + Math.random() * 3.5))), roundCount: 0,
+        lastConsumedUserCommentAt: playbackStart - 1, segments, comments,
       };
       setState(addWeverseLive(live));
       setLiveCreator(null);
@@ -596,37 +691,110 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     }
   };
 
-  const advanceLive = async (live: WeverseLive, userComments: string[] = []) => {
+  const sendLiveUserComment = (live: WeverseLive, body: string) => {
+    if (live.status !== "live") return;
+    const value = body.trim();
+    if (!value) return;
+    const current = loadWeverseState().lives.find((item) => item.id === live.id) || live;
+    const row = {
+      id: createWeverseId("wvs_live_user"), authorType: "user" as const, authorId: userIdentity?.id || "user", authorName: userName,
+      body: value, createdAt: Date.now(),
+    };
+    setState(updateWeverseLive(live.id, { comments: [...current.comments, row] }));
+  };
+
+  const advanceLive = async (live: WeverseLive) => {
     if (generatingLiveId || live.status !== "live") return;
     const community = communityMap.get(live.communityId);
-    const characterId = live.hostCharacterIds[0];
-    if (!community || !characterId) return onNotice?.("这场 LIVE 缺少成员信息");
+    const primaryCharacterId = live.hostCharacterIds[0];
+    if (!community || !primaryCharacterId) return onNotice?.("这场 LIVE 缺少成员信息");
+    const currentBefore = loadWeverseState().lives.find((item) => item.id === live.id) || live;
+    const consumeThrough = Date.now();
+    const consumedAfter = currentBefore.lastConsumedUserCommentAt ?? currentBefore.startedAt - 1;
+    const userRows = currentBefore.comments
+      .filter((comment) => comment.authorType === "user" && comment.createdAt > consumedAfter && comment.createdAt <= consumeThrough)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-12);
+    const cleanUserComments = userRows.map((item) => item.body.trim()).filter(Boolean);
     setGeneratingLiveId(live.id);
-    const now = Date.now();
-    const cleanUserComments = userComments.map((item) => item.trim()).filter(Boolean).slice(0, 8);
-    const userRows = cleanUserComments.map((body, index) => ({
-      id: createWeverseId("wvs_live_user"), authorType: "user" as const, authorId: userIdentity?.id || "user", authorName: userName,
-      body, createdAt: now + index * 35,
-    }));
-    let workingLive: WeverseLive = userRows.length ? { ...live, comments: [...live.comments, ...userRows] } : live;
-    if (userRows.length) setState(updateWeverseLive(live.id, { comments: workingLive.comments }));
     try {
-      const generated = await generateWeverseLiveContinuation(characterId, community, workingLive, { userComments: cleanUserComments, now: new Date(now) });
-      const segments = scheduleLiveSegments(characterId, generated.segments, now + 350);
-      const comments = scheduleLiveFanComments(generated.comments, now + 550);
-      const current = loadWeverseState().lives.find((item) => item.id === live.id) || workingLive;
+      const generated = await generateWeverseLiveContinuation(primaryCharacterId, community, currentBefore, { userComments: cleanUserComments, now: new Date(consumeThrough) });
+      const current = loadWeverseState().lives.find((item) => item.id === live.id) || currentBefore;
       if (current.status !== "live") return;
+
+      const playbackStart = Date.now() + 300;
+      const validIds = new Set(community.memberCharacterIds);
+      let activeCharacterIds = [...new Set((current.activeCharacterIds?.length ? current.activeCharacterIds : [primaryCharacterId]).filter((id) => validIds.has(id)))];
+      if (!activeCharacterIds.includes(primaryCharacterId)) activeCharacterIds.unshift(primaryCharacterId);
+      let hostCharacterIds = [...new Set(current.hostCharacterIds)];
+      let participantPresence = current.participantPresence.map((item) => ({ ...item }));
+      let viewerPresence = current.viewerPresence.map((item) => ({ ...item }));
+
+      const joinSystemSegments: WeverseLive["segments"] = [];
+      let joinCursor = playbackStart;
+      for (const characterId of generated.viewerJoins) {
+        if (!validIds.has(characterId) || activeCharacterIds.includes(characterId)) continue;
+        if (!viewerPresence.some((item) => item.characterId === characterId && !item.leftAt)) viewerPresence.push({ characterId, joinedAt: playbackStart });
+      }
+      for (const artistComment of generated.artistComments) {
+        if (!validIds.has(artistComment.characterId) || activeCharacterIds.includes(artistComment.characterId)) continue;
+        const open = viewerPresence.find((item) => item.characterId === artistComment.characterId && !item.leftAt);
+        if (open) open.commented = true;
+        else viewerPresence.push({ characterId: artistComment.characterId, joinedAt: playbackStart, commented: true });
+      }
+      for (const characterId of generated.participantJoins) {
+        if (!validIds.has(characterId) || activeCharacterIds.includes(characterId)) continue;
+        const openViewer = viewerPresence.find((item) => item.characterId === characterId && !item.leftAt);
+        if (openViewer) openViewer.leftAt = playbackStart;
+        activeCharacterIds.push(characterId);
+        if (!hostCharacterIds.includes(characterId)) hostCharacterIds.push(characterId);
+        participantPresence.push({ characterId, joinedAt: playbackStart });
+        joinCursor += 500;
+        joinSystemSegments.push({ id: createWeverseId("wvs_live_system"), kind: "system", characterId, original: `${resolveMember(community, characterId).displayName} 加入了 LIVE`, createdAt: joinCursor });
+      }
+
+      const segments = scheduleLiveSegments(primaryCharacterId, generated.segments, Math.max(playbackStart + 150, joinCursor));
+      const lastSegmentAt = segments.reduce((max, item) => Math.max(max, item.createdAt), joinCursor);
+      const leaveSystemSegments: WeverseLive["segments"] = [];
+      let leaveCursor = lastSegmentAt;
+      for (const characterId of generated.participantLeaves) {
+        if (characterId === primaryCharacterId || !activeCharacterIds.includes(characterId)) continue;
+        activeCharacterIds = activeCharacterIds.filter((id) => id !== characterId);
+        const openPresence = [...participantPresence].reverse().find((item) => item.characterId === characterId && !item.leftAt);
+        leaveCursor += 850;
+        if (openPresence) openPresence.leftAt = leaveCursor;
+        leaveSystemSegments.push({ id: createWeverseId("wvs_live_system"), kind: "system", characterId, original: `${resolveMember(community, characterId).displayName} 离开了 LIVE`, createdAt: leaveCursor });
+      }
+      for (const characterId of generated.viewerLeaves) {
+        const openViewer = [...viewerPresence].reverse().find((item) => item.characterId === characterId && !item.leftAt);
+        if (openViewer) openViewer.leftAt = Math.max(playbackStart, leaveCursor);
+      }
+
+      const comments = scheduleLiveFanComments(generated.comments, playbackStart + 100);
+      const artistComments = scheduleLiveArtistComments(community, generated.artistComments, playbackStart + 250);
+      const allSegments = [...joinSystemSegments, ...segments, ...leaveSystemSegments];
+      const allComments = [...comments, ...artistComments];
       const early = current.roundCount < 3;
       const factor = early ? (1.08 + Math.random() * 0.24) : (0.96 + Math.random() * 0.16);
       const viewerCount = Math.max(120, Math.round(current.viewerCount * factor));
-      const lastSegmentAt = segments.reduce((max, item) => Math.max(max, item.createdAt), now);
-      const lastCommentAt = comments.reduce((max, item) => Math.max(max, item.createdAt), now);
-      const lastContentAt = Math.max(lastSegmentAt, lastCommentAt);
-      const endedAt = generated.shouldEnd ? lastContentAt + 1200 : undefined;
+      const lastContentAt = Math.max(
+        playbackStart,
+        ...allSegments.map((item) => item.createdAt),
+        ...allComments.map((item) => item.createdAt),
+      );
+      const endedAt = generated.shouldEnd ? lastContentAt + 1400 : undefined;
       const next: Partial<WeverseLive> = {
-        segments: [...current.segments, ...segments], comments: [...current.comments, ...comments], viewerCount,
-        peakViewerCount: Math.max(current.peakViewerCount, viewerCount), heartCount: current.heartCount + Math.max(40, Math.round(viewerCount * (0.14 + Math.random() * 0.28))),
+        hostCharacterIds,
+        activeCharacterIds,
+        participantPresence,
+        viewerPresence,
+        segments: [...current.segments, ...allSegments],
+        comments: [...current.comments, ...allComments],
+        viewerCount,
+        peakViewerCount: Math.max(current.peakViewerCount, viewerCount),
+        heartCount: current.heartCount + Math.max(20, Math.round(viewerCount * (0.08 + Math.random() * 0.18))),
         roundCount: current.roundCount + 1,
+        lastConsumedUserCommentAt: userRows.length ? Math.max(...userRows.map((item) => item.createdAt)) : current.lastConsumedUserCommentAt,
         ...(generated.shouldEnd ? { endedAt } : {}),
       };
       setState(updateWeverseLive(live.id, next));
@@ -638,20 +806,71 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     }
   };
 
-  const addLiveHeart = (live: WeverseLive) => setState(updateWeverseLive(live.id, { heartCount: live.heartCount + 1 }));
+  const addLiveHeart = (live: WeverseLive) => {
+    const current = loadWeverseState().lives.find((item) => item.id === live.id) || live;
+    setState(updateWeverseLive(live.id, { heartCount: current.heartCount + 1 }));
+  };
+
+  const finalizeLive = (live: WeverseLive) => {
+    const current = loadWeverseState().lives.find((item) => item.id === live.id) || live;
+    if (current.status === "ended") return;
+    const endAt = current.endedAt || Date.now();
+    const participantPresence = current.participantPresence.map((item) => item.leftAt ? item : { ...item, leftAt: endAt });
+    const viewerPresence = current.viewerPresence.map((item) => item.leftAt ? item : { ...item, leftAt: endAt });
+    const finalized: WeverseLive = { ...current, status: "ended", endedAt: endAt, activeCharacterIds: [], participantPresence, viewerPresence };
+    setState(updateWeverseLive(current.id, finalized));
+    recordLiveMemories(finalized);
+  };
 
   const manuallyEndLive = (live: WeverseLive) => {
     const now = Date.now();
     const current = loadWeverseState().lives.find((item) => item.id === live.id) || live;
-    setState(updateWeverseLive(live.id, {
+    const participantPresence = current.participantPresence.map((item) => item.leftAt ? item : { ...item, leftAt: now });
+    const viewerPresence = current.viewerPresence.map((item) => item.leftAt ? item : { ...item, leftAt: now });
+    const finalized: WeverseLive = {
+      ...current,
       status: "ended",
       endedAt: now,
+      activeCharacterIds: [],
+      participantPresence,
+      viewerPresence,
       segments: current.segments.filter((item) => item.createdAt <= now),
       comments: current.comments.filter((item) => item.createdAt <= now),
-    }));
+    };
+    setState(updateWeverseLive(live.id, finalized));
+    recordLiveMemories(finalized);
     back();
     onNotice?.("LIVE 已结束");
   };
+
+  const removeLiveReplay = (live: WeverseLive) => {
+    if (live.status !== "ended") return;
+    if (!window.confirm(`删除回放「${live.title}」？删除后会从成员 LIVE 和 Community 的 LIVE·Media 中一起移除。`)) return;
+    setState(deleteWeverseLive(live.id));
+    onNotice?.("直播回放已删除");
+  };
+
+  const applyReplayCoverFile = async (file?: File) => {
+    const liveId = editingReplayCoverId;
+    setEditingReplayCoverId(null);
+    if (!file || !liveId) return;
+    try {
+      const coverUrl = await fileToDataUrl(file, 1400, 0.88);
+      setState(updateWeverseLive(liveId, { coverUrl }));
+      onNotice?.("回放封面已更新");
+    } catch (error) {
+      onNotice?.(`封面更新失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const due = loadWeverseState().lives.filter((item) => item.status === "live" && item.endedAt && item.endedAt <= now);
+      due.forEach((item) => finalizeLive(item));
+    }, 900);
+    return () => window.clearInterval(timer);
+  });
 
   const pickArtistForCommunity = (community: WeverseCommunity): string | null => {
     if (!community.memberCharacterIds.length) return null;
@@ -1350,12 +1569,35 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     return <div className={styles.communityPane}><div className={styles.feedFilters}>{(["highlight", "fan", "artist"] as const).map((item) => <button key={item} type="button" className={communityFeedFilter === item ? styles.activeFilter : ""} onClick={() => setCommunityFeedFilter(item)}>{item === "highlight" ? "Highlight" : item === "fan" ? "Fan" : "Artist"}</button>)}</div><div className={styles.communityFeedTitle}>{communityFeedFilter === "fan" ? "粉丝帖子" : communityFeedFilter === "artist" ? "最近艺人帖子" : "Community Highlight"}</div>{posts.length ? posts.map((post) => renderPost(post)) : <div className={styles.emptyMini}>这里还没有对应内容。</div>}{canLoadEarlier ? <button type="button" className={styles.historyLoad} disabled={generatingHistoryCommunityId === community.id} onClick={() => loadEarlierHistory(community)}>{generatingHistoryCommunityId === community.id ? "─── 加载中… ───" : "─── 加载更早动态 ───"}</button> : null}</div>;
   };
 
+  const renderLiveReplayCard = (community: WeverseCommunity, live: WeverseLive, options?: { actions?: boolean }) => {
+    const hostId = live.hostCharacterIds[0];
+    const host = hostId ? resolveMember(community, hostId) : null;
+    const coverUrl = live.coverUrl || host?.liveCoverUrl || "";
+    const visibleChatCount = live.comments.length;
+    return <article key={live.id} className={styles.liveReplayCard}>
+      <button type="button" className={styles.liveReplayMain} onClick={() => navigate({ type: "live", liveId: live.id })}>
+        <div className={styles.replayThumb} style={coverUrl ? { backgroundImage: `url(${coverUrl})` } : undefined}>
+          {!coverUrl ? <div className={styles.replayThumbFallback}>{host?.avatarUrl ? <img src={host.avatarUrl} alt="" /> : <Play size={30} />}</div> : null}
+          <span className={live.status === "live" ? styles.liveNowTag : styles.replayDurationTag}>{live.status === "live" ? "LIVE" : formatLiveDuration(live.startedAt, live.endedAt)}</span>
+        </div>
+        <div className={styles.liveReplayInfo}>
+          <div className={styles.liveReplayAccount}><Avatar text={host?.displayName || community.name} imageUrl={host?.avatarUrl || community.avatarUrl || community.official.avatarUrl} tone="soft" /><span><b>{host?.displayName || community.name} <Verified /></b><small>{new Date(live.startedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</small></span></div>
+          <h4>{live.title}</h4>
+          <div className={styles.liveReplayStats}><span>播放 {formatCompactCount(live.peakViewerCount) || "0"}</span><i>·</i><span>点赞 {formatCompactCount(live.heartCount) || "0"}</span><i>·</i><span>聊天 {formatCompactCount(visibleChatCount) || "0"}</span></div>
+        </div>
+      </button>
+      {options?.actions && live.status === "ended" ? <div className={styles.liveReplayActions}>
+        <button type="button" onClick={() => { setEditingReplayCoverId(live.id); window.setTimeout(() => replayCoverInputRef.current?.click(), 0); }}><ImagePlus size={14} /> 更换封面</button>
+        <button type="button" className={styles.liveReplayDelete} onClick={() => removeLiveReplay(live)}><Trash2 size={14} /> 删除该回放</button>
+      </div> : null}
+    </article>;
+  };
+
   const renderCommunityMedia = (community: WeverseCommunity) => {
     const lives = state.lives.filter((live) => live.communityId === community.id).sort((a,b) => b.startedAt - a.startedAt);
     const latest = lives[0];
-    const latestHost = latest?.hostCharacterIds[0] ? resolveMember(community, latest.hostCharacterIds[0]) : null;
     return <div className={styles.communityPane}>
-      <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>最新 LIVE</h3><button type="button" onClick={() => latest ? navigate({ type: "live", liveId: latest.id }) : undefined}><ChevronRight size={20} /></button></div>{latest ? <button type="button" className={styles.liveReplayCard} onClick={() => navigate({ type: "live", liveId: latest.id })}><div className={styles.replayThumb}><span className={latest.status === "live" ? styles.liveNowTag : ""}>{latest.status === "live" ? "LIVE" : "REPLAY"}</span><Play size={31} /></div><b>{latest.title}</b><small>{latestHost?.displayName || community.name} · {latest.orientation === "portrait" ? "竖屏" : "横屏"} · {formatCompactCount(latest.peakViewerCount)} peak</small></button> : <div className={styles.emptyMini}>还没有成员 LIVE。进入成员主页的 LIVE 标签即可开一场。</div>}</section>
+      <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>最新 LIVE</h3><button type="button" onClick={() => latest ? navigate({ type: "live", liveId: latest.id }) : undefined}><ChevronRight size={20} /></button></div>{latest ? renderLiveReplayCard(community, latest) : <div className={styles.emptyMini}>还没有成员 LIVE。进入成员主页的 LIVE 标签即可开一场。</div>}</section>
       <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>最新媒体内容</h3><button type="button" onClick={() => showTodo("Community 媒体内容")}><ChevronRight size={20} /></button></div><div className={styles.mediaGrid}><button type="button" onClick={() => setPhotoPicker({ communityId: community.id, mode: "manageOfficial" })}><Video size={25} /><span>Official Media · {community.officialMediaPhotoIds?.length || 0}</span></button><button type="button" onClick={() => showTodo("成员公开视频")}><Camera size={25} /><span>Artist Media</span></button></div></section>
     </div>;
   };
@@ -1390,9 +1632,12 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
   const renderArtistLive = (community: WeverseCommunity, characterId: string, memberName: string) => {
     const lives = state.lives.filter((live) => live.communityId === community.id && live.hostCharacterIds.includes(characterId)).sort((a,b) => b.startedAt - a.startedAt);
-    const current = lives.find((live) => live.status === "live");
-    const replays = lives.filter((live) => live.status === "ended").slice(0, 8);
-    return <div className={styles.artistLivePane}><section className={styles.artistLiveCurrent}><div><Radio size={20} /><b>当前 LIVE</b></div>{current ? <><p>{memberName} 正在直播 · {current.title}</p><button type="button" onClick={() => navigate({ type: "live", liveId: current.id })}>进入 LIVE</button></> : <><p>{memberName} 现在没有开播。可以不定主题，让角色自己决定这次想播什么。</p><button type="button" onClick={() => openLiveCreator(community, characterId)}>生成一场 LIVE</button></>}</section><section className={styles.artistReplaySection}><h3>过往直播回放</h3>{replays.length ? <div className={styles.artistReplayList}>{replays.map((live) => <button type="button" key={live.id} className={styles.artistReplayCard} onClick={() => navigate({ type: "live", liveId: live.id })}><div><Play size={22} /></div><span><b>{live.title}</b><small>{new Date(live.startedAt).toLocaleString("zh-CN")} · {formatCompactCount(live.peakViewerCount)} peak</small></span></button>)}</div> : <div className={styles.emptyMini}>还没有直播回放。</div>}</section></div>;
+    const current = lives.find((live) => live.status === "live" && (live.activeCharacterIds || []).includes(characterId));
+    const replays = lives.filter((live) => live.status === "ended").slice(0, 12);
+    return <div className={styles.artistLivePane}>
+      <section className={styles.artistLiveCurrent}><div><Radio size={20} /><b>当前 LIVE</b></div>{current ? <><p>{memberName} 正在 LIVE 中</p><button type="button" onClick={() => navigate({ type: "live", liveId: current.id })}>进入 LIVE</button></> : <><p>{memberName} 现在没有开播。主题可以留空，让角色自己决定这次想播什么。</p><button type="button" onClick={() => openLiveCreator(community, characterId)}>生成一场 LIVE</button></>}</section>
+      <section className={styles.artistReplaySection}><h3>过往直播回放</h3>{replays.length ? <div className={styles.artistReplayList}>{replays.map((live) => renderLiveReplayCard(community, live, { actions: true }))}</div> : <div className={styles.emptyMini}>还没有直播回放。</div>}</section>
+    </div>;
   };
 
   const renderArtist = (community: WeverseCommunity, characterId: string) => {
@@ -1489,8 +1734,8 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     const community = communityMap.get(live.communityId);
     const hostId = live.hostCharacterIds[0];
     if (!community || !hostId) return <div className={styles.emptyState}><b>这场 LIVE 的成员信息不存在</b><button type="button" onClick={back}>返回</button></div>;
-    const member = resolveMember(community, hostId);
-    return <WeverseLiveView live={live} hostName={member.displayName} hostAvatarUrl={member.avatarUrl} userName={userName} busy={generatingLiveId === live.id} onBack={back} onContinue={() => advanceLive(live)} onSummon={(comments) => advanceLive(live, comments)} onHeart={() => addLiveHeart(live)} onFinalizeEnd={() => setState(updateWeverseLive(live.id, { status: "ended" }))} onManualEnd={() => manuallyEndLive(live)} />;
+    const speakerNames = Object.fromEntries(community.memberCharacterIds.map((characterId) => [characterId, resolveMember(community, characterId).displayName]));
+    return <WeverseLiveView live={live} speakerNames={speakerNames} userName={userName} busy={generatingLiveId === live.id} onBack={back} onAdvance={() => advanceLive(live)} onSendComment={(body) => sendLiveUserComment(live, body)} onHeart={() => addLiveHeart(live)} onFinalizeEnd={() => finalizeLive(live)} onManualEnd={() => manuallyEndLive(live)} />;
   };
 
   const renderContent = () => {
@@ -1555,7 +1800,30 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       {composerOpen ? <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) { setComposerOpen(false); setEditingPostId(null); } }}><section className={styles.sheet}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>{editingPostId ? "编辑贴文" : composerAuthorType === "official" ? "Official Post" : "Fan Post"}</h2><button type="button" className={styles.iconBtn} onClick={() => { setComposerOpen(false); setEditingPostId(null); }}><X size={20} /></button></div><label className={styles.fieldLabel}>发布到</label><div className={styles.lockedCommunity}>{communityMap.get(draftCommunityId)?.name || "Community"}</div><textarea className={styles.textarea} value={draftText} onChange={(event) => setDraftText(event.target.value)} placeholder={composerAuthorType === "official" ? "写一条 Official Post…" : "写点什么吧…"} />{draftImageUrl ? <div className={styles.composePreview}><ResolvedAssetImage src={draftImageUrl} alt="预览" /><button type="button" onClick={() => { setDraftImageUrl(""); setDraftPhotoLibraryId(null); }}><X size={16} /></button></div> : null}<div className={styles.mediaTools}><button type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={18} /> {composerAuthorType === "official" ? "从手机上传" : "本地图片"}</button><button type="button" onClick={() => composerAuthorType === "official" ? setPhotoPicker({ communityId: draftCommunityId, mode: "composeOfficial" }) : showTodo("Fan Post 素材选择器")}><Sparkles size={18} /> {composerAuthorType === "official" ? "官方媒体池" : "照片库"}</button></div><input ref={fileInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { if (composerAuthorType === "official") { const community = communityMap.get(draftCommunityId); if (community) await importOfficialMediaFiles(community, [file], true); } else { setDraftImageUrl(await fileToDataUrl(file)); setDraftPhotoLibraryId(null); } } event.currentTarget.value = ""; }} /><button type="button" className={styles.primaryButton} onClick={publish}><Send size={18} /> {editingPostId ? "保存修改" : "发布"}</button></section></div> : null}
 
-      {liveCreator ? (() => { const community = communityMap.get(liveCreator.communityId); if (!community) return null; const member = resolveMember(community, liveCreator.characterId); return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target && !startingLive) setLiveCreator(null); }}><section className={styles.sheet}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>生成成员 LIVE</h2><button type="button" className={styles.iconBtn} disabled={startingLive} onClick={() => setLiveCreator(null)}><X size={20} /></button></div><div className={styles.liveCreatorMember}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><div><b>{member.displayName}</b><span>{community.name}</span></div></div><label className={styles.fieldLabel}>本场主题 · 可不填</label><textarea className={styles.textareaSmall} value={liveCreator.theme} onChange={(e) => setLiveCreator({ ...liveCreator, theme: e.target.value })} placeholder={"留空：让角色自己决定为什么开播\n也可以写：活动后台 / 吃饭 / 睡前聊聊天 / 推歌…"} /><label className={styles.fieldLabel}>直播画面</label><div className={styles.liveOrientationPicker}><button type="button" className={liveCreator.orientation === "landscape" ? styles.liveOrientationActive : ""} onClick={() => setLiveCreator({ ...liveCreator, orientation: "landscape" })}><span className={styles.landscapeGlyph} />横屏</button><button type="button" className={liveCreator.orientation === "portrait" ? styles.liveOrientationActive : ""} onClick={() => setLiveCreator({ ...liveCreator, orientation: "portrait" })}><span className={styles.portraitGlyph} />竖屏</button></div><p className={styles.editorHint}>主题只是软方向。直播多久、聊多少、什么时候下播都让角色按人设和当次情境决定。</p><button type="button" className={styles.primaryButton} disabled={startingLive} onClick={startLive}><Radio size={18} /> {startingLive ? "正在准备 LIVE…" : "开始生成 LIVE"}</button></section></div>; })() : null}
+      {liveCreator ? (() => {
+        const community = communityMap.get(liveCreator.communityId);
+        if (!community) return null;
+        const member = resolveMember(community, liveCreator.characterId);
+        return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target && !startingLive) setLiveCreator(null); }}>
+          <section className={styles.sheet}>
+            <div className={styles.sheetHandle} />
+            <div className={styles.sheetTitle}><h2>生成成员 LIVE</h2><button type="button" className={styles.iconBtn} disabled={startingLive} onClick={() => setLiveCreator(null)}><X size={20} /></button></div>
+            <div className={styles.liveCreatorMember}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><div><b>{member.displayName}</b><span>{community.name}</span></div></div>
+            <label className={styles.fieldLabel}>本场主题 · 可不填</label>
+            <textarea className={styles.textareaSmall} value={liveCreator.theme} onChange={(e) => setLiveCreator({ ...liveCreator, theme: e.target.value })} placeholder={"留空：让角色自己决定为什么开播\n也可以写：活动后台 / 吃饭 / 睡前聊聊天 / 推歌…"} />
+            <label className={styles.fieldLabel}>本场回放封面</label>
+            <div className={styles.liveCoverEditor}>
+              <div className={styles.liveCoverPreview} style={liveCreator.coverUrl ? { backgroundImage: `url(${liveCreator.coverUrl})` } : undefined}>{!liveCreator.coverUrl ? <span>未设置封面</span> : null}</div>
+              <div><button type="button" onClick={() => liveCreatorCoverInputRef.current?.click()}><ImagePlus size={15} /> 更换本场封面</button>{member.liveCoverUrl && liveCreator.coverUrl !== member.liveCoverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: member.liveCoverUrl })}>使用角色默认封面</button> : null}{liveCreator.coverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: "" })}>本场不使用封面</button> : null}</div>
+            </div>
+            <input ref={liveCreatorCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setLiveCreator({ ...liveCreator, coverUrl: await fileToDataUrl(file, 1400, 0.88) }); e.currentTarget.value = ""; }} />
+            <p className={styles.editorHint}>只保留横屏 LIVE。主题只是软方向；直播多久、聊多少、什么时候下播，以及同 Community 成员是否来围观或连线，都按人设和当次情境决定。</p>
+            <button type="button" className={styles.primaryButton} disabled={startingLive} onClick={startLive}><Radio size={18} /> {startingLive ? "正在准备 LIVE…" : "开始生成 LIVE"}</button>
+          </section>
+        </div>;
+      })() : null}
+
+      <input ref={replayCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; await applyReplayCoverFile(file); e.currentTarget.value = ""; }} />
 
       {postMenuId ? (() => { const post = postMap.get(postMenuId); if (!post) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setPostMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><button type="button" onClick={() => openPostEditor(post)}><Pencil size={18} /> 编辑贴文</button><button type="button" className={styles.dangerSheetAction} onClick={() => removePost(post)}><Trash2 size={18} /> 删除贴文</button><button type="button" onClick={() => setPostMenuId(null)}>取消</button></section></div>; })() : null}
 
@@ -1567,7 +1835,25 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       {communityEditor ? <div className={styles.fullModal}><div className={styles.modalHeader}><button type="button" className={styles.modalBackBtn} aria-label="返回" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setCommunityEditorError(""); setCommunityEditor(null); }}><ChevronLeft size={22} /></button><b>{communityEditor.id ? "管理 Community" : "新建 Community"}</b><button type="button" className={styles.saveTextBtn} onPointerDown={(e) => e.stopPropagation()} onClick={saveCommunityEditor}>保存</button></div><div className={styles.modalScroll}>{communityEditorError ? <div className={styles.editorError}>{communityEditorError}</div> : null}<div className={styles.editorSection}><h3>Community</h3><label>名称<input value={communityEditor.name} onChange={(e) => setCommunityEditor({ ...communityEditor, name: e.target.value })} placeholder="例如 NCT WISH" /></label><label>简介<textarea value={communityEditor.description} onChange={(e) => setCommunityEditor({ ...communityEditor, description: e.target.value })} placeholder="这个 Community 的简介" /></label><label>当前粉丝数<input inputMode="numeric" value={communityEditor.fanCount} onChange={(e) => setCommunityEditor({ ...communityEditor, fanCount: e.target.value.replace(/[^0-9,，]/g, "") })} placeholder="例如 1850000" /></label><div className={styles.historyEditorRow}><label>历史状态<select value={communityEditor.historyMode} onChange={(e) => setCommunityEditor({ ...communityEditor, historyMode: e.target.value as WeverseHistoryMode })}><option value="new">新社区，不生成旧内容</option><option value="existing">已运营一段时间（默认约 1 年）</option><option value="custom">自定义开始运营日期</option></select></label>{communityEditor.historyMode === "custom" ? <label>开始运营日期<input type="date" value={communityEditor.historyStartDate} onChange={(e) => setCommunityEditor({ ...communityEditor, historyStartDate: e.target.value })} /></label> : null}{communityEditor.id && communityMap.get(communityEditor.id)?.historyInitializedAt ? <p className={styles.editorHint}>历史内容已初始化；以后在 Community Feed 底部可以继续「加载更早动态」。</p> : communityEditor.historyMode !== "new" ? <p className={styles.editorHint}>保存后会自动补一小批过去的 Official / Artist / Fan 内容，不会写进当前近期记忆。</p> : null}</div><div className={styles.imageEditRow}><Avatar text={communityEditor.name || "C"} imageUrl={communityEditor.avatarUrl || communityEditor.officialAvatarUrl} tone="soft" className={styles.editorAvatar} /><button type="button" onClick={() => communityAvatarInputRef.current?.click()}><Camera size={16} /> Community 图标</button>{communityEditor.avatarUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, avatarUrl: "" })}>恢复继承官号头像</button> : null}</div><div className={styles.imageEditRow}><button type="button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={16} /> Community 背景图</button>{communityEditor.coverUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, coverUrl: "" })}>清除背景</button> : null}</div><input ref={communityAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /><input ref={coverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, coverUrl: await fileToDataUrl(file, 1400) }); e.currentTarget.value = ""; }} /></div><div className={styles.editorSection}><h3>Official Account</h3><label>官号昵称<input value={communityEditor.officialName} onChange={(e) => setCommunityEditor({ ...communityEditor, officialName: e.target.value })} placeholder={communityEditor.name ? `${communityEditor.name} Official` : "Official Account"} /></label><label>官号简介<input value={communityEditor.officialBio} onChange={(e) => setCommunityEditor({ ...communityEditor, officialBio: e.target.value })} placeholder="公告 · Schedule · 官方 LIVE" /></label><div className={styles.imageEditRow}><Avatar text={communityEditor.officialName || communityEditor.name || "O"} imageUrl={communityEditor.officialAvatarUrl} tone="teal" className={styles.editorAvatar} /><button type="button" onClick={() => officialAvatarInputRef.current?.click()}><Camera size={16} /> Official 头像</button>{communityEditor.officialAvatarUrl ? <button type="button" onClick={() => setCommunityEditor({ ...communityEditor, officialAvatarUrl: "" })}>清除</button> : null}</div>{communityEditor.id ? <button type="button" className={styles.mediaPoolButton} onClick={() => setPhotoPicker({ communityId: communityEditor.id!, mode: "manageOfficial" })}><ImagePlus size={17} /> 管理官方媒体池 · {communityMap.get(communityEditor.id)?.officialMediaPhotoIds?.length || 0} 张</button> : <p className={styles.editorHint}>保存 Community 后即可从 Photos 选择官号专用官方素材。</p>}<input ref={officialAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setCommunityEditor({ ...communityEditor, officialAvatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /></div><div className={styles.editorSection}><h3>绑定成员</h3><p className={styles.editorHint}>同一个角色可以同时加入多个 Community；底层仍是同一个角色、同一套记忆和相册。</p><div className={styles.memberPicker}>{characters.map((char) => { const checked = communityEditor.selectedCharacterIds.includes(char.id); return <button type="button" key={char.id} className={`${styles.memberPickCard} ${checked ? styles.memberPickActive : ""}`} onClick={() => setCommunityEditor({ ...communityEditor, selectedCharacterIds: checked ? communityEditor.selectedCharacterIds.filter((id) => id !== char.id) : [...communityEditor.selectedCharacterIds, char.id] })}><Avatar text={char.name} imageUrl={char.avatar} tone="soft" className={styles.memberPickAvatar} /><span className={styles.memberPickName}>{char.name}</span><i>{checked ? "✓" : "+"}</i></button>; })}</div>{!characters.length ? <div className={styles.emptyMini}>当前还没有角色，请先在「角色」App 建立角色。</div> : null}</div>{communityEditor.id ? <div className={styles.editorSection}><h3>危险操作</h3><button type="button" className={styles.dangerButton} onClick={() => { const community = communityMap.get(communityEditor.id!); if (community) removeCommunity(community); }}><Trash2 size={16} /> 删除 Community</button></div> : null}</div></div> : null}
 
-      {memberEditor ? <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setMemberEditor(null); }}><section className={styles.sheet}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>成员 WVS 资料</h2><button type="button" className={styles.iconBtn} onClick={() => setMemberEditor(null)}><X size={20} /></button></div><div className={styles.memberEditProfile}><Avatar text={memberEditor.displayName} imageUrl={memberEditor.avatarUrl} className={styles.bigAvatar} /><button type="button" onClick={() => memberAvatarInputRef.current?.click()}><Camera size={16} /> 换头像</button><button type="button" onClick={() => memberCoverInputRef.current?.click()}><ImagePlus size={16} /> 换背景</button></div><input ref={memberAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setMemberEditor({ ...memberEditor, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /><input ref={memberCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setMemberEditor({ ...memberEditor, coverUrl: await fileToDataUrl(file, 1400) }); e.currentTarget.value = ""; }} /><label className={styles.fieldLabel}>WVS 显示昵称</label><input className={styles.select} value={memberEditor.displayName} onChange={(e) => setMemberEditor({ ...memberEditor, displayName: e.target.value })} /><label className={styles.fieldLabel}>简介</label><textarea className={styles.textareaSmall} value={memberEditor.bio} onChange={(e) => setMemberEditor({ ...memberEditor, bio: e.target.value })} placeholder="可选，只影响 WVS 展示" /><button type="button" className={styles.primaryButton} onClick={saveMemberEditor}>保存</button></section></div> : null}
+      {memberEditor ? <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setMemberEditor(null); }}>
+        <section className={styles.sheet}>
+          <div className={styles.sheetHandle} />
+          <div className={styles.sheetTitle}><h2>成员 WVS 资料</h2><button type="button" className={styles.iconBtn} onClick={() => setMemberEditor(null)}><X size={20} /></button></div>
+          <div className={styles.memberEditProfile}><Avatar text={memberEditor.displayName} imageUrl={memberEditor.avatarUrl} className={styles.bigAvatar} /><button type="button" onClick={() => memberAvatarInputRef.current?.click()}><Camera size={16} /> 换头像</button><button type="button" onClick={() => memberCoverInputRef.current?.click()}><ImagePlus size={16} /> 换主页背景</button></div>
+          <input ref={memberAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setMemberEditor({ ...memberEditor, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} />
+          <input ref={memberCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setMemberEditor({ ...memberEditor, coverUrl: await fileToDataUrl(file, 1400) }); e.currentTarget.value = ""; }} />
+          <input ref={memberLiveCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setMemberEditor({ ...memberEditor, liveCoverUrl: await fileToDataUrl(file, 1400, 0.88) }); e.currentTarget.value = ""; }} />
+          <label className={styles.fieldLabel}>WVS 显示昵称</label><input className={styles.select} value={memberEditor.displayName} onChange={(e) => setMemberEditor({ ...memberEditor, displayName: e.target.value })} />
+          <label className={styles.fieldLabel}>简介</label><textarea className={styles.textareaSmall} value={memberEditor.bio} onChange={(e) => setMemberEditor({ ...memberEditor, bio: e.target.value })} placeholder="可选，只影响 WVS 展示" />
+          <label className={styles.fieldLabel}>默认 LIVE 封面</label>
+          <div className={styles.liveCoverEditor}>
+            <div className={styles.liveCoverPreview} style={memberEditor.liveCoverUrl ? { backgroundImage: `url(${memberEditor.liveCoverUrl})` } : undefined}>{!memberEditor.liveCoverUrl ? <span>未设置默认封面</span> : null}</div>
+            <div><button type="button" onClick={() => memberLiveCoverInputRef.current?.click()}><ImagePlus size={15} /> {memberEditor.liveCoverUrl ? "更换默认封面" : "设置默认封面"}</button>{memberEditor.liveCoverUrl ? <button type="button" onClick={() => setMemberEditor({ ...memberEditor, liveCoverUrl: "" })}>清除默认封面</button> : null}</div>
+          </div>
+          <p className={styles.editorHint}>设置后，这个成员以后新开的个人 LIVE 默认使用这张回放封面；单场开播前仍可覆盖。</p>
+          <button type="button" className={styles.primaryButton} onClick={saveMemberEditor}>保存</button>
+        </section>
+      </div> : null}
 
       {userProfileDraft ? <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setUserProfileDraft(null); }}><section className={styles.sheet}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>编辑 WVS 身份</h2><button type="button" className={styles.iconBtn} onClick={() => setUserProfileDraft(null)}><X size={20} /></button></div><p className={styles.editorHint}>默认继承当前 User Identity；这里修改只影响 Weverse 里的粉丝昵称、头像和简介。</p><div className={styles.memberEditProfile}><Avatar text={userProfileDraft.displayName || userName} imageUrl={userProfileDraft.avatarUrl} className={styles.bigAvatar} /><button type="button" onClick={() => userAvatarInputRef.current?.click()}><Camera size={16} /> 换头像</button>{userProfileDraft.avatarUrl ? <button type="button" onClick={() => setUserProfileDraft({ ...userProfileDraft, avatarUrl: "" })}>清除</button> : null}</div><input ref={userAvatarInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setUserProfileDraft({ ...userProfileDraft, avatarUrl: await fileToDataUrl(file, 500) }); e.currentTarget.value = ""; }} /><label className={styles.fieldLabel}>WVS 昵称</label><input className={styles.select} value={userProfileDraft.displayName} onChange={(e) => setUserProfileDraft({ ...userProfileDraft, displayName: e.target.value })} placeholder={userIdentity?.name || "我的昵称"} /><label className={styles.fieldLabel}>简介</label><textarea className={styles.textareaSmall} value={userProfileDraft.bio} onChange={(e) => setUserProfileDraft({ ...userProfileDraft, bio: e.target.value })} placeholder="Fan account" /><button type="button" className={styles.primaryButton} onClick={saveUserProfile}>保存 WVS 身份</button><button type="button" className={styles.secondaryButton} onClick={() => { const nextState = updateWeverseUserProfile({ displayName: undefined, avatarUrl: undefined, bio: undefined }); setState(nextState); setUserProfileDraft({ displayName: userIdentity?.name || "", avatarUrl: userIdentity?.avatarUrl || "", bio: userIdentity?.bio || "" }); onNotice?.("已恢复继承 User Identity"); }}>恢复继承 User Identity</button></section></div> : null}
 

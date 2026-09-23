@@ -128,3 +128,54 @@ export function loadWeverseProjectionEntries(characterId: string, options?: { af
   if (!options?.afterTimestamp) return entries;
   return entries.filter((entry) => entry.timestamp > options.afterTimestamp!);
 }
+
+export function recordWeverseLiveParticipationEvent(input: {
+  liveId: string;
+  characterId: string;
+  characterName: string;
+  communityName: string;
+  startedAt: number;
+  endedAt?: number;
+  role: "host" | "guest";
+  coParticipants?: string[];
+  ownSpeech?: string[];
+  title?: string;
+}): void {
+  const timestamp = new Date(input.endedAt || input.startedAt || Date.now()).toISOString();
+  const name = cleanText(input.characterName, 80) || "角色";
+  const community = cleanText(input.communityName, 80) || "Community";
+  const others = (input.coParticipants || []).map((item) => cleanText(item, 60)).filter(Boolean).slice(0, 5);
+  const speech = (input.ownSpeech || []).map((item) => cleanText(item, 130)).filter(Boolean).slice(-3);
+  const pieces = [
+    `[Weverse LIVE ${formatChatTimestamp(timestamp)}] ${name}${input.role === "host" ? "开了" : "中途加入了"}「${community}」Community 的一场 LIVE${input.title ? `（${cleanText(input.title, 100)}）` : ""}`,
+    others.length ? `，同场还有${others.join("、")}` : "",
+    speech.length ? `。期间自己说过：${speech.map((item) => `“${item}”`).join("、")}` : "",
+    "。",
+  ];
+  upsert(input.characterId, {
+    id: `weverse_live_participant_${input.liveId}_${input.characterId}`,
+    timestamp,
+    content: pieces.join(""),
+  });
+}
+
+export function recordWeverseLiveViewerEvent(input: {
+  liveId: string;
+  characterId: string;
+  characterName: string;
+  communityName: string;
+  hostNames: string[];
+  watchedAt: number;
+  comments?: string[];
+  title?: string;
+}): void {
+  const timestamp = new Date(input.watchedAt || Date.now()).toISOString();
+  const name = cleanText(input.characterName, 80) || "角色";
+  const hosts = input.hostNames.map((item) => cleanText(item, 60)).filter(Boolean).slice(0, 5);
+  const comments = (input.comments || []).map((item) => cleanText(item, 150)).filter(Boolean).slice(-3);
+  upsert(input.characterId, {
+    id: `weverse_live_viewer_${input.liveId}_${input.characterId}`,
+    timestamp,
+    content: `[Weverse LIVE ${formatChatTimestamp(timestamp)}] ${name}作为普通观众看过${hosts.length ? `${hosts.join("、")}的` : "一场"}「${cleanText(input.communityName, 80) || "Community"}」LIVE${input.title ? `（${cleanText(input.title, 100)}）` : ""}${comments.length ? `，并在艺人评论里说过：${comments.map((item) => `“${item}”`).join("、")}` : ""}。`,
+  });
+}
