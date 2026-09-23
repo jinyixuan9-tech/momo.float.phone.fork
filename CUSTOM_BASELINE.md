@@ -242,3 +242,10 @@
 - TTS 使用 `resolveVoiceConfig(characterId, "weverse")`，多人连线时按每段 speech 的 `characterId` 使用各自绑定语音；音频做小型内存缓存，重听无需重复合成。
 - 艺人评论由全屏覆盖页改为直播页内折叠抽屉，入口再次点击收起，内部独立滚动，直播窗口始终保持可见。
 - Service Worker cache version 升至 v34。
+
+### v0.5.4 · WVS LIVE Per-line TTS
+- 移除 v0.5.3 Stage 左下“播放最新发言”的全局 TTS 按钮，改为每一条 `speech` 发言前各自显示一个小语音按钮。
+- 用户可以只点自己想听的那一句；每条按钮只朗读该条角色原话，不自动连续播放下一条，不朗读 action 或中文翻译。
+- 多人连线仍按该条 speech 的 `characterId` 使用对应角色的 Weverse 语音绑定；正在合成/播放的那条按钮显示独立状态，点击同一条可停止，点击另一条会切换到另一条。
+- 保留 v0.5.3 的语音缓存，因此同一句重复点播不必重新合成。
+- Service Worker cache version 升至 v35。

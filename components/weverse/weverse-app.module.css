@@ -538,15 +538,17 @@
 .liveSpeechLine, .liveActionLine, .liveSystemLine { max-width: 94%; flex: 0 0 auto; animation: liveLineIn .28s ease both; }
 .liveSpeechLine b, .liveActionLine b { display: block; font-size: 9px; color: rgba(255,255,255,.57); margin-bottom: 3px; font-weight: 760; }
 .liveSpeechLine p { margin: 0; font-size: 15px; line-height: 1.45; font-weight: 760; letter-spacing: -.12px; white-space: pre-wrap; text-shadow: 0 1px 8px rgba(0,0,0,.36); }
+.liveSpeechAudioRow { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.liveSpeechAudioRow p { flex: 1; min-width: 0; }
+.liveSpeechVoiceButton { flex: 0 0 auto; width: 22px; height: 22px; margin-top: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 50%; background: rgba(5,7,9,.62); color: rgba(255,255,255,.78); display: grid; place-items: center; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: background .16s ease,border-color .16s ease,transform .16s ease; }
+.liveSpeechVoiceButton:active { transform: scale(.92); }
+.liveSpeechVoiceButtonActive { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.28); color: #fff; }
 .liveSpeechLine small { display: block; margin-top: 4px; color: rgba(255,255,255,.62); font-size: 10px; line-height: 1.45; }
+.liveSpeechTranslation { margin-left: 28px; }
 .liveActionLine { align-self: flex-start; color: rgba(255,255,255,.56); font-size: 10px; line-height: 1.55; font-style: italic; font-weight: 400; letter-spacing: .05px; }
 .liveActionLine p, .liveSystemLine p { margin: 0; }
 .liveSystemLine { align-self: center; max-width: 100%; color: rgba(255,255,255,.44); font-size: 9px; text-align: center; }
 .liveConnecting { margin: auto; color: rgba(255,255,255,.58); font-size: 10px; }
-.liveVoiceButton { position: absolute; left: 9px; bottom: 6px; z-index: 3; width: 29px; height: 29px; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; background: rgba(5,7,9,.68); color: rgba(255,255,255,.88); display: grid; place-items: center; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 3px 12px rgba(0,0,0,.24); transition: background .18s ease,border-color .18s ease,transform .18s ease; }
-.liveVoiceButton:disabled { opacity: .32; }
-.liveVoiceButton:not(:disabled):active { transform: scale(.94); }
-.liveVoiceButtonActive { background: rgba(36,40,44,.86); border-color: rgba(255,255,255,.24); }
 .liveVoiceSpinner { animation: liveVoiceSpin .82s linear infinite; }
 @keyframes liveVoiceSpin { to { transform: rotate(360deg); } }
 .liveVoiceNotice { position: absolute; left: 50%; bottom: 40px; z-index: 4; max-width: calc(100% - 44px); transform: translateX(-50%); padding: 6px 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(4,5,6,.86); color: rgba(255,255,255,.9); font-size: 9px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px rgba(0,0,0,.32); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }

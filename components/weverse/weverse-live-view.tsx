@@ -87,10 +87,6 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
     [live.comments, clock],
   );
   const visibleArtistComments = useMemo(() => visibleComments.filter((item) => item.authorType === "artist"), [visibleComments]);
-  const latestVisibleSpeech = useMemo(
-    () => [...visibleSegments].reverse().find((item) => item.kind === "speech" && item.original.trim()) || null,
-    [visibleSegments],
-  );
   const bufferedUntil = Math.max(live.startedAt, ...live.segments.map((item) => item.createdAt), ...live.comments.map((item) => item.createdAt));
   const isPlaying = live.status === "live" && bufferedUntil > clock;
   const isEnding = live.status === "live" && Boolean(live.endedAt);
@@ -126,12 +122,8 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
     setPlayingVoiceSegmentId(null);
   };
 
-  const playLatestVoice = async () => {
-    const segment = latestVisibleSpeech;
-    if (!segment) {
-      showVoiceNotice("当前还没有可播放的角色发言");
-      return;
-    }
+  const playSegmentVoice = async (segment: WeverseLive["segments"][number]) => {
+    if (segment.kind !== "speech" || !segment.original.trim()) return;
 
     if (playingVoiceSegmentId === segment.id || voiceLoadingSegmentId === segment.id) {
       stopVoice();
@@ -205,7 +197,6 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
   };
 
   const canAdvance = live.status === "live" && !busy && !isPlaying && !isEnding;
-  const voiceBusy = Boolean(voiceLoadingSegmentId || playingVoiceSegmentId);
 
   return (
     <div className={styles.liveRoom}>
@@ -222,23 +213,26 @@ export function WeverseLiveView({ live, speakerNames, userName, busy, onBack, on
         }}>
           {visibleSegments.length ? visibleSegments.map((segment) => {
             const speaker = segment.characterId ? (speakerNames[segment.characterId] || segment.characterId) : "";
+            const isVoiceLoading = voiceLoadingSegmentId === segment.id;
+            const isVoicePlaying = playingVoiceSegmentId === segment.id;
             return <div key={segment.id} className={segment.kind === "action" ? styles.liveActionLine : segment.kind === "system" ? styles.liveSystemLine : styles.liveSpeechLine}>
               {speaker && segment.kind !== "system" ? <b>{speaker}</b> : null}
-              <p>{segment.original}</p>
-              {segment.kind === "speech" && segment.translated && segment.translated !== segment.original ? <small>{segment.translated}</small> : null}
+              {segment.kind === "speech" ? <div className={styles.liveSpeechAudioRow}>
+                <button
+                  type="button"
+                  className={`${styles.liveSpeechVoiceButton} ${isVoiceLoading || isVoicePlaying ? styles.liveSpeechVoiceButtonActive : ""}`}
+                  onClick={() => void playSegmentVoice(segment)}
+                  aria-label={isVoiceLoading ? "停止生成语音" : isVoicePlaying ? "停止播放" : "播放这条发言"}
+                  title={isVoiceLoading ? "停止生成语音" : isVoicePlaying ? "停止播放" : "播放这条发言"}
+                >
+                  {isVoiceLoading ? <LoaderCircle size={12} className={styles.liveVoiceSpinner} /> : isVoicePlaying ? <Square size={10} fill="currentColor" /> : <Volume2 size={13} />}
+                </button>
+                <p>{segment.original}</p>
+              </div> : <p>{segment.original}</p>}
+              {segment.kind === "speech" && segment.translated && segment.translated !== segment.original ? <small className={styles.liveSpeechTranslation}>{segment.translated}</small> : null}
             </div>;
           }) : <div className={styles.liveConnecting}>正在连接 LIVE…</div>}
         </div>
-        <button
-          type="button"
-          className={`${styles.liveVoiceButton} ${voiceBusy ? styles.liveVoiceButtonActive : ""}`}
-          onClick={() => void playLatestVoice()}
-          disabled={!latestVisibleSpeech}
-          aria-label={voiceBusy ? "停止语音" : "播放最新发言"}
-          title={voiceBusy ? "停止语音" : "播放最新发言"}
-        >
-          {voiceLoadingSegmentId ? <LoaderCircle size={15} className={styles.liveVoiceSpinner} /> : playingVoiceSegmentId ? <Square size={13} fill="currentColor" /> : <Volume2 size={16} />}
-        </button>
         <time className={styles.liveStageTime}>{liveElapsed(live.startedAt, live.status === "ended" && live.endedAt ? live.endedAt : clock)}</time>
         {voiceNotice ? <div className={styles.liveVoiceNotice}>{voiceNotice}</div> : null}
       </section>
