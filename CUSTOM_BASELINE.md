@@ -160,3 +160,12 @@
 - 保留原有“用户发图/小窗推荐角色换头像 → 角色自主接受或拒绝”的完整机制；当本轮存在用户头像推荐时，禁止同时走自主头像动作，避免绕开推荐图片。
 - `资料更新` 动作壳按 platform target 设计；v0.4.0 只执行 `chat`，为后续 WVS / LYSN 复用同一资料行为层预留。
 - Service Worker cache version 升至 v25。
+
+
+## v0.4.1 · Chat Profile Tool Isolation Fix
+
+- 修复明确要求角色“换头像 / 改昵称”时可能误入原生工具调用链、最终出现 `Tool Network Error connecting to AI Provider: Failed to fetch` 的问题。
+- 私聊中明确的 Chat Profile 修改请求现在强制关闭本轮外部工具，仅走普通文本生成 + 本地 `资料更新` 动作；不影响普通聊天里的工具能力。
+- Profile 自主提示词新增硬约束：修改头像/昵称不得调用联网、搜索、生图、文件或发送照片工具；头像只能选择已注入的真实 Photos 候选 `photoId`。
+- 用户发图推荐头像的原有接受/拒绝机制继续保留，并同样受益于本轮工具隔离。
+- Service Worker cache version 升至 v26。

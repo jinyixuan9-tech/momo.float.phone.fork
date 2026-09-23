@@ -1,10 +1,49 @@
 import type { Character } from "./character-types";
+import type { ChatMessage } from "./chat-storage";
 import { getChatCharacterProfile, updateChatCharacterProfile } from "./chat-profile-storage";
 import { loadPhotoLibrary } from "./photo-library-storage";
 
 const AUTONOMOUS_NAME_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const AUTONOMOUS_AVATAR_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const MAX_AVATAR_CANDIDATES = 10;
+
+/**
+ * 判断本轮是否明确在谈“让角色修改自己的 Chat 资料”。
+ * 这类请求本身不需要任何外部工具；若仍把原生工具定义暴露给模型，
+ * 模型可能错误地把“换头像”理解成生图/文件/其它动作，进入多轮 tool calling。
+ */
+export function isExplicitChatProfileRequestTurn(history: ChatMessage[], sessionId: string): boolean {
+  const sessionMessages = history.filter((message) => message.sessionId === sessionId);
+  if (sessionMessages.length === 0) return false;
+
+  const currentUserTurn: ChatMessage[] = [];
+  for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
+    const message = sessionMessages[index];
+    if (message.role === "assistant") break;
+    if (message.role === "user") currentUserTurn.unshift(message);
+  }
+  if (currentUserTurn.length === 0) return false;
+
+  const text = currentUserTurn
+    .map((message) => [message.content, message.mediaData?.label].filter(Boolean).join(" "))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return false;
+
+  const target = "(?:头像|头图|昵称|网名|显示名|名字)";
+  const change = "(?:换|改|设置|设成|设为|用作|当作|换上)";
+  const directed = new RegExp(`(?:给你|帮你|让你|你(?:自己|的)?|把你(?:的)?).{0,12}${change}.{0,10}${target}|${target}.{0,10}${change}.{0,10}(?:你|你的|自己)`, "i");
+  if (directed.test(text)) return true;
+
+  // “我换头像了 / 我想改昵称”是在说用户自己，不要误判成角色资料请求。
+  const describesUser = new RegExp(`(?:^|[，。！？!?\\s])我.{0,10}(?:想|要|刚|已经|又)?${change}.{0,8}${target}`, "i");
+  if (describesUser.test(text)) return false;
+
+  // 私聊里省略主语的“换个头像吧 / 改下昵称”通常就是在对角色说。
+  const bareRequest = new RegExp(`${change}.{0,8}(?:个|一下|一个|新的)?${target}(?:吧|呗|呀|啊|看看|试试|好吗|行吗)?[。！!？?]*$|${target}.{0,8}${change}(?:一下|一个|个)?(?:吧|呗|呀|啊)?[。！!？?]*$`, "i");
+  return bareRequest.test(text);
+}
 
 function cleanSummary(value: unknown, max = 140): string {
   if (typeof value !== "string") return "";
@@ -64,6 +103,7 @@ export function buildChatProfileAutonomyPrompt(character: Character, now = Date.
     currentTraits ? `你的当前外观参考：${currentTraits}` : "当前没有额外外观参考。",
     "你拥有偶尔主动修改自己 Chat 昵称或头像的能力，但这是低频的真实账号行为，不是每轮必做任务。绝大多数普通聊天不要改资料，也不要因为看见这段说明就立刻改。只有当当下情境、心情、纪念日、新发色、玩笑、小名、刚拍到很适合的照片等真的让你自然想改时才行动。",
     "用户给你推荐头像是另一条独立机制；如果本轮用户正在推荐某张头像，请走接受/拒绝推荐机制，不要用这里的自主行为绕开用户推荐。",
+    "修改 Chat Profile 不需要、也不允许调用任何外部工具、联网、搜索、生图、文件或发送照片动作。头像只能从下方已经给出的真实候选 photoId 中直接选择；昵称直接用资料更新动作完成。",
     nameEligible
       ? "如果你确实主动决定改 Chat 昵称，在自然回复末尾额外输出一个隐藏动作，格式严格为：[资料更新 \"chat\"]{\"displayName\":\"你的新昵称\"}[/资料更新]。昵称应符合你的人设和使用语言，简短自然，不要把角色本名永久改掉。"
       : "本轮不要主动改 Chat 昵称。",

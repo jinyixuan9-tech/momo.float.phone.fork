@@ -25,7 +25,7 @@ import {
 } from "./chat-storage";
 import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-tool-protocol";
 import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent } from "./chat-avatar-intent";
-import { buildChatProfileAutonomyPrompt } from "./chat-profile-autonomy";
+import { buildChatProfileAutonomyPrompt, isExplicitChatProfileRequestTurn } from "./chat-profile-autonomy";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -1863,7 +1863,12 @@ export async function buildChatPromptMessages(
     const memConfig = loadMemoryConfig();
     const isOfflineMode = options?.appTags?.includes("offline") === true;
     const effectiveAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
-    const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode;
+    const explicitChatProfileRequest = resolvedAppId === "chat"
+        && !session.isGroup
+        && isExplicitChatProfileRequestTurn(historyForPrompt, session.id);
+    // Chat 头像/昵称修改是本地 Profile 行为，不需要工具调用。
+    // 明确的资料修改请求强制走普通文本生成，避免模型误调用生图/文件等原生工具后进入第二轮请求。
+    const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode && !explicitChatProfileRequest;
     const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
     const toolsEnabled = enabledTools.length > 0
         && (options?.forceEnableTools === true || presetIncludesToolsMacro(preset, resolvedAppId, effectiveAppTags));
