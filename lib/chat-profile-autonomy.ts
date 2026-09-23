@@ -2,6 +2,7 @@ import type { Character } from "./character-types";
 import type { ChatMessage } from "./chat-storage";
 import { getChatCharacterProfile, updateChatCharacterProfile } from "./chat-profile-storage";
 import { loadPhotoLibrary } from "./photo-library-storage";
+import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 
 const AUTONOMOUS_NAME_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const AUTONOMOUS_AVATAR_COOLDOWN_MS = 72 * 60 * 60 * 1000;
@@ -118,6 +119,37 @@ export function buildChatProfileAutonomyPrompt(character: Character, now = Date.
   ].join("\n");
 }
 
+
+async function assetToAvatarDataUrl(assetId: string): Promise<string | null> {
+  const source = await getChatImageFromIndexedDB(assetId).catch(() => null);
+  if (!source) return null;
+  if (typeof document === "undefined" || typeof Image === "undefined") return source;
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const maxSize = 640;
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+        if (!width || !height) { resolve(source); return; }
+        const scale = Math.min(1, maxSize / Math.max(width, height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { resolve(source); return; }
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      } catch {
+        resolve(source);
+      }
+    };
+    image.onerror = () => resolve(source);
+    image.src = source;
+  });
+}
+
 function parseJsonObject(content: string): Record<string, unknown> | null {
   const trimmed = content.trim();
   if (!trimmed) return null;
@@ -130,7 +162,7 @@ function parseJsonObject(content: string): Record<string, unknown> | null {
 }
 
 /** 执行已经由 action parser 隐藏掉的 Chat Profile 自主更新。 */
-export function applyAutonomousChatProfileAction(characterId: string, content: string): boolean {
+export async function applyAutonomousChatProfileAction(characterId: string, content: string): Promise<boolean> {
   const payload = parseJsonObject(content);
   if (!payload) return false;
 
@@ -160,8 +192,8 @@ export function applyAutonomousChatProfileAction(characterId: string, content: s
         && Boolean(item.assetId),
       );
       if (photo) {
-        const nextAvatar = `asset://${photo.assetId}`;
-        if (nextAvatar !== profile?.avatarUrl) {
+        const nextAvatar = await assetToAvatarDataUrl(photo.assetId);
+        if (nextAvatar && nextAvatar !== profile?.avatarUrl) {
           patch.avatarUrl = nextAvatar;
           patch.lastAutonomousAvatarAt = now;
         }

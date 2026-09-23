@@ -249,7 +249,7 @@ export async function dispatchActions(
                     await dispatchGroupChatMessage(action, effectiveCtx);
                     break;
                 case "资料更新":
-                    dispatchProfileUpdate(action, effectiveCtx);
+                    await dispatchProfileUpdate(action, effectiveCtx);
                     break;
             }
         } catch (err) {
@@ -260,11 +260,11 @@ export async function dispatchActions(
 }
 
 
-function dispatchProfileUpdate(action: ActionTag, context: ActionContext): void {
+async function dispatchProfileUpdate(action: ActionTag, context: ActionContext): Promise<void> {
     // v0.4.0 先只开放 Chat 平台；未来 WVS / LYSN 可复用同一个动作壳，按 target 分发。
     if (context.sourceEngine !== "chat") return;
     if ((action.target || "").trim().toLowerCase() !== "chat") return;
-    applyAutonomousChatProfileAction(context.characterId, action.content);
+    await applyAutonomousChatProfileAction(context.characterId, action.content);
 }
 
 /**

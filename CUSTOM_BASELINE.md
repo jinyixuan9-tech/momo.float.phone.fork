@@ -169,3 +169,12 @@
 - Profile 自主提示词新增硬约束：修改头像/昵称不得调用联网、搜索、生图、文件或发送照片工具；头像只能选择已注入的真实 Photos 候选 `photoId`。
 - 用户发图推荐头像的原有接受/拒绝机制继续保留，并同样受益于本轮工具隔离。
 - Service Worker cache version 升至 v26。
+
+
+## v0.4.2 · Avatar Recommendation + Asset Avatar Fix
+
+- 修复“用户发图推荐角色换头像”时 Custom AI Provider 可能因多模态图片 body 直接 `Failed to fetch`：该轮保留文字/图片描述与推荐语义，但不再把原始图片 base64 再次塞进聊天请求。
+- 保留原有“角色按人设接受/拒绝推荐头像”机制；接受后仍使用用户推荐的那一张。
+- 修复角色从 Photos 自主挑选头像后把 `asset://...` 直接写进 `<img src>` 导致头像空白：现在会从 IndexedDB 读取素材并压缩成可直接显示的 Chat Profile 头像 Data URL 后再落库；v0.4.0/v0.4.1 已产生的旧 `asset://` 头像也会在读取时自动迁移并先回退默认头像，避免继续显示空白。
+- `资料更新` 动作支持异步落库，确保 Photos 素材解析完成后再更新头像。
+- Service Worker cache version 升至 v27。

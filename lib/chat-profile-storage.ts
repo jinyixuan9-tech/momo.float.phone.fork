@@ -1,5 +1,6 @@
 import type { Character } from "./character-types";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 
 export const CHAT_CHARACTER_PROFILES_KEY = "ai_phone_chat_character_profiles_v1";
 export const CHAT_CHARACTER_PROFILES_UPDATED_EVENT = "chat-character-profiles-updated";
@@ -25,6 +26,52 @@ function cleanText(value: unknown, max = 80): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.trim().slice(0, max);
   return text || undefined;
+}
+
+const legacyAvatarHydrationInFlight = new Set<string>();
+
+async function compressAvatarDataUrl(source: string): Promise<string> {
+  if (typeof document === "undefined" || typeof Image === "undefined") return source;
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const maxSize = 640;
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+        if (!width || !height) { resolve(source); return; }
+        const scale = Math.min(1, maxSize / Math.max(width, height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) { resolve(source); return; }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      } catch {
+        resolve(source);
+      }
+    };
+    image.onerror = () => resolve(source);
+    image.src = source;
+  });
+}
+
+function hydrateLegacyAssetAvatar(characterId: string, assetRef: string): void {
+  if (typeof window === "undefined" || !assetRef.startsWith("asset://")) return;
+  const assetId = assetRef.slice("asset://".length).trim();
+  if (!assetId || legacyAvatarHydrationInFlight.has(characterId)) return;
+  legacyAvatarHydrationInFlight.add(characterId);
+  void getChatImageFromIndexedDB(assetId)
+    .then(async (source) => {
+      if (!source) return;
+      const avatarUrl = await compressAvatarDataUrl(source);
+      const current = loadChatCharacterProfiles()[characterId];
+      if (current?.avatarUrl !== assetRef) return;
+      updateChatCharacterProfile(characterId, { avatarUrl });
+    })
+    .catch(() => undefined)
+    .finally(() => legacyAvatarHydrationInFlight.delete(characterId));
 }
 
 function cleanAvatar(value: unknown): string | undefined {
@@ -115,5 +162,12 @@ export function resolveChatCharacterDisplayName(character: Pick<Character, "id" 
 
 export function resolveChatCharacterAvatar(character: Pick<Character, "id" | "avatar"> | null | undefined): string | null {
   if (!character) return null;
-  return getChatCharacterProfile(character.id)?.avatarUrl || character.avatar || null;
+  const avatarUrl = getChatCharacterProfile(character.id)?.avatarUrl;
+  if (avatarUrl?.startsWith("asset://")) {
+    // v0.4.0/0.4.1 曾把 Photos 的内部 asset:// 直接写进 Profile，浏览器 img 无法显示。
+    // 先回退默认头像，同时后台一次性把旧引用迁成可显示的压缩 Data URL。
+    hydrateLegacyAssetAvatar(character.id, avatarUrl);
+    return character.avatar || null;
+  }
+  return avatarUrl || character.avatar || null;
 }

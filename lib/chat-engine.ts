@@ -1880,10 +1880,20 @@ export async function buildChatPromptMessages(
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
         promptTimestampOptions,
     });
-    const promptHistory = applyVisionImagePromptLimit(
+    const avatarChangeIntent = !session.isGroup
+        ? findUserAvatarChangeIntent(historyForPrompt, session.id, character.id)
+        : null;
+    let promptHistory = applyVisionImagePromptLimit(
         truncatedHistory.map(msg => ({ ...msg })),
         resolveVisionImagePromptLimit(session),
     );
+
+    // 头像推荐是一个本地资料决策，不需要把原图的 base64 再塞进聊天请求。
+    // 某些 Custom Provider / 代理对多模态 body 很敏感，会在包含图片时直接 Failed to fetch。
+    // 这里保留消息文本与图片描述，只剥离视觉二进制；角色仍可结合用户措辞、人设和关系决定接受/拒绝。
+    if (avatarChangeIntent) {
+        promptHistory = promptHistory.map(msg => isVisionPromptImageMessage(msg) ? stripVisionPromptImageData(msg) : msg);
+    }
 
     if (config.enableImageRecognition) {
         for (const msg of promptHistory) {
@@ -1968,9 +1978,6 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
-    const avatarChangeIntent = !session.isGroup
-        ? findUserAvatarChangeIntent(historyForPrompt, session.id, character.id)
-        : null;
     // 当前状态用一条直白提示兜底；具体拉黑/解除事件已写入私聊短期记忆。
     if (!session.isGroup && session.isBlacklisted) {
         llmMessages.push({
@@ -1983,6 +1990,9 @@ export async function buildChatPromptMessages(
             role: "system",
             content: [
                 "用户在本轮发送了图片，并表达或暗示希望你把它换成自己的头像。",
+                avatarChangeIntent.image.mediaData?.label?.trim()
+                    ? `这张图片在聊天里的描述是：${avatarChangeIntent.image.mediaData.label.trim().slice(0, 240)}`
+                    : "本轮不会把原始图片二进制再次发送给模型；如果没有文字描述，就根据你的人设、关系和用户的推荐语气决定是否采用，不要假装看到了不存在的细节。",
                 "请结合你的人设与关系自主决定是否更换，不要机械接受。",
                 "如果愿意采用，必须在本次自然回复的末尾输出且只输出一次控制标记：[接受头像推荐]。",
                 "如果不愿采用，必须在回复末尾输出：[拒绝头像推荐]。",
