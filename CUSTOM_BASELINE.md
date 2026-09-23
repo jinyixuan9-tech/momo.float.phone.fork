@@ -134,3 +134,13 @@
 - 移除详情图 230px 限高。
 - Service Worker cache version 升至 v22。
 
+## v0.3.8 · Chat Profile MVP
+- 新增角色专属 Chat Profile：`displayName` 与 `avatarUrl` 只影响 Chat，不修改 Character 本体资料。
+- Chat 昵称显示优先级：用户备注 `alias` > Chat Profile 昵称 > Character.name。
+- Chat 头像显示优先级：Chat Profile 头像 > Character.avatar。
+- 聊天信息页原“设置头像”升级为“聊天资料”，可手动编辑 TA 的聊天昵称与聊天头像，并可一键恢复角色默认资料。
+- 联系人列表、会话列表、聊天室标题/头像与通知头像统一读取 Chat Profile。
+- 现有“发图并暗示对方换头像”机制接受后只更新 Chat Profile，不再污染角色卡头像。
+- Chat Profile 纳入数据管理/备份键；旧角色无 Profile 时自动回退，无需迁移旧数据。
+- 本版只补 Chat Profile 基础层，暂未加入角色主动自主改昵称/头像的 AI 行为。
+- Service Worker cache version 升至 v23。

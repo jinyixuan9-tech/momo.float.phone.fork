@@ -21,6 +21,11 @@ import { kvSet } from "@/lib/kv-db";
 import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
+    CHAT_CHARACTER_PROFILES_UPDATED_EVENT,
+    resolveChatCharacterAvatar,
+    resolveChatCharacterDisplayName,
+} from "@/lib/chat-profile-storage";
+import {
     DEFAULT_MASCOT_AVATAR,
     getMascotSettingsSnapshot,
     resolveMascotImageRef,
@@ -106,7 +111,11 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
             ...c,
             char: chars.find(ch => ch.id === c.characterId)
         })).filter(c => c.char);
-        enriched.sort((a, b) => (a.char?.name || "").localeCompare(b.char?.name || ""));
+        enriched.sort((a, b) => {
+            const aName = a.char ? resolveChatCharacterDisplayName(a.char) : "";
+            const bName = b.char ? resolveChatCharacterDisplayName(b.char) : "";
+            return aName.localeCompare(bName);
+        });
         setContacts(enriched);
 
         const posts = loadMomentPosts();
@@ -124,18 +133,22 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
         refresh();
         const handler = () => refresh();
         window.addEventListener("friend-requests-updated", handler);
-        return () => window.removeEventListener("friend-requests-updated", handler);
+        window.addEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, handler);
+        return () => {
+            window.removeEventListener("friend-requests-updated", handler);
+            window.removeEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, handler);
+        };
     }, [refresh]);
 
     /** Group contacts by pinyin initial */
     const { grouped, indexLetters } = useMemo(() => {
         const keyword = deferredContactFilter.trim().toLowerCase();
         const filtered = keyword
-            ? contacts.filter(c => (c.char?.name || "").toLowerCase().includes(keyword))
+            ? contacts.filter(c => (c.char ? resolveChatCharacterDisplayName(c.char) : "").toLowerCase().includes(keyword))
             : contacts;
         const map: Record<string, typeof contacts> = {};
         for (const c of filtered) {
-            const letter = getInitial(c.char?.name || "");
+            const letter = getInitial(c.char ? resolveChatCharacterDisplayName(c.char) : "");
             (map[letter] ??= []).push(c);
         }
         // Sort keys: A-Z first, then #
@@ -271,6 +284,8 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                                 <div className="contact-letter-header text-[var(--c-icon)] py-2 ts-13 pl-1 font-semibold">{letter}</div>
                                 {grouped[letter].map(c => {
                                     const char = c.char!;
+                                    const chatDisplayName = resolveChatCharacterDisplayName(char);
+                                    const chatAvatar = resolveChatCharacterAvatar(char);
                                     return (
                                         <div
                                             key={c.id}
@@ -281,15 +296,15 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                                             className="minimal-list-item"
                                         >
                                             <div className="minimal-avatar-wrapper">
-                                                {char.avatar ? (
-                                                    <img src={char.avatar} className="w-full h-full object-cover rounded-full" alt="" />
+                                                {chatAvatar ? (
+                                                    <img src={chatAvatar} className="w-full h-full object-cover rounded-full" alt="" />
                                                 ) : (
                                                     <ChatFallbackAvatar className="rounded-full" />
                                                 )}
                                             </div>
                                             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
                                                 <div className="ts-16 font-medium text-[var(--c-text-title)] truncate">
-                                                    {char.name || "UNNAMED"}
+                                                    {chatDisplayName || "UNNAMED"}
                                                 </div>
                                                 <div className="ts-13 text-[var(--c-text)] opacity-80 truncate font-normal">
                                                     {latestPost[char.id] || "暂无动态"}
@@ -343,17 +358,17 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                                             onClick={() => setSelectedRequest(req)}
                                         >
                                             <div className="freq-avatar">
-                                                {char?.avatar ? (
-                                                    <img src={char.avatar} alt="" />
+                                                {resolveChatCharacterAvatar(char) ? (
+                                                    <img src={resolveChatCharacterAvatar(char) || ""} alt="" />
                                                 ) : (
                                                     <div className="freq-avatar-fallback">
-                                                        {(char?.name || "?")[0]}
+                                                        {(char ? resolveChatCharacterDisplayName(char) : "?")[0]}
                                                     </div>
                                                 )}
                                             </div>
                                             <div className="flex-1 overflow-hidden">
                                                 <div className="menu-label font-medium truncate">
-                                                    {char?.name || "未知角色"}
+                                                    {char ? resolveChatCharacterDisplayName(char) : "未知角色"}
                                                 </div>
                                                 <div className="ts-12 text-[var(--c-text)] truncate mt-[2px]">
                                                     {req.message}
@@ -382,18 +397,18 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                         <div className="modal-dialog freq-dialog" onClick={e => e.stopPropagation()}>
                             {/* Avatar */}
                             <div className="freq-detail-avatar">
-                                {char?.avatar ? (
-                                    <img src={char.avatar} alt="" />
+                                {resolveChatCharacterAvatar(char) ? (
+                                    <img src={resolveChatCharacterAvatar(char) || ""} alt="" />
                                 ) : (
                                     <div className="freq-avatar-fallback" style={{ fontSize: "calc(28px*var(--app-text-scale,1))" }}>
-                                        {(char?.name || "?")[0]}
+                                        {(char ? resolveChatCharacterDisplayName(char) : "?")[0]}
                                     </div>
                                 )}
                             </div>
 
                             {/* Name */}
                             <div className="ts-17 font-semibold text-center text-[var(--c-text)]">
-                                {char?.name || "未知角色"}
+                                {char ? resolveChatCharacterDisplayName(char) : "未知角色"}
                             </div>
 
                             {/* Message */}

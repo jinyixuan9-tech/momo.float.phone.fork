@@ -29,6 +29,11 @@ import { createPortal } from "react-dom";
 
 import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
+import {
+    CHAT_CHARACTER_PROFILES_UPDATED_EVENT,
+    resolveChatCharacterAvatar,
+    resolveChatCharacterDisplayName,
+} from "@/lib/chat-profile-storage";
 import { loadCustomAppChatPlusActions, type RegisteredCustomAppChatPlusAction } from "@/lib/custom-app-chat-directives";
 import { CUSTOM_APPS_UPDATED_EVENT, getInstalledCustomApp } from "@/lib/custom-app-storage";
 import { toCustomAppIconId, type InstalledCustomApp } from "@/lib/custom-app-types";
@@ -1086,6 +1091,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const chars = loadCharacters();
         return chars.find(c => c.id === session.contactId) || null;
     });
+    const [chatProfileRevision, setChatProfileRevision] = useState(0);
     const [isGenerating, setIsGenerating] = useState(false);
     const [offlineMode, setOfflineMode] = useState(false);
     const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
@@ -1132,6 +1138,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [userIdentity, setUserIdentity] = useState<UserIdentity | null>(null);
     const [enterToSendEnabled, setEnterToSendEnabled] = useState(() => loadChatAppSettings().enterToSendEnabled === true);
     const [chatAppSettingsRevision, setChatAppSettingsRevision] = useState(0);
+    const chatDisplayName = character ? resolveChatCharacterDisplayName(character) : `User_${session.contactId.slice(-4)}`;
+    const chatAvatar = character ? resolveChatCharacterAvatar(character) : null;
+    void chatProfileRevision;
 
     // Rich media input modals
     const [richModal, setRichModal] = useState<RichModalKind | null>(null);
@@ -1745,11 +1754,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             setCharacter(latestCharacter);
             setUserIdentity(resolveUserIdentity(session.contactId, "chat"));
         };
+        const refreshChatProfile = () => setChatProfileRevision(value => value + 1);
         window.addEventListener(CHARACTERS_UPDATED_EVENT, refreshAvatars);
         window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, refreshAvatars);
+        window.addEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, refreshChatProfile);
         return () => {
             window.removeEventListener(CHARACTERS_UPDATED_EVENT, refreshAvatars);
             window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, refreshAvatars);
+            window.removeEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, refreshChatProfile);
         };
     }, [session.contactId]);
 
@@ -3004,7 +3016,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             dispatchChatMessageNotice({
                 sessionId: session.id,
                 senderName: charN,
-                avatar: character?.avatar || null,
+                avatar: chatAvatar || null,
                 body: body.slice(0, 80),
             });
         };
@@ -3016,7 +3028,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             dispatchVisibleNotice(msg);
             const body = getNoticeBody(msg);
             if (body) {
-                sendBrowserNotification(charN, { body: body.slice(0, 60), icon: character?.avatar || undefined });
+                sendBrowserNotification(charN, { body: body.slice(0, 60), icon: chatAvatar || undefined });
             }
             const afterPublishResult = entry.afterPublish?.(msg);
             if (afterPublishResult) imageReplacementTasks.push(Promise.resolve(afterPublishResult));
@@ -5482,7 +5494,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         {offlineMode ? "线下 · " : ""}
                         {session.isGroup
                             ? `${session.groupName || "群聊"}(${(session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1)})`
-                            : (session.alias || character?.name || `User_${session.contactId.slice(-4)}`)}
+                            : (session.alias || chatDisplayName || `User_${session.contactId.slice(-4)}`)}
                         {(isGenerating || isOfflineGenerating) && (
                             <span className="chat-typing-indicator">
                                 {offlineMode ? "线下生成中" : "对方正在输入"}<span className="chat-typing-dots"><i/><i/><i/></span>
@@ -5578,10 +5590,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 <div className="chat-offline-entry" data-role="assistant">
                                     {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
                                     <div className="chat-offline-avatar" aria-hidden="true">
-                                        {character?.avatar ? <img src={character.avatar} alt="" /> : <ChatFallbackAvatar />}
+                                        {chatAvatar ? <img src={chatAvatar} alt="" /> : <ChatFallbackAvatar />}
                                     </div>
                                     <div className="chat-offline-label-row">
-                                        <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (character?.name || "对方")}</div>
+                                        <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (chatDisplayName || "对方")}</div>
                                         {assistantHasHtmlPreview ? (
                                             <button
                                                 type="button"
@@ -5679,10 +5691,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                        正文用轻量 pre-wrap 渲染（避免每帧 markdown/双语解析），落库时原地换成正式排版 */
                                     <div className="chat-offline-entry" data-role="assistant">
                                         <div className="chat-offline-avatar" aria-hidden="true">
-                                            {character?.avatar ? <img src={character.avatar} alt="" /> : <ChatFallbackAvatar />}
+                                            {chatAvatar ? <img src={chatAvatar} alt="" /> : <ChatFallbackAvatar />}
                                         </div>
                                         <div className="chat-offline-label-row">
-                                            <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (character?.name || "对方")}</div>
+                                            <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (chatDisplayName || "对方")}</div>
                                         </div>
                                         <div className="chat-offline-text">
                                             <div className="chat-stream-text whitespace-pre-wrap break-words">{offlineStreamPreview.content}</div>
@@ -6259,7 +6271,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     <div key={`stream-seg-${j}`} className="chat-msg-wrapper" data-role="assistant">
                                         <div className="chat-msg-avatar flex flex-col items-center gap-1 shrink-0">
                                             <div className="w-[40px] h-[40px] rounded-[20px] bg-[var(--c-input)] overflow-hidden">
-                                                {character?.avatar ? <img src={character.avatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                                                {chatAvatar ? <img src={chatAvatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
                                             </div>
                                         </div>
                                         <div className="chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%]">

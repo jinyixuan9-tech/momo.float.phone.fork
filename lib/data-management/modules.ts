@@ -47,6 +47,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
         label: "聊天设置与待处理状态",
         keys: [
           "ai_phone_chat_settings_v1",
+          "ai_phone_chat_character_profiles_v1",
           "ai_phone_followup_schedules_v1",
           "ai_phone_timed_wake_schedules_v1",
           "ai_phone_removed_contacts_v1",

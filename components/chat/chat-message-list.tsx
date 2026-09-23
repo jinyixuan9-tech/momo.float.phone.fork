@@ -24,6 +24,11 @@ import {
 import { kvSet } from "@/lib/kv-db";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
+    CHAT_CHARACTER_PROFILES_UPDATED_EVENT,
+    resolveChatCharacterAvatar,
+    resolveChatCharacterDisplayName,
+} from "@/lib/chat-profile-storage";
+import {
     getMascotLastPreview,
     getMascotChatSnapshot,
     hydrateMascotChat,
@@ -152,11 +157,13 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
         window.addEventListener("chat-messages-updated", refreshSessions);
         window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, refreshSessions);
         window.addEventListener("characters-updated", refreshSessions);
+        window.addEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, refreshSessions);
         return () => {
             window.removeEventListener("weixin-messages-updated", refreshSessions);
             window.removeEventListener("chat-messages-updated", refreshSessions);
             window.removeEventListener(CHAT_MESSAGE_PUSHED_EVENT, refreshSessions);
             window.removeEventListener("characters-updated", refreshSessions);
+            window.removeEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, refreshSessions);
         };
     }, []);
 
@@ -300,7 +307,8 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                                 if (listTab === "group" && !s.isGroup) return false;
                                 if (!keyword) return true;
                                 if (s.isGroup) return (s.groupName || "群聊").toLowerCase().includes(keyword);
-                                const name = s.alias || allChars.find(c => c.id === s.contactId)?.name || "";
+                                const matchedCharacter = allChars.find(c => c.id === s.contactId);
+                                const name = s.alias || (matchedCharacter ? resolveChatCharacterDisplayName(matchedCharacter) : "");
                                 return name.toLowerCase().includes(keyword);
                             })
                             .sort((a, b) => {
@@ -757,6 +765,8 @@ function ContactPicker({ onClose, onSelect }: { onClose: () => void; onSelect: (
 function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, onSelect: () => void, isPinned?: boolean }) {
     const chars = loadCharacters();
     const character = chars.find(c => c.id === session.contactId);
+    const chatDisplayName = character ? resolveChatCharacterDisplayName(character) : `User_${session.contactId.slice(-4)}`;
+    const chatAvatar = character ? resolveChatCharacterAvatar(character) : null;
     const lastVisibleMessage = getLastVisibleSessionMessage(session.id);
     const lastOfflineTurn = getLastChatOfflineTurn(session.id);
     // 线下记录比线上消息新时（含只在线下聊过的会话），列表展示线下摘要
@@ -801,8 +811,8 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
                 </div>
             ) : (
                 <div className="minimal-avatar-wrapper">
-                    {character?.avatar ? (
-                        <img src={character.avatar} className="w-full h-full object-cover pointer-events-none rounded-full" alt="" />
+                    {chatAvatar ? (
+                        <img src={chatAvatar} className="w-full h-full object-cover pointer-events-none rounded-full" alt="" />
                     ) : (
                         <ChatFallbackAvatar className="pointer-events-none rounded-full" />
                     )}
@@ -812,7 +822,7 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
                 <div className="flex justify-between items-center">
                     <span className="ts-16 font-medium text-[var(--c-text-title)] truncate">
-                        {isGroup ? (session.groupName || "群聊") : (session.alias || character?.name || `User_${session.contactId.slice(-4)}`)}
+                        {isGroup ? (session.groupName || "群聊") : (session.alias || chatDisplayName || `User_${session.contactId.slice(-4)}`)}
                     </span>
                     <span className="ts-12 text-[var(--c-icon)] font-medium">
                         {formatChatUiTime(displayTime)}

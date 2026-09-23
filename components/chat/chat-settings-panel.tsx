@@ -38,8 +38,15 @@ import {
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { removeChatSessionCompletely } from "@/lib/chat-session-remove";
 import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
-import { loadCharacters, saveCharacters } from "@/lib/character-storage";
+import { loadCharacters } from "@/lib/character-storage";
 import { isAgentComputerConfigured } from "@/lib/agent-computer";
+import {
+    getChatCharacterProfile,
+    resetChatCharacterProfile,
+    resolveChatCharacterAvatar,
+    resolveChatCharacterDisplayName,
+    updateChatCharacterProfile,
+} from "@/lib/chat-profile-storage";
 import { CharacterComputerPage } from "./character-computer-page";
 import { resolveUserIdentity, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
 import { clearStatusRegionConfig, getStatusRegionConfig, hasOwnStatusRegionConfig, saveStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
@@ -466,6 +473,7 @@ export function ChatSettingsPanel({
     const [chatTransferBusy, setChatTransferBusy] = useState(false);
     const [chatTransferStatus, setChatTransferStatus] = useState<{ success: boolean; message: string } | null>(null);
     const [showAvatarDialog, setShowAvatarDialog] = useState(false);
+    const [chatProfileName, setChatProfileName] = useState(() => getChatCharacterProfile(session.contactId)?.displayName || "");
     const [, setAvatarRevision] = useState(0);
     const ownAvatarInputRef = useRef<HTMLInputElement | null>(null);
     const characterAvatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -556,10 +564,13 @@ export function ChatSettingsPanel({
 
     const characters = loadCharacters();
     const character = characters.find(c => c.id === session.contactId);
+    const chatProfile = !session.isGroup && character ? getChatCharacterProfile(character.id) : null;
+    const chatDisplayName = character ? resolveChatCharacterDisplayName(character) : `User_${session.contactId.slice(-4)}`;
+    const chatAvatar = character ? resolveChatCharacterAvatar(character) : null;
 
     const characterName = session.isGroup
         ? (groupName || session.groupName || "群聊")
-        : (alias || character?.name || `User_${session.contactId.slice(-4)}`);
+        : (alias || chatDisplayName || `User_${session.contactId.slice(-4)}`);
 
     const exportChatRecords = async () => {
         if (chatTransferBusy) return;
@@ -618,11 +629,8 @@ export function ChatSettingsPanel({
     };
 
     const updateCharacterAvatar = async (file: File) => {
-        const avatar = await fileToAvatarDataUrl(file);
-        const latest = loadCharacters();
-        saveCharacters(latest.map(item => item.id === session.contactId
-            ? { ...item, avatar, updatedAt: new Date().toISOString() }
-            : item));
+        const avatarUrl = await fileToAvatarDataUrl(file);
+        updateChatCharacterProfile(session.contactId, { avatarUrl });
         setAvatarRevision(value => value + 1);
     };
 
@@ -983,15 +991,15 @@ export function ChatSettingsPanel({
                         <button className="menu-item" onClick={() => setShowAvatarDialog(true)}>
                             <ChatInfoIcon icon={Camera} color={BINDING_ACCENTS.preset} />
                             <div className="menu-label-group">
-                                <span className="menu-label">设置头像</span>
-                                <span className="menu-desc">我的头像与对方头像</span>
+                                <span className="menu-label">聊天资料</span>
+                                <span className="menu-desc">TA 的聊天昵称 / 头像与我的头像</span>
                             </div>
                             <div className="menu-right gap-1.5">
                                 <div className="h-7 w-7 overflow-hidden rounded-full bg-[var(--c-input)] ring-2 ring-[var(--c-card-bg)]">
                                     {effectiveUserAvatar ? <img src={effectiveUserAvatar} className="h-full w-full object-cover" alt="我的头像" /> : <ChatFallbackAvatar />}
                                 </div>
                                 <div className="-ml-3 h-7 w-7 overflow-hidden rounded-full bg-[var(--c-input)] ring-2 ring-[var(--c-card-bg)]">
-                                    {character?.avatar ? <img src={character.avatar} className="h-full w-full object-cover" alt="对方头像" /> : <ChatFallbackAvatar />}
+                                    {chatAvatar ? <img src={chatAvatar} className="h-full w-full object-cover" alt="TA 的聊天头像" /> : <ChatFallbackAvatar />}
                                 </div>
                                 <ChevronRight size={16} />
                             </div>
@@ -1885,12 +1893,12 @@ export function ChatSettingsPanel({
                 </div>
             )}
             {showAvatarDialog && !session.isGroup && (
-                <div className="fixed inset-0 z-[10035] flex items-end justify-center bg-black/45 sm:items-center" role="dialog" aria-modal="true" aria-label="设置头像" onClick={() => setShowAvatarDialog(false)}>
+                <div className="fixed inset-0 z-[10035] flex items-end justify-center bg-black/45 sm:items-center" role="dialog" aria-modal="true" aria-label="聊天资料" onClick={() => setShowAvatarDialog(false)}>
                     <div className="w-full max-w-md overflow-hidden rounded-t-[24px] bg-[var(--c-page-body-bg)] px-4 pb-[max(20px,env(safe-area-inset-bottom))] pt-4 text-[var(--c-text)] shadow-2xl sm:rounded-[24px]" onClick={event => event.stopPropagation()}>
                         <div className="mb-4 flex items-center justify-between px-1">
                             <div>
-                                <div className="ts-17 font-semibold text-[var(--c-text-title)]">设置头像</div>
-                                <div className="mt-1 ts-12 opacity-55">选择要更换的头像</div>
+                                <div className="ts-17 font-semibold text-[var(--c-text-title)]">聊天资料</div>
+                                <div className="mt-1 ts-12 opacity-55">Chat Profile 只影响聊天，不修改角色本体资料</div>
                             </div>
                             <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="关闭" onClick={() => setShowAvatarDialog(false)}><X size={18} /></button>
                         </div>
@@ -1905,12 +1913,50 @@ export function ChatSettingsPanel({
                             </button>
                             <button type="button" className="rounded-2xl bg-[var(--c-card-bg)] p-4 text-left shadow-sm" onClick={() => characterAvatarInputRef.current?.click()}>
                                 <div className="mx-auto h-16 w-16 overflow-hidden rounded-full bg-[var(--c-input)]">
-                                    {character?.avatar ? <img src={character.avatar} className="h-full w-full object-cover" alt="对方头像" /> : <ChatFallbackAvatar />}
+                                    {chatAvatar ? <img src={chatAvatar} className="h-full w-full object-cover" alt="TA 的聊天头像" /> : <ChatFallbackAvatar />}
                                 </div>
-                                <div className="mt-3 text-center ts-14 font-medium text-[var(--c-text-title)]">{character?.name || "对方"}的头像</div>
-                                <div className="mt-1 text-center ts-11 opacity-50">直接更换</div>
+                                <div className="mt-3 text-center ts-14 font-medium text-[var(--c-text-title)]">{chatDisplayName || character?.name || "对方"}的聊天头像</div>
+                                <div className="mt-1 text-center ts-11 opacity-50">只影响 Chat</div>
                             </button>
                         </div>
+
+                        <div className="mt-3 rounded-2xl bg-[var(--c-card-bg)] px-4 py-3">
+                            <div className="mb-2 ts-13 font-medium text-[var(--c-text-title)]">TA 的聊天昵称</div>
+                            <div className="flex gap-2">
+                                <Input
+                                    type="text"
+                                    value={chatProfileName}
+                                    onChange={event => setChatProfileName(event.target.value)}
+                                    placeholder={character?.name || "默认继承角色名"}
+                                />
+                                <button
+                                    type="button"
+                                    className="ui-btn ui-btn-success shrink-0 px-4"
+                                    onClick={() => {
+                                        updateChatCharacterProfile(session.contactId, { displayName: chatProfileName });
+                                        setChatProfileName(getChatCharacterProfile(session.contactId)?.displayName || "");
+                                        setAvatarRevision(value => value + 1);
+                                    }}
+                                >
+                                    保存
+                                </button>
+                            </div>
+                            <div className="mt-2 ts-11 leading-5 opacity-55">你的备注仍然优先显示；没有备注时才显示 TA 自己的聊天昵称。</div>
+                        </div>
+
+                        {chatProfile && (
+                            <button
+                                type="button"
+                                className="mt-3 w-full rounded-xl py-2 ts-12 text-[var(--c-danger)]"
+                                onClick={() => {
+                                    resetChatCharacterProfile(session.contactId);
+                                    setChatProfileName("");
+                                    setAvatarRevision(value => value + 1);
+                                }}
+                            >
+                                TA 的聊天资料恢复角色默认
+                            </button>
+                        )}
 
                         {session.userAvatarOverride && (
                             <button type="button" className="mt-3 w-full rounded-xl py-2 ts-12 text-[var(--c-danger)]" onClick={() => { updateSession({ userAvatarOverride: "" }); setAvatarRevision(value => value + 1); }}>我的头像恢复全局设置</button>
@@ -1922,7 +1968,7 @@ export function ChatSettingsPanel({
                             </div>
                             <Toggle checked={notifyAvatarChange} onChange={checked => { setNotifyAvatarChange(checked); updateSession({ notifyCharacterOnUserAvatarChange: checked }); }} />
                         </div>
-                        <p className="mt-3 px-1 ts-11 leading-5 opacity-55">你也可以在聊天中发送图片并暗示对方换头像，角色会根据人设自行决定是否采用。</p>
+                        <p className="mt-3 px-1 ts-11 leading-5 opacity-55">你也可以在聊天中发送图片并暗示对方换头像；如果角色接受，只会更新 TA 的 Chat Profile，不会修改角色卡头像。</p>
                         <input ref={ownAvatarInputRef} type="file" accept="image/*" className="hidden" onChange={event => void handleAvatarInput(event, "own")} />
                         <input ref={characterAvatarInputRef} type="file" accept="image/*" className="hidden" onChange={event => void handleAvatarInput(event, "character")} />
                     </div>

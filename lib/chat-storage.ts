@@ -8,7 +8,8 @@ import {
     dbReplaceContacts, dbReplaceSessions, dbBulkPutMessages,
 } from "./chat-db";
 import { resolveUserIdentity } from "./settings-storage";
-import { loadCharacters, saveCharacters } from "./character-storage";
+import { loadCharacters } from "./character-storage";
+import { updateChatCharacterProfile } from "./chat-profile-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
@@ -453,16 +454,8 @@ function resolvePendingAvatarRecommendation(message: ChatMessage): void {
     dbPutMessage(recommendation);
 
     if (accepted && recommendation.mediaUrl) {
-        const characters = loadCharacters();
-        const index = characters.findIndex(character => character.id === session.contactId);
-        if (index >= 0) {
-            characters[index] = {
-                ...characters[index],
-                avatar: recommendation.mediaUrl,
-                updatedAt: new Date().toISOString(),
-            };
-            saveCharacters(characters);
-        }
+        // 头像推荐只修改 Chat 平台资料，不再污染角色本体头像。
+        updateChatCharacterProfile(session.contactId, { avatarUrl: recommendation.mediaUrl });
     }
 
     if (typeof window !== "undefined") {
