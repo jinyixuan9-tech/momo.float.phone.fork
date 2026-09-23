@@ -15,6 +15,9 @@ export type ChatCharacterProfile = {
   characterId: string;
   displayName?: string;
   avatarUrl?: string;
+  /** 仅记录角色“自主”修改，用于低频冷却；用户手动编辑/推荐头像不会占用这个冷却。 */
+  lastAutonomousNameAt?: number;
+  lastAutonomousAvatarAt?: number;
   updatedAt: number;
 };
 
@@ -42,6 +45,8 @@ function normalizeProfile(raw: unknown): ChatCharacterProfile | null {
     characterId: source.characterId,
     displayName: cleanText(source.displayName),
     avatarUrl: cleanAvatar(source.avatarUrl),
+    lastAutonomousNameAt: typeof source.lastAutonomousNameAt === "number" && Number.isFinite(source.lastAutonomousNameAt) ? source.lastAutonomousNameAt : undefined,
+    lastAutonomousAvatarAt: typeof source.lastAutonomousAvatarAt === "number" && Number.isFinite(source.lastAutonomousAvatarAt) ? source.lastAutonomousAvatarAt : undefined,
     updatedAt: typeof source.updatedAt === "number" && Number.isFinite(source.updatedAt) ? source.updatedAt : Date.now(),
   };
 }
@@ -70,7 +75,7 @@ export function getChatCharacterProfile(characterId: string): ChatCharacterProfi
 
 export function updateChatCharacterProfile(
   characterId: string,
-  patch: Partial<Pick<ChatCharacterProfile, "displayName" | "avatarUrl">>,
+  patch: Partial<Pick<ChatCharacterProfile, "displayName" | "avatarUrl" | "lastAutonomousNameAt" | "lastAutonomousAvatarAt">>,
 ): ChatCharacterProfile {
   const profiles = loadChatCharacterProfiles();
   const previous = profiles[characterId];
@@ -78,6 +83,8 @@ export function updateChatCharacterProfile(
     characterId,
     displayName: patch.displayName !== undefined ? cleanText(patch.displayName) : previous?.displayName,
     avatarUrl: patch.avatarUrl !== undefined ? cleanAvatar(patch.avatarUrl) : previous?.avatarUrl,
+    lastAutonomousNameAt: patch.lastAutonomousNameAt !== undefined ? patch.lastAutonomousNameAt : previous?.lastAutonomousNameAt,
+    lastAutonomousAvatarAt: patch.lastAutonomousAvatarAt !== undefined ? patch.lastAutonomousAvatarAt : previous?.lastAutonomousAvatarAt,
     updatedAt: Date.now(),
   };
 

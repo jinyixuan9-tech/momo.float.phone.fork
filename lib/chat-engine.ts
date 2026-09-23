@@ -25,6 +25,7 @@ import {
 } from "./chat-storage";
 import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-tool-protocol";
 import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent } from "./chat-avatar-intent";
+import { buildChatProfileAutonomyPrompt } from "./chat-profile-autonomy";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -1981,8 +1982,14 @@ export async function buildChatPromptMessages(
                 "如果愿意采用，必须在本次自然回复的末尾输出且只输出一次控制标记：[接受头像推荐]。",
                 "如果不愿采用，必须在回复末尾输出：[拒绝头像推荐]。",
                 "控制标记不会展示给用户；不要解释标记，也不要把它写进代码块。",
+                "本轮不要另外输出[资料更新]动作，避免绕开用户正在推荐的这张头像。",
             ].join("\n"),
         });
+    } else if (!session.isGroup && resolvedAppId === "chat" && !(options?.appTags || []).includes("offline")) {
+        const chatProfileAutonomyPrompt = buildChatProfileAutonomyPrompt(character);
+        if (chatProfileAutonomyPrompt) {
+            llmMessages.push({ role: "system", content: chatProfileAutonomyPrompt });
+        }
     }
     if (promptProfile?.output === "plain_text") {
         llmMessages.push({
