@@ -20,7 +20,7 @@ import { buildCalendarScheduleMarker } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext, buildGroupTimeContext, getSystemTimeZone, formatZonedChineseDateTime, getZonedWeekday } from "./character-time";
 import { loadPhotoLibrary } from "./photo-library-storage";
-import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings } from "./weverse-storage";
+import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, WeverseLive, WeverseLiveOrientation } from "./weverse-storage";
 
 export type WeverseMediaIntent = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
 
@@ -462,4 +462,161 @@ export async function generateWeverseArtistReply(
   const translated = String(parsed?.translated ?? original).trim() || original;
   if (!original && !translated) return null;
   return { original: original || translated, translated: translated || original };
+}
+
+
+export type GeneratedWeverseLiveSegment = {
+  kind: "speech" | "action";
+  original: string;
+  translated?: string;
+};
+
+export type GeneratedWeverseLiveComment = {
+  displayName: string;
+  original: string;
+  translated: string;
+};
+
+export type GeneratedWeverseLiveRound = {
+  title?: string;
+  segments: GeneratedWeverseLiveSegment[];
+  comments: GeneratedWeverseLiveComment[];
+  shouldEnd: boolean;
+  endingReason?: string;
+};
+
+function normalizeLiveSegments(value: unknown): GeneratedWeverseLiveSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const kind: "speech" | "action" = String(item.kind || "").toLowerCase() === "action" ? "action" : "speech";
+    const original = String(item.original ?? item.text ?? "").trim();
+    const translated = String(item.translated ?? "").trim();
+    if (!original) return [];
+    return [{ kind, original, translated: kind === "speech" && translated && translated !== original ? translated : undefined }];
+  }).slice(0, 8);
+}
+
+function normalizeLiveComments(value: unknown): GeneratedWeverseLiveComment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const original = String(item.original ?? item.body ?? "").trim();
+    const translated = String(item.translated ?? original).trim() || original;
+    if (!original && !translated) return [];
+    return [{
+      displayName: String(item.displayName ?? "익명팬").trim() || "익명팬",
+      original: original || translated,
+      translated: translated || original,
+    }];
+  }).slice(0, 18);
+}
+
+function liveTranscriptContext(live: WeverseLive): string {
+  const segments = live.segments.slice(-14).map((segment) => {
+    const kind = segment.kind === "action" ? "动作" : segment.kind === "system" ? "系统" : "角色";
+    return `${kind}: ${segment.original}${segment.translated ? ` / ${segment.translated}` : ""}`;
+  });
+  const comments = live.comments.slice(-20).map((comment) => `${comment.authorType === "user" ? "用户" : comment.authorName}: ${comment.originalBody || comment.body}`);
+  return [segments.length ? `最近直播内容：\n${segments.join("\n")}` : "", comments.length ? `最近弹幕：\n${comments.join("\n")}` : ""].filter(Boolean).join("\n\n");
+}
+
+function liveFormatRules(orientation: WeverseLiveOrientation, opening = false): string[] {
+  return [
+    "这是 Weverse 的成员私人 LIVE，不是私聊，也不是正式节目主持。角色可以随意聊天、吃饭、推荐歌、等人进来、发呆、准备工作或睡前陪粉丝一会儿。",
+    "直播持续多久完全按角色人设与当次情境决定：有人会黏很久，有人活动后台只匆匆播几分钟。不要预设固定轮数。",
+    opening
+      ? "现在是刚开播阶段。通常先调一下状态、等观众陆续进来、随口说几句；不要一开场就进入高强度问答或大型节目。"
+      : "这是直播中途的一小段推进。延续之前的话题与状态，不要像新开一场直播一样重新自我介绍。",
+    "角色语言与动作分开输出。speech 使用角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。action 是第三人称环境/动作旁白，只写简体中文，不要做双语。",
+    `当前直播画面模板为${orientation === "portrait" ? "竖屏" : "横屏"}。这只影响镜头/动作的自然感，不要描述真实视频文件或画质技术。`,
+    "粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。韩语为主，少量日语、英语、中文；不要人人都像资深粉丝。",
+    opening
+      ? "开场留言以轻松即时反应为主，例如终于开播、爱你、今天好帅/可爱、最近吃什么、是不是瘦了胖了、最近在忙什么等；不要一上来全是深度问题。"
+      : "中途留言可以逐渐更具体，但仍要混入很短的感叹、路人式发言、造型/吃饭/近况问题，避免所有评论都像采访提纲。",
+    "角色不需要回应每条评论。即使用户发了多条，也可以只看到其中一条、综合回应、完全没看到，或继续自己原本的话题。",
+    "不要公开地下关系、私人秘密、只在私聊成立的称呼或单一对象的私密承诺。",
+  ];
+}
+
+export async function generateWeverseLiveOpening(
+  characterId: string,
+  community: WeverseCommunity,
+  options?: { theme?: string; orientation?: WeverseLiveOrientation; now?: Date },
+): Promise<GeneratedWeverseLiveRound> {
+  const now = options?.now ?? new Date();
+  const orientation = options?.orientation === "portrait" ? "portrait" : "landscape";
+  const resolved = await resolveCharacterGeneration(characterId, community, { now });
+  const theme = String(options?.theme || "").trim();
+  const raw = await sendLLMRequest(
+    resolved.apiConfig,
+    resolved.preset,
+    [
+      ...resolved.messages,
+      {
+        role: "system",
+        content: [
+          ...liveFormatRules(orientation, true),
+          theme ? `用户给了一个软主题：${theme}。这是方向，不是脚本；按人设自然发挥、允许跑题。` : "用户没有指定主题。请结合人设、近期经历、当前时间与状态，自然决定为什么突然开播以及想聊什么。",
+          "生成本场直播标题、开场的 3~5 个短 segment（动作与说话交错即可）和 9~14 条初始观众留言。",
+          "只输出 JSON，不要 Markdown。格式：{\"title\":\"...\",\"segments\":[{\"kind\":\"action\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":false}",
+        ].join("\n"),
+      },
+      { role: "user", content: theme ? `现在按这个主题开一场 LIVE：${theme}` : "现在自然地开一场 Weverse LIVE。" },
+    ],
+    resolved.regexes,
+    { characterName: `Weverse LIVE:${resolved.character.name}`, userName: resolved.userName },
+    { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
+  );
+  const parsed = extractJsonObject(raw);
+  const segments = normalizeLiveSegments(parsed?.segments);
+  const comments = normalizeLiveComments(parsed?.comments).slice(0, 14);
+  const title = String(parsed?.title ?? "").trim() || `${resolved.character.name} LIVE`;
+  if (!segments.length) throw new ChatEngineError("这次没有生成有效 LIVE 开场，请重试。");
+  return { title, segments, comments, shouldEnd: false };
+}
+
+export async function generateWeverseLiveContinuation(
+  characterId: string,
+  community: WeverseCommunity,
+  live: WeverseLive,
+  options?: { userComments?: string[]; now?: Date },
+): Promise<GeneratedWeverseLiveRound> {
+  const now = options?.now ?? new Date();
+  const resolved = await resolveCharacterGeneration(characterId, community, { now });
+  const userComments = (options?.userComments || []).map((item) => item.trim()).filter(Boolean).slice(0, 8);
+  const raw = await sendLLMRequest(
+    resolved.apiConfig,
+    resolved.preset,
+    [
+      ...resolved.messages,
+      {
+        role: "system",
+        content: [
+          ...liveFormatRules(live.orientation, false),
+          `本场 LIVE 标题：${live.title}`,
+          live.theme ? `最初的软主题：${live.theme}` : "本场没有预设主题。",
+          `这已经是第 ${Math.max(1, live.roundCount + 1)} 段推进。`,
+          liveTranscriptContext(live),
+          userComments.length ? `用户刚刚准备发送的多条弹幕如下。它们属于同一个观众，但你不必逐条回应：\n${userComments.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "用户这一轮没有发弹幕，只是在继续观看。",
+          "生成接下来的 2~5 个短 segment 和 7~12 条新观众留言。根据角色人设与当前情境判断是否已经自然到收尾时机。若该下播，shouldEnd=true，并让最后的 segment 自然告别；否则 false。",
+          "不要因为用户点了继续播放就机械延长；也不要因为已经播了几轮就强制结束。",
+          "只输出 JSON，不要 Markdown。格式：{\"segments\":[{\"kind\":\"action\",\"original\":\"中文动作\"},{\"kind\":\"speech\",\"original\":\"角色原话\",\"translated\":\"中文翻译\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"shouldEnd\":true或false,\"endingReason\":\"可空\"}",
+        ].filter(Boolean).join("\n"),
+      },
+      { role: "user", content: userComments.length ? "把这些弹幕放进直播间并继续这一小段 LIVE。" : "继续播放下一小段 LIVE。" },
+    ],
+    resolved.regexes,
+    { characterName: `Weverse LIVE:${resolved.character.name}`, userName: resolved.userName },
+    { appId: "weverse", appTags: ["weverse", "live"], skipOutputRegex: true },
+  );
+  const parsed = extractJsonObject(raw);
+  const segments = normalizeLiveSegments(parsed?.segments);
+  const comments = normalizeLiveComments(parsed?.comments).slice(0, 12);
+  const shouldEnd = parsed?.shouldEnd === true || String(parsed?.shouldEnd).toLowerCase() === "true";
+  const endingReason = String(parsed?.endingReason ?? "").trim() || undefined;
+  if (!segments.length && !comments.length) throw new ChatEngineError("这次 LIVE 没有生成新的内容，请重试。");
+  return { segments, comments, shouldEnd, endingReason };
 }

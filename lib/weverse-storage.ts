@@ -51,6 +51,46 @@ export type WeversePost = {
   historical?: boolean;
   comments: WeverseComment[];
 };
+
+export type WeverseLiveOrientation = "landscape" | "portrait";
+export type WeverseLiveStatus = "live" | "ended";
+export type WeverseLiveSegmentKind = "speech" | "action" | "system";
+export type WeverseLiveSegment = {
+  id: string;
+  kind: WeverseLiveSegmentKind;
+  characterId?: string;
+  original: string;
+  translated?: string;
+  createdAt: number;
+};
+export type WeverseLiveComment = {
+  id: string;
+  authorType: "user" | "fan";
+  authorId: string;
+  authorName: string;
+  body: string;
+  originalBody?: string;
+  createdAt: number;
+};
+export type WeverseLive = {
+  id: string;
+  communityId: string;
+  hostCharacterIds: string[];
+  liveType: "visual";
+  orientation: WeverseLiveOrientation;
+  status: WeverseLiveStatus;
+  title: string;
+  theme?: string;
+  startedAt: number;
+  endedAt?: number;
+  viewerCount: number;
+  peakViewerCount: number;
+  heartCount: number;
+  roundCount: number;
+  segments: WeverseLiveSegment[];
+  comments: WeverseLiveComment[];
+};
+
 export type WeverseUserProfile = { displayName?: string; avatarUrl?: string; bio?: string };
 export type WeverseSettings = {
   translationDefault: "translated" | "original";
@@ -60,14 +100,14 @@ export type WeverseSettings = {
   generationScope: "current" | "all";
   notifications: { artistReply: boolean; fanReply: boolean; artistPost: boolean; officialPost: boolean; live: boolean };
 };
-export type WeverseState = { version: 4; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
+export type WeverseState = { version: 5; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
 
 export const DEFAULT_WEV_SETTINGS: WeverseSettings = {
   translationDefault: "translated", autoTranslateComments: true, fanActivity: "normal", fanLanguagePreset: "korean_mixed", generationScope: "current",
   notifications: { artistReply: true, fanReply: true, artistPost: true, officialPost: true, live: true },
 };
-const EMPTY_STATE: WeverseState = { version: 4, communities: [], posts: [], notices: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
-function cloneEmpty(): WeverseState { return { version: 4, communities: [], posts: [], notices: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
+const EMPTY_STATE: WeverseState = { version: 5, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
+function cloneEmpty(): WeverseState { return { version: 5, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
 function uniqueStrings(value: unknown): string[] { return Array.isArray(value) ? Array.from(new Set(value.filter((v): v is string => typeof v === "string" && Boolean(v.trim())).map(v => v.trim()))) : []; }
 function finiteNonNegative(value: unknown, fallback = 0): number { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback; }
 function normalizeSettings(value: unknown): WeverseSettings {
@@ -77,6 +117,52 @@ function normalizeSettings(value: unknown): WeverseSettings {
     fanActivity: raw.fanActivity === "quiet" || raw.fanActivity === "lively" ? raw.fanActivity : "normal", fanLanguagePreset: "korean_mixed", generationScope: raw.generationScope === "all" ? "all" : "current",
     notifications: { artistReply: notifications.artistReply !== false, fanReply: notifications.fanReply !== false, artistPost: notifications.artistPost !== false, officialPost: notifications.officialPost !== false, live: notifications.live !== false } };
 }
+function normalizeLiveSegment(raw: unknown): WeverseLiveSegment | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Partial<WeverseLiveSegment>;
+  if (typeof item.id !== "string") return null;
+  const kind: WeverseLiveSegmentKind = item.kind === "action" || item.kind === "system" ? item.kind : "speech";
+  const original = typeof item.original === "string" ? item.original.trim() : "";
+  if (!original) return null;
+  return {
+    id: item.id, kind, characterId: typeof item.characterId === "string" && item.characterId ? item.characterId : undefined,
+    original, translated: typeof item.translated === "string" && item.translated.trim() ? item.translated.trim() : undefined,
+    createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
+  };
+}
+function normalizeLiveComment(raw: unknown): WeverseLiveComment | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Partial<WeverseLiveComment>;
+  if (typeof item.id !== "string") return null;
+  const body = typeof item.body === "string" ? item.body.trim() : "";
+  if (!body) return null;
+  return {
+    id: item.id, authorType: item.authorType === "user" ? "user" : "fan",
+    authorId: typeof item.authorId === "string" && item.authorId ? item.authorId : "fan",
+    authorName: typeof item.authorName === "string" && item.authorName.trim() ? item.authorName.trim() : "익명팬",
+    body, originalBody: typeof item.originalBody === "string" && item.originalBody.trim() ? item.originalBody.trim() : undefined,
+    createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
+  };
+}
+function normalizeLive(raw: unknown): WeverseLive | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Partial<WeverseLive>;
+  if (typeof item.id !== "string" || typeof item.communityId !== "string") return null;
+  const startedAt = typeof item.startedAt === "number" && Number.isFinite(item.startedAt) ? item.startedAt : Date.now();
+  const segments = Array.isArray(item.segments) ? item.segments.map(normalizeLiveSegment).filter((v): v is WeverseLiveSegment => Boolean(v)) : [];
+  const comments = Array.isArray(item.comments) ? item.comments.map(normalizeLiveComment).filter((v): v is WeverseLiveComment => Boolean(v)) : [];
+  const viewerCount = finiteNonNegative(item.viewerCount, 0);
+  return {
+    id: item.id, communityId: item.communityId, hostCharacterIds: uniqueStrings(item.hostCharacterIds), liveType: "visual",
+    orientation: item.orientation === "portrait" ? "portrait" : "landscape",
+    status: item.status === "ended" ? "ended" : "live", title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "LIVE",
+    theme: typeof item.theme === "string" && item.theme.trim() ? item.theme.trim() : undefined, startedAt,
+    endedAt: typeof item.endedAt === "number" && Number.isFinite(item.endedAt) ? item.endedAt : undefined,
+    viewerCount, peakViewerCount: Math.max(viewerCount, finiteNonNegative(item.peakViewerCount, viewerCount)),
+    heartCount: finiteNonNegative(item.heartCount, 0), roundCount: finiteNonNegative(item.roundCount, 0), segments, comments,
+  };
+}
+
 function normalizeComment(raw: unknown): WeverseComment | null {
   if (!raw || typeof raw !== "object") return null; const item = raw as Partial<WeverseComment>; if (typeof item.id !== "string" || typeof item.authorId !== "string") return null;
   const authorType: WeverseAuthorType = item.authorType === "fan" || item.authorType === "official" || item.authorType === "artist" ? item.authorType : "user";
@@ -117,7 +203,8 @@ function normalizeState(raw: unknown): WeverseState {
   const notices: WeverseNotice[] = rawNotices.filter((item: any) => item && typeof item.id === "string" && typeof item.communityId === "string" && typeof item.title === "string").map((item: any) => ({
     id: item.id, communityId: item.communityId, title: item.title, body: typeof item.body === "string" ? item.body : "", originalBody: typeof item.originalBody === "string" ? item.originalBody : undefined, imageUrl: typeof item.imageUrl === "string" ? item.imageUrl : undefined, photoLibraryId: typeof item.photoLibraryId === "string" ? item.photoLibraryId : undefined, photoSource: item.photoSource === "album" || item.photoSource === "generated" || item.photoSource === "manual" ? item.photoSource : undefined, photoDescription: typeof item.photoDescription === "string" ? item.photoDescription : undefined, createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(), historical: item.historical === true,
   }));
-  return { version: 4, communities, posts, notices, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
+  const lives = Array.isArray((source as any).lives) ? (source as any).lives.map(normalizeLive).filter((v: WeverseLive | null): v is WeverseLive => Boolean(v)) : [];
+  return { version: 5, communities, posts, notices, lives, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
 }
 export function loadWeverseState(): WeverseState { if (typeof window === "undefined") return EMPTY_STATE; try { const raw=kvGet(WEV_STATE_KEY); return raw ? normalizeState(JSON.parse(raw)) : cloneEmpty(); } catch { return cloneEmpty(); } }
 export function saveWeverseState(state: WeverseState): WeverseState { const normalized=normalizeState(state); if (typeof window !== "undefined") { kvSet(WEV_STATE_KEY, JSON.stringify(normalized)); window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT)); } return normalized; }
@@ -162,7 +249,7 @@ export function updateWeverseMemberProfile(
 }
 export function updateWeverseSettings(patch: Partial<WeverseSettings>): WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,settings:normalizeSettings({...state.settings,...patch,notifications:{...state.settings.notifications,...(patch.notifications||{})}})}); }
 export function upsertWeverseCommunity(community: WeverseCommunity): WeverseState { const state=loadWeverseState(); const i=state.communities.findIndex(v=>v.id===community.id); const communities=[...state.communities]; if(i>=0) communities[i]=community; else communities.unshift(community); return saveWeverseState({...state,communities}); }
-export function deleteWeverseCommunity(communityId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,communities:state.communities.filter(v=>v.id!==communityId),posts:state.posts.filter(v=>v.communityId!==communityId),notices:state.notices.filter(v=>v.communityId!==communityId)}); }
+export function deleteWeverseCommunity(communityId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,communities:state.communities.filter(v=>v.id!==communityId),posts:state.posts.filter(v=>v.communityId!==communityId),notices:state.notices.filter(v=>v.communityId!==communityId),lives:state.lives.filter(v=>v.communityId!==communityId)}); }
 export function addWeversePost(post:WeversePost):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,posts:[post,...state.posts]}); }
 export function addWeversePosts(posts:WeversePost[]):WeverseState { if(!posts.length) return loadWeverseState(); const state=loadWeverseState(); return saveWeverseState({...state,posts:[...posts,...state.posts]}); }
 export function updateWeversePost(postId:string,patch:Partial<WeversePost>):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,posts:state.posts.map(v=>v.id===postId?{...v,...patch}:v)}); }
@@ -175,3 +262,16 @@ export function createWeverseId(prefix:string):string { return `${prefix}_${Date
 export function addWeverseNotice(notice:WeverseNotice):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,notices:[notice,...state.notices]}); }
 export function updateWeverseNotice(noticeId:string,patch:Partial<WeverseNotice>):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,notices:state.notices.map(v=>v.id===noticeId?{...v,...patch}:v)}); }
 export function deleteWeverseNotice(noticeId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,notices:state.notices.filter(v=>v.id!==noticeId)}); }
+
+export function addWeverseLive(live: WeverseLive): WeverseState {
+  const state = loadWeverseState();
+  return saveWeverseState({ ...state, lives: [live, ...state.lives.filter((item) => item.id !== live.id)] });
+}
+export function updateWeverseLive(liveId: string, patch: Partial<WeverseLive>): WeverseState {
+  const state = loadWeverseState();
+  return saveWeverseState({ ...state, lives: state.lives.map((item) => item.id === liveId ? { ...item, ...patch } : item) });
+}
+export function deleteWeverseLive(liveId: string): WeverseState {
+  const state = loadWeverseState();
+  return saveWeverseState({ ...state, lives: state.lives.filter((item) => item.id !== liveId) });
+}
