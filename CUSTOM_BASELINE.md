@@ -178,3 +178,10 @@
 - 修复角色从 Photos 自主挑选头像后把 `asset://...` 直接写进 `<img src>` 导致头像空白：现在会从 IndexedDB 读取素材并压缩成可直接显示的 Chat Profile 头像 Data URL 后再落库；v0.4.0/v0.4.1 已产生的旧 `asset://` 头像也会在读取时自动迁移并先回退默认头像，避免继续显示空白。
 - `资料更新` 动作支持异步落库，确保 Photos 素材解析完成后再更新头像。
 - Service Worker cache version 升至 v27。
+
+## v0.4.3 · Recommended Avatar Apply Fix
+
+- 修复“用户推荐头像，角色口头接受但 Chat Profile 没真正换上”的问题。
+- 头像推荐接受判定补充中文“换了/换好了/已经换”等表达，并兼容常见韩语、日语、英语接受/拒绝措辞；拒绝判断优先，避免误判。
+- 用户推荐的原始图片不再直接整张写入 Chat Profile：接受后会先解析并压缩成头像尺寸，再更新平台头像，避免超大 data URL 或内部 asset 引用导致显示/持久化异常。
+- 推荐头像仍只影响 Chat Profile，不修改 Character 本体；自主从 Photos 换头像逻辑保持不变。

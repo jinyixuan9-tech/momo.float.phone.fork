@@ -74,6 +74,32 @@ function hydrateLegacyAssetAvatar(characterId: string, assetRef: string): void {
     .finally(() => legacyAvatarHydrationInFlight.delete(characterId));
 }
 
+
+/**
+ * 把任意可显示图片来源规范化成 Chat Profile 头像。
+ * - asset:// 会先从 IndexedDB 取出真实图片；
+ * - data/http(s) 会尽量压缩成头像尺寸，避免把原始大图整张塞进 Profile；
+ * - 最终只修改 Chat 平台资料，不触碰 Character 本体。
+ */
+export async function setChatCharacterAvatarFromSource(characterId: string, source: string): Promise<boolean> {
+  const raw = typeof source === "string" ? source.trim() : "";
+  if (!raw) return false;
+
+  let resolved = raw;
+  if (raw.startsWith("asset://")) {
+    const assetId = raw.slice("asset://".length).trim();
+    if (!assetId) return false;
+    const stored = await getChatImageFromIndexedDB(assetId).catch(() => null);
+    if (!stored) return false;
+    resolved = stored;
+  }
+
+  const avatarUrl = await compressAvatarDataUrl(resolved);
+  if (!avatarUrl) return false;
+  updateChatCharacterProfile(characterId, { avatarUrl });
+  return true;
+}
+
 function cleanAvatar(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.trim();

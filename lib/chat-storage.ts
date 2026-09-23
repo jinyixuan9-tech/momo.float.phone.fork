@@ -9,7 +9,7 @@ import {
 } from "./chat-db";
 import { resolveUserIdentity } from "./settings-storage";
 import { loadCharacters } from "./character-storage";
-import { updateChatCharacterProfile } from "./chat-profile-storage";
+import { setChatCharacterAvatarFromSource, updateChatCharacterProfile } from "./chat-profile-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
@@ -454,8 +454,24 @@ function resolvePendingAvatarRecommendation(message: ChatMessage): void {
     dbPutMessage(recommendation);
 
     if (accepted && recommendation.mediaUrl) {
-        // 头像推荐只修改 Chat 平台资料，不再污染角色本体头像。
-        updateChatCharacterProfile(session.contactId, { avatarUrl: recommendation.mediaUrl });
+        // 用户推荐的原图可能是很大的 data URL，不能直接整张塞进 Profile。
+        // 先规范化/压缩成真正可显示的 Chat 头像；处理失败时保持原头像，不污染角色本体。
+        void setChatCharacterAvatarFromSource(session.contactId, recommendation.mediaUrl)
+            .then(applied => {
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("chat-avatar-recommendation-resolved", {
+                        detail: { sessionId: message.sessionId, accepted: applied, requestedAccepted: true },
+                    }));
+                }
+            })
+            .catch(() => {
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("chat-avatar-recommendation-resolved", {
+                        detail: { sessionId: message.sessionId, accepted: false, requestedAccepted: true },
+                    }));
+                }
+            });
+        return;
     }
 
     if (typeof window !== "undefined") {
