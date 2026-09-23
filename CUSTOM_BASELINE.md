@@ -236,3 +236,9 @@
 - LIVE 结束时为实际参与者和纯围观艺人分别写入简短角色视角记忆，区分“主持/连线参与”和“普通围观”，不向角色灌入整场逐字稿。
 - Official LIVE 暂不实现，后续与 Official 账号主页一起设计；普通 LIVE TTS 与纯语音 LIVE 仍留待后续。
 - Weverse state version 升至 v6；Service Worker cache version 升至 v33。
+
+### v0.5.3 · WVS LIVE TTS / Artist Comments Drawer
+- 在普通文字 LIVE Stage 左下加入 TTS 按钮：手动点播当前最新可见角色原话，不自动播放；动作、翻译不朗读；支持停止与重复播放。
+- TTS 使用 `resolveVoiceConfig(characterId, "weverse")`，多人连线时按每段 speech 的 `characterId` 使用各自绑定语音；音频做小型内存缓存，重听无需重复合成。
+- 艺人评论由全屏覆盖页改为直播页内折叠抽屉，入口再次点击收起，内部独立滚动，直播窗口始终保持可见。
+- Service Worker cache version 升至 v34。

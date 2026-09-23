@@ -139,3 +139,8 @@
 - 同 Community 成员也可中途连线加入同一 LiveSession。连线不改变页面成视频分屏，只在 Stage 中以 WVS ID 区分发言者，并用系统行标注加入/离开。艺人围观与连线参与是两种独立状态。
 - 结束后为主持/连线参与者与纯围观艺人分别生成精简的 WVS LIVE 记忆投影，避免角色忘记自己来过；不同 Community 暂不互相围观或连线。
 - Official LIVE 延后与 Official 账号主页一起实现；普通 LIVE 的点播 TTS 与纯语音 LIVE 也不在本版。
+
+## v0.5.3 · LIVE TTS / Artist comments drawer
+- 普通文字 LIVE 接入 Weverse 绑定的 TTS：直播 Stage 左下提供单一语音按钮，点击只朗读当前最新一条可见角色原话；不自动播放，不朗读动作或中文翻译；再次点击可停止，播完后可重复播放。
+- 多人连线时按该 speech segment 的 `characterId` 解析各自 Weverse 语音绑定，所以不同成员自动使用自己的声音。
+- 艺人评论不再跳转全屏页面：`X 条艺人评论` 在当前直播页内展开/收起半屏折叠抽屉，直播 Stage 始终可见，抽屉内部独立滚动。
