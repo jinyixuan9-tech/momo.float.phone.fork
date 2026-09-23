@@ -133,24 +133,13 @@ export function inferAvatarDecisionFromReply(text: string): "accepted" | "declin
     if (!normalized) return null;
     if (/[\[【]\s*拒绝头像推荐\s*[\]】]/.test(normalized)) return "declined";
     if (/[\[【]\s*接受头像推荐\s*[\]】]/.test(normalized)) return "accepted";
-
-    // 拒绝永远优先，避免“我不换了”被后面的“换了”子串误判成接受。
-    const declined = [
-        /(?:不想|不愿|不要|不用|别|不换|算了|拒绝|还是算了|先不换|不太想).{0,12}(?:头像|这张|照片|图片|它)?/,
-        /(?:头像|这张|照片|图片|它).{0,12}(?:不想|不愿|不要|不用|不换|算了|拒绝)/,
-        /(?:안|않|말자|싫|그냥).{0,12}(?:바꾸|바꿀|쓸|둘|유지|프사|프로필)|(?:프사|프로필|이걸로).{0,12}(?:안|않|말자|싫|그대로|유지)/i,
-        /(?:変えない|変えたくない|使わない|やめとく|今のまま|そのまま)/i,
-        /(?:won['’]?t|don['’]?twant|notgoingto|keep(?:ing)?(?:my)?current|pass(?:on)?this)/i,
-    ].some(pattern => pattern.test(normalized));
-    if (declined) return "declined";
-
-    // 模型偶尔会漏掉隐藏控制标记；覆盖中/韩/日/英里常见的“已经换了/就用这张”表达。
-    const accepted = [
-        /(?:就用|换上|换成|换了|换好|已经换|设成|设为|用上|当作头像|用作头像|收下|采用|就这个|就它).{0,12}(?:这张|照片|图片|它|头像)?/,
-        /(?:这张|照片|图片|它).{0,14}(?:就用|换上|换成|换了|设成|设为|当头像|用上|收下|采用|挺好|可以)/,
-        /(?:바꿨어|바꿨|바꿀게|바꿔둘게|갈아꼈|쓸게|써볼게|이걸로할게|이걸로바꿀게|이걸로쓸게|이걸로해둘게|이걸로해놨어|프사로할게|프로필로할게|프사바꿨|프로필바꿨|좋아이걸로)/i,
-        /(?:変えた|変えたよ|変えるね|これにする|これ使う|これに変える|アイコンにする)/i,
-        /(?:changedit|i['’]?llusethis|i['’]?lluseit|usingthis|set(?:it|this)as(?:my)?(?:avatar|profilepicture)|make(?:it|this)(?:my)?(?:avatar|profilepicture))/i,
-    ].some(pattern => pattern.test(normalized));
-    return accepted ? "accepted" : null;
+    if (/(?:不想|不愿|不要|不用|别|不换|算了|拒绝|还是算了).{0,10}(?:头像|这张|照片|图片|它)?/.test(normalized)
+        || /(?:头像|这张|照片|图片|它).{0,10}(?:不想|不愿|不要|不用|不换|算了|拒绝)/.test(normalized)) {
+        return "declined";
+    }
+    if (/(?:就用|换上|换成|设成|设为|当作头像|用作头像|收下|采用).{0,10}(?:这张|照片|图片|它|头像)?/.test(normalized)
+        || /(?:这张|照片|图片|它).{0,12}(?:就用|换上|换成|设成|设为|当头像|收下|采用)/.test(normalized)) {
+        return "accepted";
+    }
+    return null;
 }

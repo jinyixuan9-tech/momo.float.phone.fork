@@ -1863,11 +1863,14 @@ export async function buildChatPromptMessages(
     const memConfig = loadMemoryConfig();
     const isOfflineMode = options?.appTags?.includes("offline") === true;
     const effectiveAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
+    const recommendationTurnForTools = resolvedAppId === "chat" && !session.isGroup
+        ? findUserAvatarChangeIntent(historyForPrompt, session.id, character.id)
+        : null;
     const explicitChatProfileRequest = resolvedAppId === "chat"
         && !session.isGroup
+        && !recommendationTurnForTools
         && isExplicitChatProfileRequestTurn(historyForPrompt, session.id);
-    // Chat 头像/昵称修改是本地 Profile 行为，不需要工具调用。
-    // 明确的资料修改请求强制走普通文本生成，避免模型误调用生图/文件等原生工具后进入第二轮请求。
+    // 只隔离“角色自己改 Chat Profile”的本地动作；用户推荐头像继续走原有推荐链。
     const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode && !explicitChatProfileRequest;
     const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
     const toolsEnabled = enabledTools.length > 0
@@ -1880,20 +1883,10 @@ export async function buildChatPromptMessages(
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
         promptTimestampOptions,
     });
-    const avatarChangeIntent = !session.isGroup
-        ? findUserAvatarChangeIntent(historyForPrompt, session.id, character.id)
-        : null;
-    let promptHistory = applyVisionImagePromptLimit(
+    const promptHistory = applyVisionImagePromptLimit(
         truncatedHistory.map(msg => ({ ...msg })),
         resolveVisionImagePromptLimit(session),
     );
-
-    // 头像推荐是一个本地资料决策，不需要把原图的 base64 再塞进聊天请求。
-    // 某些 Custom Provider / 代理对多模态 body 很敏感，会在包含图片时直接 Failed to fetch。
-    // 这里保留消息文本与图片描述，只剥离视觉二进制；角色仍可结合用户措辞、人设和关系决定接受/拒绝。
-    if (avatarChangeIntent) {
-        promptHistory = promptHistory.map(msg => isVisionPromptImageMessage(msg) ? stripVisionPromptImageData(msg) : msg);
-    }
 
     if (config.enableImageRecognition) {
         for (const msg of promptHistory) {
@@ -1978,6 +1971,9 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
+    const avatarChangeIntent = !session.isGroup
+        ? findUserAvatarChangeIntent(historyForPrompt, session.id, character.id)
+        : null;
     // 当前状态用一条直白提示兜底；具体拉黑/解除事件已写入私聊短期记忆。
     if (!session.isGroup && session.isBlacklisted) {
         llmMessages.push({
@@ -1990,14 +1986,10 @@ export async function buildChatPromptMessages(
             role: "system",
             content: [
                 "用户在本轮发送了图片，并表达或暗示希望你把它换成自己的头像。",
-                avatarChangeIntent.image.mediaData?.label?.trim()
-                    ? `这张图片在聊天里的描述是：${avatarChangeIntent.image.mediaData.label.trim().slice(0, 240)}`
-                    : "本轮不会把原始图片二进制再次发送给模型；如果没有文字描述，就根据你的人设、关系和用户的推荐语气决定是否采用，不要假装看到了不存在的细节。",
                 "请结合你的人设与关系自主决定是否更换，不要机械接受。",
                 "如果愿意采用，必须在本次自然回复的末尾输出且只输出一次控制标记：[接受头像推荐]。",
                 "如果不愿采用，必须在回复末尾输出：[拒绝头像推荐]。",
                 "控制标记不会展示给用户；不要解释标记，也不要把它写进代码块。",
-                "本轮不要另外输出[资料更新]动作，避免绕开用户正在推荐的这张头像。",
             ].join("\n"),
         });
     } else if (!session.isGroup && resolvedAppId === "chat" && !(options?.appTags || []).includes("offline")) {
