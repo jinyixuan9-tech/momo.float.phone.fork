@@ -5,7 +5,16 @@ export const WEV_UPDATED_EVENT = "weverse-updated";
 registerKvMigration(WEV_STATE_KEY);
 
 export type WeverseAccountProfile = { displayName: string; avatarUrl?: string; bio?: string };
-export type WeverseMemberProfile = { characterId: string; displayName?: string; avatarUrl?: string; coverUrl?: string; bio?: string };
+export type WeverseMemberProfile = {
+  characterId: string;
+  displayName?: string;
+  avatarUrl?: string;
+  coverUrl?: string;
+  bio?: string;
+  /** 仅记录角色自主修改，用于低频冷却；用户手动编辑/推荐头像不占用。 */
+  lastAutonomousNameAt?: number;
+  lastAutonomousAvatarAt?: number;
+};
 export type WeverseHistoryMode = "new" | "existing" | "custom";
 
 export type WeverseCommunity = {
@@ -113,6 +122,44 @@ function normalizeState(raw: unknown): WeverseState {
 export function loadWeverseState(): WeverseState { if (typeof window === "undefined") return EMPTY_STATE; try { const raw=kvGet(WEV_STATE_KEY); return raw ? normalizeState(JSON.parse(raw)) : cloneEmpty(); } catch { return cloneEmpty(); } }
 export function saveWeverseState(state: WeverseState): WeverseState { const normalized=normalizeState(state); if (typeof window !== "undefined") { kvSet(WEV_STATE_KEY, JSON.stringify(normalized)); window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT)); } return normalized; }
 export function updateWeverseUserProfile(patch: Partial<WeverseUserProfile>): WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,userProfile:{...(state.userProfile||{}),...patch}}); }
+
+export function getWeverseCommunitiesForCharacter(characterId: string): WeverseCommunity[] {
+  const id = characterId.trim();
+  if (!id) return [];
+  return loadWeverseState().communities.filter((community) => community.memberCharacterIds.includes(id));
+}
+
+/**
+ * 更新角色在某个 WVS Community 中的独立资料；不触碰 Character 本体。
+ * 未指定 communityId 时使用该角色加入的第一个 Community（当前 UI 的主资料语义）。
+ */
+export function updateWeverseMemberProfile(
+  characterId: string,
+  patch: Partial<Omit<WeverseMemberProfile, "characterId">>,
+  communityId?: string,
+): WeverseState {
+  const state = loadWeverseState();
+  const candidates = state.communities.filter((community) => community.memberCharacterIds.includes(characterId));
+  const target = communityId
+    ? candidates.find((community) => community.id === communityId)
+    : candidates[0];
+  if (!target) return state;
+
+  const previous = target.memberProfiles[characterId] || { characterId };
+  const nextProfile: WeverseMemberProfile = {
+    ...previous,
+    ...patch,
+    characterId,
+  };
+  const communities = state.communities.map((community) => community.id === target.id
+    ? {
+        ...community,
+        memberProfiles: { ...community.memberProfiles, [characterId]: nextProfile },
+        updatedAt: Date.now(),
+      }
+    : community);
+  return saveWeverseState({ ...state, communities });
+}
 export function updateWeverseSettings(patch: Partial<WeverseSettings>): WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,settings:normalizeSettings({...state.settings,...patch,notifications:{...state.settings.notifications,...(patch.notifications||{})}})}); }
 export function upsertWeverseCommunity(community: WeverseCommunity): WeverseState { const state=loadWeverseState(); const i=state.communities.findIndex(v=>v.id===community.id); const communities=[...state.communities]; if(i>=0) communities[i]=community; else communities.unshift(community); return saveWeverseState({...state,communities}); }
 export function deleteWeverseCommunity(communityId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,communities:state.communities.filter(v=>v.id!==communityId),posts:state.posts.filter(v=>v.communityId!==communityId),notices:state.notices.filter(v=>v.communityId!==communityId)}); }

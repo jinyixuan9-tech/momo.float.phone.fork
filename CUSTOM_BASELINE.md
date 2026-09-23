@@ -193,3 +193,13 @@
 - 与旧版唯一的目标差异：最终不再写 `Character.avatar`，而是写 `ChatProfile.avatarUrl`，因此只影响 Chat 平台头像。
 - “角色自主从 Photos 换头像/改昵称”继续保留，并与推荐头像严格分支；推荐回合不进入自主 `资料更新` 提示。
 - Service Worker cache version 升至 v29。
+
+## v0.4.5 · WVS Autonomous Profile
+
+- WVS 现有成员资料手动编辑入口保持不变。
+- Chat 中接入角色 WVS Profile 自主行为：角色可低频自己改 WVS 昵称，或从 Photos 的真实可用角色照片中选择 WVS 头像。
+- Chat 中明确提到 WVS/Weverse/위버스 的头像或昵称时，只影响 WVS Profile，不误改 Chat Profile。
+- 用户“发图 + 推荐作为 WVS 头像”沿用已经稳定的头像推荐链：角色接受/拒绝；接受后直接更新 WVS memberProfile，不碰 Character/Chat。
+- WVS 自主资料动作使用 `[资料更新 "wvs"]...[/资料更新]`，由现有 Action Parser 分发；当前只从 Chat 沟通渠道触发，WVS 本身不新增推荐资料入口。
+- WVS Profile 自主改名/头像有 72 小时低频冷却；用户明确在 Chat 里提出 WVS 资料建议时可按人设当轮决定，不被自主冷却强制挡住。
+- Service Worker cache v30。

@@ -31,6 +31,8 @@ export function isExplicitChatProfileRequestTurn(history: ChatMessage[], session
     .replace(/\s+/g, " ")
     .trim();
   if (!text) return false;
+  // 显式点名 WVS/Weverse 的资料请求由 WVS Profile 行为层处理，不要误改 Chat Profile。
+  if (/(?:\bwvs\b|weverse|위버스)/i.test(text)) return false;
 
   const target = "(?:头像|头图|昵称|网名|显示名|名字)";
   const change = "(?:换|改|设置|设成|设为|用作|当作|换上)";

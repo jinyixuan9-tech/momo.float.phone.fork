@@ -24,8 +24,9 @@ import {
     isSessionStreamingEnabled,
 } from "./chat-storage";
 import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-tool-protocol";
-import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent } from "./chat-avatar-intent";
+import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent, inferAvatarRecommendationPlatform } from "./chat-avatar-intent";
 import { buildChatProfileAutonomyPrompt, isExplicitChatProfileRequestTurn } from "./chat-profile-autonomy";
+import { buildWeverseProfileAutonomyPrompt, isExplicitWeverseProfileRequestTurn } from "./weverse-profile-autonomy";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -1870,8 +1871,13 @@ export async function buildChatPromptMessages(
         && !session.isGroup
         && !recommendationTurnForTools
         && isExplicitChatProfileRequestTurn(historyForPrompt, session.id);
-    // 只隔离“角色自己改 Chat Profile”的本地动作；用户推荐头像继续走原有推荐链。
-    const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode && !explicitChatProfileRequest;
+    const explicitWeverseProfileRequest = resolvedAppId === "chat"
+        && !session.isGroup
+        && !recommendationTurnForTools
+        && isExplicitWeverseProfileRequestTurn(historyForPrompt, session.id);
+    // 角色资料更新是本地动作；明确要求改 Chat/WVS 资料时不暴露外部工具，避免被误判成生图/搜索。
+    // 用户直接发图推荐头像继续沿用原有推荐链，不改它已经稳定的执行方式。
+    const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode && !explicitChatProfileRequest && !explicitWeverseProfileRequest;
     const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
     const toolsEnabled = enabledTools.length > 0
         && (options?.forceEnableTools === true || presetIncludesToolsMacro(preset, resolvedAppId, effectiveAppTags));
@@ -1982,10 +1988,13 @@ export async function buildChatPromptMessages(
         });
     }
     if (avatarChangeIntent) {
+        const recommendationPlatform = inferAvatarRecommendationPlatform(avatarChangeIntent.intentText);
+        const targetLabel = recommendationPlatform === "wvs" ? "WVS" : "Chat";
         llmMessages.push({
             role: "system",
             content: [
-                "用户在本轮发送了图片，并表达或暗示希望你把它换成自己的头像。",
+                `用户在本轮发送了图片，并表达或暗示希望你把它换成自己的 ${targetLabel} 头像。`,
+                `这次推荐只针对 ${targetLabel} 平台；不要顺手修改另一个平台的资料。`,
                 "请结合你的人设与关系自主决定是否更换，不要机械接受。",
                 "如果愿意采用，必须在本次自然回复的末尾输出且只输出一次控制标记：[接受头像推荐]。",
                 "如果不愿采用，必须在回复末尾输出：[拒绝头像推荐]。",
@@ -1993,9 +2002,17 @@ export async function buildChatPromptMessages(
             ].join("\n"),
         });
     } else if (!session.isGroup && resolvedAppId === "chat" && !(options?.appTags || []).includes("offline")) {
-        const chatProfileAutonomyPrompt = buildChatProfileAutonomyPrompt(character);
-        if (chatProfileAutonomyPrompt) {
-            llmMessages.push({ role: "system", content: chatProfileAutonomyPrompt });
+        if (!explicitWeverseProfileRequest) {
+            const chatProfileAutonomyPrompt = buildChatProfileAutonomyPrompt(character);
+            if (chatProfileAutonomyPrompt) {
+                llmMessages.push({ role: "system", content: chatProfileAutonomyPrompt });
+            }
+        }
+        if (!explicitChatProfileRequest) {
+            const weverseProfileAutonomyPrompt = buildWeverseProfileAutonomyPrompt(character, { explicitRequest: explicitWeverseProfileRequest });
+            if (weverseProfileAutonomyPrompt) {
+                llmMessages.push({ role: "system", content: weverseProfileAutonomyPrompt });
+            }
         }
     }
     if (promptProfile?.output === "plain_text") {

@@ -490,6 +490,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       memberProfiles: {
         ...community.memberProfiles,
         [memberEditor.characterId]: {
+          ...(community.memberProfiles[memberEditor.characterId] || {}),
           characterId: memberEditor.characterId,
           displayName: memberEditor.displayName.trim() || char?.name || "成员",
           avatarUrl: memberEditor.avatarUrl || undefined,

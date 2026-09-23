@@ -21,6 +21,7 @@ import type { MomentPost, MomentComment } from "./moments-types";
 import { attachMomentPhotoInBackground, parseMomentPostResponse } from "./moments-engine";
 import { isAbortError, throwIfAborted } from "./abort-utils";
 import { applyAutonomousChatProfileAction } from "./chat-profile-autonomy";
+import { applyAutonomousWeverseProfileAction } from "./weverse-profile-autonomy";
 
 // ── Types ──
 
@@ -261,10 +262,16 @@ export async function dispatchActions(
 
 
 async function dispatchProfileUpdate(action: ActionTag, context: ActionContext): Promise<void> {
-    // v0.4.0 先只开放 Chat 平台；未来 WVS / LYSN 可复用同一个动作壳，按 target 分发。
+    // Profile 行为从沟通渠道发起；当前开放 Chat -> Chat/WVS，后续 LYSN 可复用同一个动作壳。
     if (context.sourceEngine !== "chat") return;
-    if ((action.target || "").trim().toLowerCase() !== "chat") return;
-    await applyAutonomousChatProfileAction(context.characterId, action.content);
+    const target = (action.target || "").trim().toLowerCase();
+    if (target === "chat") {
+        await applyAutonomousChatProfileAction(context.characterId, action.content);
+        return;
+    }
+    if (target === "wvs" || target === "weverse") {
+        await applyAutonomousWeverseProfileAction(context.characterId, action.content);
+    }
 }
 
 /**

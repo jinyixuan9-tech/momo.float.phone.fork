@@ -14,7 +14,8 @@ import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
 import { extractTextToolDirectiveText } from "./text-tool-protocol";
-import { findUserAvatarChangeIntent, inferAvatarDecisionFromReply } from "./chat-avatar-intent";
+import { findUserAvatarChangeIntent, inferAvatarDecisionFromReply, inferAvatarRecommendationPlatform } from "./chat-avatar-intent";
+import { setWeverseMemberAvatarFromRecommendation } from "./weverse-profile-autonomy";
 
 export const DEFAULT_VISION_IMAGE_PROMPT_LIMIT = 1;
 export const MAX_VISION_IMAGE_PROMPT_LIMIT = 20;
@@ -251,6 +252,7 @@ export type ChatMessage = {
         appHistoryRole?: ChatMessageRole;
         avatarRecommendationForCharacterId?: string;
         avatarRecommendationStatus?: "pending" | "accepted" | "declined";
+        avatarRecommendationTargetPlatform?: "chat" | "wvs";
     };
     isTyping?: boolean; // temporary flag for UI rendering
     statusPanel?: string; // AI display-only status content from [状态栏] tags
@@ -433,9 +435,11 @@ function resolvePendingAvatarRecommendation(message: ChatMessage): void {
         && item.mediaData?.avatarRecommendationStatus === "pending"
         && Boolean(item.mediaUrl),
     );
-    const recommendation = legacyRecommendation
-        || findUserAvatarChangeIntent(_messagesCache, message.sessionId, session.contactId)?.image;
+    const detectedIntent = findUserAvatarChangeIntent(_messagesCache, message.sessionId, session.contactId);
+    const recommendation = legacyRecommendation || detectedIntent?.image;
     if (!recommendation) return;
+    const targetPlatform = recommendation.mediaData?.avatarRecommendationTargetPlatform
+        || inferAvatarRecommendationPlatform(detectedIntent?.intentText || "");
 
     const explicitAccepted = AVATAR_ACCEPT_RE.test(message.rawResponseText);
     const explicitDeclined = AVATAR_DECLINE_RE.test(message.rawResponseText);
@@ -450,12 +454,17 @@ function resolvePendingAvatarRecommendation(message: ChatMessage): void {
         ...recommendation.mediaData,
         avatarRecommendationForCharacterId: session.contactId,
         avatarRecommendationStatus: accepted ? "accepted" : "declined",
+        avatarRecommendationTargetPlatform: targetPlatform,
     };
     dbPutMessage(recommendation);
 
     if (accepted && recommendation.mediaUrl) {
-        // 沿用原有头像推荐执行链；唯一变化是落到 Chat Profile，而不是 Character.avatar。
-        updateChatCharacterProfile(session.contactId, { avatarUrl: recommendation.mediaUrl });
+        if (targetPlatform === "wvs") {
+            // 沿用原本“推荐图 -> 接受 -> 真换头像”的执行链，只把目标平台切到 WVS。
+            setWeverseMemberAvatarFromRecommendation(session.contactId, recommendation.mediaUrl, detectedIntent?.intentText);
+        } else {
+            updateChatCharacterProfile(session.contactId, { avatarUrl: recommendation.mediaUrl });
+        }
     }
 
     if (typeof window !== "undefined") {
