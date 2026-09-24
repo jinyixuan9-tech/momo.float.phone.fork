@@ -274,3 +274,10 @@
 - Updated widget, bird, and MiSans font references to the renamed assets.
 - Renamed the encoded docs filename as well so the repository contains no `#` path segments.
 - Service Worker cache bumped to v38 so clients do not retain stale renamed asset paths.
+
+## v0.5.8 · WVS final UI pass
+- WVS final cleanup pass: Official/Artist profile hero alignment, duplicate UI removal, notification center, fan-language presets, Live cover picker cleanup, Schedule filter simplification, and Weverse wordmark.
+- Photos remains the single source of image records; WVS Artist/Official media pools are usage-scope references, not duplicate albums.
+- Artist WVS media can be uploaded directly from the WVS member media manager; uploads first enter Photos/vision processing and are then added to that member's WVS-only public pool.
+- WVS typography now inherits the phone global font.
+- Service Worker cache v39.

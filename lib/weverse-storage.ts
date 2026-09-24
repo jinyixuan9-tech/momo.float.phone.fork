@@ -12,6 +12,8 @@ export type WeverseMemberProfile = {
   coverUrl?: string;
   liveCoverUrl?: string;
   bio?: string;
+  /** WVS 公开素材池：仅保存 Photos photoId 引用，不复制图片本体。 */
+  wvsMediaPhotoIds?: string[];
   /** 仅记录角色自主修改，用于低频冷却；用户手动编辑/推荐头像不占用。 */
   lastAutonomousNameAt?: number;
   lastAutonomousAvatarAt?: number;
@@ -135,7 +137,7 @@ export type WeverseSettings = {
   translationDefault: "translated" | "original";
   autoTranslateComments: boolean;
   fanActivity: "quiet" | "normal" | "lively";
-  fanLanguagePreset: "korean_mixed";
+  fanLanguagePreset: "korean_mixed" | "japanese_mixed" | "chinese_mixed" | "english_mixed" | "balanced" | "kr_jp_mixed";
   generationScope: "current" | "all";
   notifications: { artistReply: boolean; fanReply: boolean; artistPost: boolean; officialPost: boolean; live: boolean };
 };
@@ -153,7 +155,9 @@ function normalizeSettings(value: unknown): WeverseSettings {
   const raw = value && typeof value === "object" ? value as Partial<WeverseSettings> : {};
   const notifications = raw.notifications && typeof raw.notifications === "object" ? raw.notifications : {} as Partial<WeverseSettings["notifications"]>;
   return { translationDefault: raw.translationDefault === "original" ? "original" : "translated", autoTranslateComments: raw.autoTranslateComments !== false,
-    fanActivity: raw.fanActivity === "quiet" || raw.fanActivity === "lively" ? raw.fanActivity : "normal", fanLanguagePreset: "korean_mixed", generationScope: raw.generationScope === "all" ? "all" : "current",
+    fanActivity: raw.fanActivity === "quiet" || raw.fanActivity === "lively" ? raw.fanActivity : "normal",
+    fanLanguagePreset: ["korean_mixed","japanese_mixed","chinese_mixed","english_mixed","balanced","kr_jp_mixed"].includes(String(raw.fanLanguagePreset)) ? raw.fanLanguagePreset as WeverseSettings["fanLanguagePreset"] : "korean_mixed",
+    generationScope: raw.generationScope === "all" ? "all" : "current",
     notifications: { artistReply: notifications.artistReply !== false, fanReply: notifications.fanReply !== false, artistPost: notifications.artistPost !== false, officialPost: notifications.officialPost !== false, live: notifications.live !== false } };
 }
 function normalizeLiveSegment(raw: unknown): WeverseLiveSegment | null {

@@ -9,6 +9,8 @@ export type MediaIntentKind = "selfie" | "portrait" | "group" | "food" | "scener
 export type CharacterMediaActor = {
   type: "character";
   characterId: string;
+  /** 可选平台专用公开素材池；传入时只允许从这些 Photos photoId 中匹配。 */
+  photoIds?: string[];
 };
 
 export type OfficialMediaActor = {
@@ -85,6 +87,23 @@ function photoText(photo: PhotoRecord): string {
   ].filter(Boolean).join(" ");
 }
 
+async function resolveCharacterPoolPhoto(request: MediaResolverRequest & { actor: CharacterMediaActor }): Promise<{ photo: PhotoRecord; dataUrl: string; score: number } | null> {
+  const ids = request.actor.photoIds;
+  if (!ids) return null;
+  const allowed = new Set(ids);
+  if (!allowed.size) return null;
+  const candidates = loadPhotoLibrary().photos
+    .filter((photo) => allowed.has(photo.id))
+    .filter((photo) => photo.aiUsable && photo.visionStatus === "done")
+    .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
+    .sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || best.score < 0.13) return null;
+  const dataUrl = await getChatImageFromIndexedDB(best.photo.assetId).catch(() => null);
+  if (!dataUrl) return null;
+  return { photo: best.photo, dataUrl, score: best.score };
+}
+
 async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor: OfficialMediaActor }): Promise<{ photo: PhotoRecord; dataUrl: string; score: number } | null> {
   const allowed = new Set(request.actor.photoIds);
   const excluded = new Set(request.actor.excludedPhotoIds || []);
@@ -159,30 +178,42 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
 
   if (strategy !== "generated_only") {
     if (request.actor.type === "character") {
-      const match = await resolvePhotoForUse({
-        characterId: request.actor.characterId,
-        description,
-        channel: request.channel,
-        targetId: request.targetId,
-      }).catch(() => null);
-      if (match) {
-        recordPhotoUse(match, {
+      if (request.actor.photoIds) {
+        const poolMatch = await resolveCharacterPoolPhoto(request as MediaResolverRequest & { actor: CharacterMediaActor }).catch(() => null);
+        if (poolMatch) {
+          return {
+            imageUrl: `asset://${poolMatch.photo.assetId}`,
+            source: "album",
+            photoLibraryId: poolMatch.photo.id,
+            debug: debugEnabled ? { strategy, intentKind, reason: `命中 WVS 角色公开素材池（匹配 ${poolMatch.score.toFixed(2)}）。` } : undefined,
+          };
+        }
+      } else {
+        const match = await resolvePhotoForUse({
           characterId: request.actor.characterId,
           description,
           channel: request.channel,
           targetId: request.targetId,
-        });
-        return {
-          imageUrl: `asset://${match.photo.assetId}`,
-          source: "album",
-          photoLibraryId: match.photo.id,
-          debug: debugEnabled ? {
-            strategy,
-            intentKind,
-            reason: "命中角色素材池。",
-            albumReasons: match.reasons,
-          } : undefined,
-        };
+        }).catch(() => null);
+        if (match) {
+          recordPhotoUse(match, {
+            characterId: request.actor.characterId,
+            description,
+            channel: request.channel,
+            targetId: request.targetId,
+          });
+          return {
+            imageUrl: `asset://${match.photo.assetId}`,
+            source: "album",
+            photoLibraryId: match.photo.id,
+            debug: debugEnabled ? {
+              strategy,
+              intentKind,
+              reason: "命中角色素材池。",
+              albumReasons: match.reasons,
+            } : undefined,
+          };
+        }
       }
     } else {
       const match = await resolveOfficialPoolPhoto(request as MediaResolverRequest & { actor: OfficialMediaActor }).catch(() => null);

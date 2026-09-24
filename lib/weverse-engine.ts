@@ -20,7 +20,7 @@ import { buildCalendarScheduleMarker, loadOwnerCalendarPlans } from "./calendar-
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext, buildGroupTimeContext, getSystemTimeZone, formatZonedChineseDateTime, getZonedWeekday } from "./character-time";
 import { loadPhotoLibrary } from "./photo-library-storage";
-import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, WeverseLive, WeverseScheduleItem, WeverseScheduleType } from "./weverse-storage";
+import { loadWeverseState, type WeverseComment, type WeverseCommunity, type WeversePost, type WeverseSettings, type WeverseLive, type WeverseScheduleItem, type WeverseScheduleType } from "./weverse-storage";
 
 export type WeverseMediaIntent = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
 
@@ -352,11 +352,21 @@ export async function generateWeverseOfficialNotice(
   return { title, original: original || translated, translated: translated || original, photoDescription: photoDescription || undefined, mediaIntent: photoDescription ? mediaIntent || "official" : undefined, preferredPhotoId: preferredPhotoId && (community.officialMediaPhotoIds || []).includes(preferredPhotoId) ? preferredPhotoId : undefined };
 }
 
-function fanLanguageRules(): string[] {
+function fanLanguageRules(preset: WeverseSettings["fanLanguagePreset"] = "korean_mixed"): string[] {
+  const rule = preset === "japanese_mixed"
+    ? "普通粉丝内容以自然日语为主，约 60%~75%；其余自然混入韩语、英语、简体中文。"
+    : preset === "chinese_mixed"
+      ? "普通粉丝内容以简体中文为主，约 60%~75%；其余自然混入韩语、日语、英语。"
+      : preset === "english_mixed"
+        ? "普通粉丝内容以自然英语为主，约 60%~75%；其余自然混入韩语、日语、简体中文。"
+        : preset === "balanced"
+          ? "普通粉丝内容在韩语、日语、英语、简体中文之间尽量均衡，但不要机械轮流或强行每批四种语言齐全。"
+          : preset === "kr_jp_mixed"
+            ? "普通粉丝内容以韩语和日语为主，两者合计约 75%~90%，其余少量英语与简体中文。"
+            : "普通粉丝内容明显以自然韩语为主，约 75%~90%；其余少量日语、英语、简体中文。";
   return [
-    "这是韩国艺人粉丝社区：普通粉丝动态与评论必须明显以韩语为主。大约 75%~90% 的内容使用自然韩语。",
-    "剩余内容可以少量出现日语、英语、简体中文或混合表达，用来模拟海外粉丝；不要平均分配，也不要每批强行凑齐四种语言。",
-    "不要把简体中文当默认粉丝语言。韩语饭圈表达可以自然出现，但不要每条都堆网络梗。",
+    rule,
+    "语言分布是软倾向，不要机械按固定比例排队，也不要为了凑语言而写不自然内容。",
     "每条内容都输出 original 与简体中文 translated；若 original 本身是简体中文，则 translated 与 original 相同。",
   ];
 }
@@ -404,7 +414,7 @@ export async function generateWeverseFanBatch(
         "你在模拟一个真实的 Weverse 粉丝社区里的普通粉丝，不扮演艺人本人。",
         `Community：${community.name}`,
         `成员：${memberNames || "未提供"}`,
-        ...fanLanguageRules(),
+        ...fanLanguageRules(loadWeverseState().settings.fanLanguagePreset),
         communityTimeContext(community, now),
         "不要把整批粉丝都写成同一时间段的口吻。除非目标帖子/评论明确涉及睡觉或深夜，否则不要集体说晚安、早点睡、快去睡等。",
         options?.historical ? "这是历史回填：请写成目标日期当时的公开粉丝内容，不要引用未来事件。" : "",
@@ -705,7 +715,7 @@ function liveFormatRules(opening = false, liveType: "visual" | "voice" | "auto" 
         : "这是 Video Live，使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
     "speech 使用该角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。",
     liveType === "voice" ? "Voice Live 不输出动作。" : "visual 模式下 action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。",
-    "粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。韩语为主，少量日语、英语、中文；不要人人都像资深粉丝。",
+    `粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。${fanLanguageRules(loadWeverseState().settings.fanLanguagePreset)[0]}不要人人都像资深粉丝。`,
     opening
       ? "开场留言以轻松即时反应为主，例如终于开播、爱你、今天好帅/可爱、最近吃什么、是不是瘦了胖了、最近在忙什么等；不要一上来全是深度问题。"
       : "中途留言可以逐渐更具体，但仍要混入很短的感叹、路人式发言、造型/吃饭/近况问题，避免所有评论都像采访提纲。",

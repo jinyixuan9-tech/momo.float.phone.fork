@@ -172,3 +172,18 @@
 - Updated widget, bird, and MiSans font references to the renamed assets.
 - Renamed the encoded docs filename as well so the repository contains no `#` path segments.
 - Service Worker cache bumped to v38 so clients do not retain stale renamed asset paths.
+
+## v0.5.8 · WVS UI / Notifications / Media Scope finish
+- Official profile now reuses the Artist hero structure with a large cover + avatar and an edit entry; profile share buttons were removed from both Artist and Official profiles.
+- Official posts no longer show the teal left rail or the extra OFFICIAL pill.
+- Post detail “加载更多评论” is visually merged into the comment background instead of sitting on a separate white strip.
+- Drawer copy simplified to 编辑资料 / 我的内容 / 设置 / 返回桌面; duplicate 收藏 entry removed (收藏 remains inside 我的内容).
+- Fan language distribution is configurable: 韩语多 / 日语多 / 中文多 / 英语多 / 平均 / 日韩多. The preset affects Fan Posts, regular fan comments and Live audience comments as a soft weighting.
+- Added an in-app notification center for artist replies, fan replies, Artist posts, Official posts and Live starts; existing notification switches now control whether new notifications are written.
+- Live cover picker UI now uses a larger centered clickable cover preview instead of a separate “更换封面” button.
+- Removed the unfinished “最新媒体内容 / Official Media / Artist Media” placeholder block from Community LIVE·Media.
+- Added a WVS-only Artist public media pool on top of Photos. Artist WVS posts only search this WVS pool; direct WVS uploads still enter Photos, receive vision analysis, and are then referenced by the pool. Photos outside the WVS pool remain available for private-channel use such as Chat/Bubble.
+- Schedule no longer exposes the overly granular type filter dropdown; types continue to be represented through color dots / rails / labels.
+- Replaced the plain text header brand with the supplied Weverse wordmark asset.
+- WVS now inherits the phone’s global font instead of forcing its own Inter/SF stack.
+- Service Worker cache bumped to v39.
