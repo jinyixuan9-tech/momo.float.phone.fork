@@ -4,9 +4,17 @@ import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, loadWorldBooks, resolveBinding } from "./settings-storage";
 import type { RegexConfig, WorldBookConfig } from "./settings-types";
 import { buildCharacterTimeContext } from "./character-time";
-import type { LysnMessage } from "./lysn-storage";
+import type { LysnMessage, LysnQuote } from "./lysn-storage";
 
-type Generated = { kind: "text" | "photo" | "voice"; original: string; translated: string; photoDescription?: string; mediaIntent?: "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "other"; extra?: Generated[] };
+type Generated = {
+  kind: "text" | "photo" | "voice";
+  original: string;
+  translated: string;
+  photoDescription?: string;
+  mediaIntent?: "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "other";
+  quote?: LysnQuote;
+  extra?: Generated[];
+};
 function parseJson(raw: string): Record<string, unknown> {
   const start = raw.indexOf("{"); const end = raw.lastIndexOf("}");
   if (start < 0 || end < start) throw new Error("LYSN 没有返回有效消息，请重试。");
@@ -22,19 +30,19 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   const preset = presets.find(x => x.id === slot.presetId) || presets.find(x => x.builtIn) || null;
   const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(x => x.id === id)).filter(Boolean) as WorldBookConfig[];
   const regexes = (slot.regexIds || []).map(id => loadRegexes().find(x => x.id === id)).filter(Boolean) as RegexConfig[];
-  // LYSN deliberately has no private Chat history or Chat user identity in its prompt.
   const prompt = assemblePromptPayload({ character, history: [], preset, worldBooks, regexes,
     appId: "lysn", appTags: ["lysn", "bubble"], timeContext: buildCharacterTimeContext(character.timeZone) });
-  const timeline = history.slice(-18).map(m => `${m.sender === "fan" ? "订阅粉丝" : m.sender === "artist" ? "艺人" : "系统"}: ${m.original}`).join("\n");
+  const timeline = history.slice(-18).map(m => `${m.id} | ${m.sender === "fan" ? "订阅粉丝" : m.sender === "artist" ? "艺人" : "系统"}: ${m.original}`).join("\n");
   const instruction: LLMMessage = { role: "system", content: [
     "你正在 LYSN 的 Bubble 订阅频道给粉丝发消息。这是面向所有订阅粉丝的艺人频道，不是你和某个人的私人 Chat。",
     "订阅粉丝可以回复，但你看到的是匿名粉丝反馈；即使现实中认识这个人，也不能由此认定这条消息是对方发的，不能泄露私下关系、昵称或秘密。",
     "自然地写符合本人语言习惯的短消息，不要每次像营业公告。只在适合时发送照片或语音。",
     "original 使用角色实际说话的语言；translated 提供简体中文忠实翻译，原文是中文时两项相同。不要翻译系统状态。",
-    "只输出 JSON：{\"messages\":[{\"kind\":\"text/photo/voice\",\"original\":\"...\",\"translated\":\"...\",\"photoDescription\":\"想发的照片内容或空\",\"mediaIntent\":\"selfie/portrait/group/food/scenery/object/pet/other\"}]}。自然决定发一至三条消息；每条必须有各自的翻译。",
+    "你可以偶尔使用 Bubble 的“引用回复”样式。引用内容默认是你根据频道语境自行生成的一条匿名粉丝留言；只有确实要引用最近收到的用户留言时，才引用时间线中 sender=订阅粉丝 的原文。quote.original 写被引用原文，quote.translated 写简体中文翻译。没有必要引用时不要输出 quote。",
+    "只输出 JSON：{\"messages\":[{\"kind\":\"text/photo/voice\",\"original\":\"...\",\"translated\":\"...\",\"quote\":{\"original\":\"可选引用原文\",\"translated\":\"可选引用中文\"},\"photoDescription\":\"想发的照片内容或空\",\"mediaIntent\":\"selfie/portrait/group/food/scenery/object/pet/other\"}]}。自然决定发一至三条消息；每条必须有各自的翻译。",
     "kind=photo 时必须填 photoDescription；kind=voice 时正文就是适合直接读出的逐字稿；没合适照片就发文字。",
     `频道最近消息：\n${timeline || "暂无消息"}`,
-    fanMessage ? `最近收到的一条匿名粉丝回复：${fanMessage}` : "",
+    fanMessage ? `最近收到的匿名粉丝回复：${fanMessage}` : "",
   ].filter(Boolean).join("\n") };
   const raw = await sendLLMRequest(api, preset, [...prompt, instruction, { role: "user", content: mode === "reply" ? "根据最近的匿名粉丝反馈，自然地向所有订阅粉丝发一至三条消息。" : "自然地向订阅粉丝发一至三条新的 Bubble 消息。" }], regexes, { characterName: `LYSN:${character.name}`, userName: "订阅粉丝" }, { appId: "lysn", appTags: ["lysn", "bubble"], skipOutputRegex: true });
   const data = parseJson(raw);
@@ -42,7 +50,17 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
     const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
     const original = String(row.original || "").trim();
     const kind = row.kind === "photo" || row.kind === "voice" ? row.kind : "text";
-    return { kind, original, translated: String(row.translated || original).trim(), photoDescription: String(row.photoDescription || "").trim(), mediaIntent: ["selfie", "portrait", "group", "food", "scenery", "object", "pet", "other"].includes(String(row.mediaIntent)) ? row.mediaIntent as Generated["mediaIntent"] : "other" } satisfies Generated;
+    const quoteData = row.quote && typeof row.quote === "object" ? row.quote as Record<string, unknown> : null;
+    const quoteOriginal = quoteData ? String(quoteData.original || "").trim() : "";
+    const quote = quoteOriginal ? { original: quoteOriginal, translated: String(quoteData?.translated || quoteOriginal).trim() } : undefined;
+    return {
+      kind,
+      original,
+      translated: String(row.translated || original).trim(),
+      quote,
+      photoDescription: String(row.photoDescription || "").trim(),
+      mediaIntent: ["selfie", "portrait", "group", "food", "scenery", "object", "pet", "other"].includes(String(row.mediaIntent)) ? row.mediaIntent as Generated["mediaIntent"] : "other",
+    } satisfies Generated;
   }).filter(row => row.original);
   if (!rows.length) throw new Error("LYSN 没有返回有效正文，请重试。");
   return { ...rows[0], extra: rows.slice(1) };
