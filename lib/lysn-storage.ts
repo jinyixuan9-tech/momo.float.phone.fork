@@ -23,6 +23,7 @@ export type LysnSticker = { id: string; name: string; imageUrl: string };
 export type LysnStickerPack = { id: string; name: string; stickers: LysnSticker[] };
 export type LysnRoom = {
   subscriptionDate?: string; nickname?: string; avatar?: string; chatName?: string;
+  backgroundUrl?: string;
   pinned?: boolean; muted?: boolean; foldPhotos?: boolean;
   openerText?: string; openerShown?: boolean;
   activity?: "quiet" | "normal" | "frequent";

@@ -221,3 +221,77 @@
 .voiceViewerCard h3{margin:18px 0 5px;font-size:20px;line-height:1.3;font-weight:650}
 .voiceViewerCard p{margin:0;font-size:13px;color:#a8a8a8}
 .voiceViewerTranslation{position:absolute;top:70%;left:8%;width:84%;padding:0;color:#c8c8c8;font-size:18px;font-weight:600;line-height:1.5}
+
+/* v0.7.3 — compact proportions; phone shell safe-top values above stay intact */
+.app{font-family:var(--app-font-family,inherit);font-size:calc(13px*var(--app-text-scale,1))}
+.app input,.app textarea,.app select{font-family:inherit}
+.app[data-root="true"]{background:linear-gradient(180deg,#f5effb 0,#faf9fd 195px,#fff 350px)}
+.rootHeader h1{font-size:calc(21px*var(--app-text-scale,1));font-weight:700;line-height:1.2}
+.rootActions svg{width:20px;height:20px}
+.rootScroll{padding:11px 17px 24px}
+.sectionLabel{margin:10px 0 11px;font-size:calc(11px*var(--app-text-scale,1))}
+.myMini{gap:11px;padding:6px 2px 13px}.sectionRule{margin:7px 2px 16px}
+.friendRow,.chatRow{gap:11px;min-height:64px;padding:6px 2px}
+.friendRow .avatar,.chatRow .avatar,.myMini .avatar{width:43px;height:43px}
+.myMini b,.friendRow b,.chatRow b{font-size:calc(13px*var(--app-text-scale,1));font-weight:600}
+.myMini small,.friendRow small,.chatRow small{font-size:calc(10px*var(--app-text-scale,1))}
+.moreProfile{padding:6px 0 15px}.moreProfile .avatar{width:78px;height:78px;margin-bottom:10px}.moreProfile b{font-size:calc(16px*var(--app-text-scale,1))}
+.moreRow{gap:12px;min-height:52px;padding:0 8px;font-size:calc(13px*var(--app-text-scale,1))}.moreRow svg{width:19px;height:19px}
+.bottomNav{min-height:60px;padding-top:5px;border-radius:14px 14px 0 0}
+.bottomNav svg{width:20px;height:20px}.bottomNav button small{font-size:calc(10px*var(--app-text-scale,1))}
+.subHeader strong{font-size:calc(16px*var(--app-text-scale,1));font-weight:650}
+.subHeader svg,.chatHeader svg:not(.bubbleDays svg){width:20px;height:20px}
+.chatHeader strong{font-size:calc(14px*var(--app-text-scale,1));font-weight:650}
+.bubbleDays{height:17px;gap:3px}.bubbleDays>span{font-size:14px}.bubbleDays svg{width:15px;height:15px}.bubbleDays b{font-size:calc(11px*var(--app-text-scale,1));font-weight:650}
+.chatView{position:relative;flex:1;min-height:0;overflow:hidden;background:#f8f9fb}
+.chatBackground{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.chatBackground img,.chatBackground .fallback{display:block;width:100%;height:100%;object-fit:cover}
+.messages{position:relative;z-index:1;width:100%;height:100%;flex:none;padding:12px 10px 14px;background:transparent}
+.message{gap:7px;margin-bottom:12px}.messageAvatar{width:31px;height:31px}
+.artistAvatarRing::before{inset:-3px;border-width:2px}
+.messageBody{max-width:min(79%,330px)}
+.senderLine{gap:4px;margin-bottom:3px}.senderLine b{font-size:calc(11px*var(--app-text-scale,1));font-weight:550}
+.senderLine .artistBadgeImage{font-size:calc(8px*var(--app-text-scale,1));padding:2px 5px}
+.bubble{padding:8px 10px;border-radius:12px 12px 12px 4px}
+.bubble p{font-size:calc(13px*var(--app-text-scale,1));font-weight:400;line-height:1.42}
+.mine .bubble{border-radius:12px 12px 4px 12px}
+.translation{margin-top:6px;padding-top:6px;border-top:1px dashed #ebe7ed;color:#a756dc;font-size:calc(12px*var(--app-text-scale,1));line-height:1.4}
+.messageMeta{font-size:calc(10px*var(--app-text-scale,1));font-weight:400}
+.voiceButton{min-width:110px;min-height:40px;padding:6px 10px;gap:13px;border-radius:12px 12px 12px 4px}
+.voiceIconWrap,.voiceIconWrap svg{width:20px;height:20px}.voiceDuration{font-size:calc(14px*var(--app-text-scale,1))}
+.voiceTranslation{margin-top:5px;padding:7px 10px;font-size:calc(12px*var(--app-text-scale,1));border-radius:12px 12px 12px 4px}
+.composer{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:7px 12px max(6px,env(safe-area-inset-bottom))}
+.composerMain{display:flex;align-items:center;gap:8px}
+.composer textarea{font:inherit;font-size:calc(13px*var(--app-text-scale,1))}
+.inputShell textarea{min-height:36px;max-height:92px;padding:8px 12px;border-radius:18px}
+.composerMain>button[type=submit]{display:grid;place-items:center;flex:none;width:35px;height:35px;border:0;border-radius:50%;background:#9052d9;color:#fff}
+.composerMain>button[type=submit]:disabled{background:#c8b9dc}
+.composerTools{display:flex;justify-content:flex-end;min-height:22px;padding-right:43px}
+.composerTools .inputTranslateButton{position:static;display:inline-flex!important;align-items:center;gap:4px;width:auto!important;height:22px!important;padding:0 3px;border:0;border-radius:0!important;background:transparent!important;color:#817687!important;font-size:calc(10px*var(--app-text-scale,1));font-weight:500}
+.composerTools .inputTranslateButton span{width:16px;height:16px;border-width:1px;border-radius:5px;font-size:calc(10px*var(--app-text-scale,1))}
+.translatePreviewCard{margin:0 12px;padding:7px 10px 9px}.translateTargetButton{font-size:calc(11px*var(--app-text-scale,1))}.translatePreviewBody{font-size:calc(12px*var(--app-text-scale,1))}.useTranslateButton{min-height:32px;font-size:calc(12px*var(--app-text-scale,1))}
+.detailsScroll{padding:16px 15px 30px;background:#f8f9fd}
+.detailsScroll h3{margin:23px 3px 10px;font-size:calc(12px*var(--app-text-scale,1));font-weight:600}
+.detailsCard{padding:12px 14px;border-radius:18px;box-shadow:0 2px 11px #34224906}
+.identityRow{gap:11px;padding:7px 2px}.identityRow .avatar{width:42px;height:42px}
+.identityRow>span:nth-child(2){gap:3px}.identityRow b{font-size:calc(13px*var(--app-text-scale,1));font-weight:600}.identityRow small{font-size:calc(10px*var(--app-text-scale,1))}
+.identityRow svg:last-child{width:17px;height:17px}
+.ourBoxButton{min-height:45px;margin-top:9px;padding:10px;border-radius:11px;font-size:calc(13px*var(--app-text-scale,1));font-weight:600}
+.detailsRow{gap:10px;min-height:51px;font-size:calc(13px*var(--app-text-scale,1));font-weight:500}.detailsRow svg{width:18px;height:18px}
+.clearChatButton{margin-top:20px;font-size:calc(12px*var(--app-text-scale,1))}.unsubscribeButton{margin-top:8px;font-size:calc(12px*var(--app-text-scale,1))}
+.settingsScroll{padding:7px 16px 26px}.settingsScroll h3{margin:16px 0 5px;font-size:calc(11px*var(--app-text-scale,1))}
+.settingRow{gap:10px;min-height:51px;padding:7px 2px;font-size:calc(13px*var(--app-text-scale,1))}
+.settingRow>.avatar{width:38px;height:38px}.settingRow small,.rowHint,.settingsNote{font-size:calc(10px*var(--app-text-scale,1))}
+.settingRow input[type=checkbox]{width:16px;height:16px}.selectedCheck{width:17px;height:17px}
+.field{gap:6px;padding:11px 0}.field span{font-size:calc(11px*var(--app-text-scale,1))}.field input,.roomSheet .field input,.roomSheet .field select,.roomSheet .field textarea{font-size:calc(12px*var(--app-text-scale,1))}
+.roomSheet{max-height:80%;padding:11px 16px max(10px,env(safe-area-inset-bottom));border-radius:18px 18px 0 0}
+.roomSheet>header{padding:2px 0 7px}.roomSheet>header b{font-size:calc(15px*var(--app-text-scale,1))}
+.roomSection{margin:15px 2px 5px;font-size:calc(11px*var(--app-text-scale,1))}
+.roomSheet .settingRow{min-height:48px;padding:5px 2px}.roomSheet .settingRow .avatar{width:34px;height:34px;min-width:34px;min-height:34px}
+.roomSheet .field{padding:9px 2px}.roomSheet .field input,.roomSheet .field select,.roomSheet .field textarea{padding:8px}
+.roomBackgroundControl{display:flex;align-items:center;gap:11px;padding:5px 2px}
+.roomBackgroundPreview{display:grid;place-items:center;width:55px;height:76px;flex:none;overflow:hidden;border:1px solid #ebe8f0;border-radius:8px;background:#f8f9fb;color:#aaa;font-size:10px}
+.roomBackgroundPreview img,.roomBackgroundPreview .fallback{width:100%;height:100%;object-fit:cover}
+.roomBackgroundActions{display:flex;flex-direction:column;gap:7px}
+.roomBackgroundActions button{width:auto;min-height:27px;padding:4px 10px;border:1px solid #e9e0f3;border-radius:8px;background:#faf6ff;color:#704aaa;font-size:calc(11px*var(--app-text-scale,1))}
+.voiceViewerCard h3{font-size:calc(18px*var(--app-text-scale,1))}.voiceViewerCard p{font-size:calc(12px*var(--app-text-scale,1))}.voiceViewerTranslation{font-size:calc(15px*var(--app-text-scale,1))}
