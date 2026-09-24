@@ -28,6 +28,7 @@ import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent, in
 import { buildChatProfileAutonomyPrompt, isExplicitChatProfileRequestTurn } from "./chat-profile-autonomy";
 import { buildWeverseProfileAutonomyPrompt, isExplicitWeverseProfileRequestTurn } from "./weverse-profile-autonomy";
 import { lysnProfilePrompt, explicitLysnProfileRequest } from "./lysn-profile-autonomy";
+import { lysnPrivateChatPrompt } from "./lysn-identity";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -2018,6 +2019,8 @@ export async function buildChatPromptMessages(
         }
         const lysnAutonomy = lysnProfilePrompt(character, explicitLysnRequest);
         if (lysnAutonomy) llmMessages.push({ role: "system", content: lysnAutonomy });
+        const lysnIdentity = lysnPrivateChatPrompt(character.id);
+        if (lysnIdentity) llmMessages.push({ role: "system", content: lysnIdentity });
     }
     if (promptProfile?.output === "plain_text") {
         llmMessages.push({

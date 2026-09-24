@@ -131,18 +131,18 @@
 .mine .voiceIconWrap{color:#fff}
 .mine .voiceTranslation{color:#f6efff}
 .composerWrap{display:flex;flex-direction:column;border-top:1px solid #eeeaf2;background:#fff}
-.translatePreviewCard{margin:9px 11px 0;padding:10px 12px 12px;border-radius:16px;background:#f6f2fb}
-.translateTargetButton{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:0!important;margin:0 0 8px;padding:0;border:0;background:none;color:#5d4e72;font-size:13px;font-weight:700}
-.translatePreviewBody{min-height:42px;padding:9px 11px;border-radius:12px;background:#fff;color:#362e41;font-size:14px;line-height:1.55;white-space:pre-wrap}
-.translatePreviewBody p{margin:0}
-.translatePlaceholder{color:#9c95a8;font-size:13px}
-.useTranslateButton{margin-top:8px;display:flex;align-items:center;justify-content:center;width:100%;min-height:38px;border:0;border-radius:12px;background:#111;color:#fff;font-size:14px;font-weight:600}
-.useTranslateButton:disabled{background:#dad4e3;color:#fff}
+
+
+
+
+
+
+
 .composer{border-top:0;padding-top:8px}
 .inputShell{position:relative;display:flex;flex:1;min-width:0}
 .inputShell textarea{padding-right:52px}
-.inputTranslateButton{position:absolute;right:8px;bottom:7px;display:flex!important;align-items:center;justify-content:center;gap:2px;width:34px!important;height:34px!important;border-radius:50%!important;background:#f1ecf8!important;color:#6c52a6!important}
-.inputTranslateButton span{font-size:10px;font-weight:700;line-height:1}
+
+
 .composer>button[type=submit]{background:#111}
 .detailsScroll{padding-top:16px}
 .clearChatButton{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin:22px auto 0;border:0;background:none;color:#8e8a98;font-size:14px}
@@ -158,10 +158,10 @@
 .actionDanger{color:#d35673}
 .actionCancel{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:10px;border:0;border-radius:14px;background:#f5f2f8;color:#444}
 .editMessageSheet{display:flex;flex-direction:column;gap:8px;max-height:85%}
-.languageSheet{display:flex;flex-direction:column;max-height:75%}
-.languageList{overflow:auto;min-height:0}
-.languageItem{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:52px;border:0;border-top:1px solid #f2eff4;background:none;color:#211e27;font-size:15px}
-.languageItem i,.languageItem em{display:grid;place-items:center;width:18px;height:18px;color:#7f57cf;font-style:normal}
+
+
+
+
 .voiceViewer{position:absolute;inset:0;z-index:11;display:flex;align-items:center;justify-content:center;background:#17131eed}
 .voiceViewerClose{position:absolute;top:calc(var(--page-header-safe-top,48px) + 8px);right:12px;display:grid;place-items:center;min-width:48px;min-height:48px;border:0;background:none;color:#fff}
 .voiceViewerCard{display:flex;flex-direction:column;align-items:center;gap:10px;width:min(82%,320px);padding:28px 24px;border-radius:28px;background:linear-gradient(180deg,#f7f4fb 0%,#fff 100%);text-align:center}
@@ -195,12 +195,12 @@
 .mine .voiceButton{background:#a18af2;color:#fff}.mine .voiceIconWrap{color:#fff}.mine .voiceTranslation{background:#a18af2;color:#fff!important}
 .composer{gap:9px;padding:9px 13px max(10px,env(safe-area-inset-bottom))}
 .inputShell textarea{min-height:42px;padding:11px 49px 10px 15px;border:0;background:#f3f6fa;border-radius:22px;color:#17151d}
-.inputTranslateButton{right:5px;bottom:4px;width:33px!important;height:33px!important;border-radius:50%!important;background:transparent!important;color:#6c6675!important}
-.inputTranslateButton span{display:grid;place-items:center;width:22px;height:22px;border:1.5px solid currentColor;border-radius:8px;font-size:15px;font-weight:600;line-height:1}
+
+
 .composer>button[type=submit]{width:39px;height:39px;min-width:39px;background:#8751d9;color:white}.composer>button[type=submit]:disabled{background:#c7b7e3}
-.translatePreviewCard{margin:5px 13px 0;padding:12px 14px 13px;background:#fff;border-top:1px solid #f2eff5;border-radius:0}
-.translateTargetButton{color:#85808a}.translatePreviewBody{padding:6px 0 12px;min-height:38px;color:#24212a}
-.useTranslateButton{background:#f3f6fa;color:#27232e;border-radius:10px}
+
+
+
 .mediaGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-content:start;align-items:end;gap:8px;padding:20px 15px 38px}
 .mediaTile{min-width:0;align-self:end}.mediaTile:has(.libraryDate){grid-column:1}
 .mediaGrid .libraryDate{width:calc(300% + 16px);margin:33px 0 19px;color:#aaaab0;font-size:12px}
@@ -266,10 +266,10 @@
 .inputShell textarea{min-height:36px;max-height:92px;padding:8px 12px;border-radius:18px}
 .composerMain>button[type=submit]{display:grid;place-items:center;flex:none;width:35px;height:35px;border:0;border-radius:50%;background:#9052d9;color:#fff}
 .composerMain>button[type=submit]:disabled{background:#c8b9dc}
-.composerTools{display:flex;justify-content:flex-end;min-height:22px;padding-right:43px}
-.composerTools .inputTranslateButton{position:static;display:inline-flex!important;align-items:center;gap:4px;width:auto!important;height:22px!important;padding:0 3px;border:0;border-radius:0!important;background:transparent!important;color:#817687!important;font-size:calc(10px*var(--app-text-scale,1));font-weight:500}
-.composerTools .inputTranslateButton span{width:16px;height:16px;border-width:1px;border-radius:5px;font-size:calc(10px*var(--app-text-scale,1))}
-.translatePreviewCard{margin:0 12px;padding:7px 10px 9px}.translateTargetButton{font-size:calc(11px*var(--app-text-scale,1))}.translatePreviewBody{font-size:calc(12px*var(--app-text-scale,1))}.useTranslateButton{min-height:32px;font-size:calc(12px*var(--app-text-scale,1))}
+
+
+
+
 .detailsScroll{padding:16px 15px 30px;background:#f8f9fd}
 .detailsScroll h3{margin:23px 3px 10px;font-size:calc(12px*var(--app-text-scale,1));font-weight:600}
 .detailsCard{padding:12px 14px;border-radius:18px;box-shadow:0 2px 11px #34224906}
@@ -298,9 +298,9 @@
 /* v0.7.4: translation, read receipts, and voice controls */
 .chatHeader>div{transform:translateY(3px)}
 .inputShell textarea{padding-right:47px}
-.inputShell .inputTranslateButton{position:absolute;right:7px;top:50%;bottom:auto;transform:translateY(-50%);display:grid!important;place-items:center;width:29px!important;height:29px!important;min-width:29px;min-height:29px;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#595b62!important}
-.inputShell .inputTranslateButton svg{position:absolute;inset:0;width:29px;height:29px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
-.inputShell .inputTranslateButton span{position:relative;z-index:1;display:grid;place-items:center;width:18px;height:18px;border:0;border-radius:0;background:#f3f6fa;font-size:calc(13px*var(--app-text-scale,1));font-weight:600;line-height:1;color:#55565c}
+
+
+
 .fanSourceText{display:block;margin-top:7px;padding-top:7px;border-top:1px dashed #8865d4;color:#ded0fc;font-size:calc(13px*var(--app-text-scale,1));line-height:1.42;white-space:pre-wrap}
 .mine .messageMeta{align-self:flex-end;display:flex;flex-direction:column;align-items:center;gap:2px;padding-bottom:2px}
 .readReceipt{display:grid;place-items:center;width:14px;height:14px;border:1px solid #aab1b9;border-radius:50%;background:#dce2e8;color:white}
@@ -309,3 +309,15 @@
 .voiceViewerPortrait{display:grid;place-items:center}
 .voiceViewerPortrait .voiceViewerAvatar{position:absolute;inset:0;width:100%;height:100%}
 .voiceViewerPortrait .voiceViewerPlayer{position:absolute;z-index:2;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);display:grid;place-items:center;width:56px;height:56px;min-width:56px;min-height:56px;border-radius:50%;touch-action:manipulation}
+/* Voice translation follows the same folded/replaced text setting as artist messages. */
+.inputShell textarea{padding-right:12px}
+.voiceTranscript{display:flex;flex-direction:column;align-items:flex-start;gap:6px;max-width:100%;margin-top:5px;padding:7px 10px;border-radius:12px 12px 12px 4px;background:#fff;color:#26222b;font-size:calc(12px*var(--app-text-scale,1));line-height:1.45;white-space:pre-wrap}
+.voiceTranscript button,.voiceViewerTranslation button{align-self:flex-start;padding:0;border:0;background:transparent;color:#9254c8;font-size:calc(11px*var(--app-text-scale,1));cursor:pointer}
+.voiceTranscript small,.voiceViewerTranslation small{width:100%;padding-top:6px;border-top:1px dashed #e8e0ed;color:#9a55cf;font-size:inherit;line-height:1.45}
+.voiceViewerTranslation{display:flex;flex-direction:column;gap:10px;align-items:flex-start;text-align:left}
+.voiceViewerTranslation button{color:#dbbcff}.voiceViewerTranslation small{color:#e2c7ff;border-color:#777079}
+/* Keep receipts beside the bubble, with the timestamp anchored at its bottom. */
+.mine .bubble{min-height:42px}
+.mine .messageMeta{position:relative;align-self:stretch;display:block;flex:0 0 32px;width:32px;min-height:42px;padding:0;color:#9fa1aa}
+.mine .messageMeta .readReceipt{position:absolute;top:max(calc(50% - 7px),calc(100% - 33px));left:50%;transform:translateX(-50%);width:14px;height:14px}
+.mine .messageMeta time{position:absolute;right:0;bottom:2px;display:block;width:100%;font-size:calc(10px*var(--app-text-scale,1));line-height:1;text-align:center;white-space:nowrap}

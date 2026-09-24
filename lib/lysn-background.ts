@@ -4,6 +4,7 @@ import { prepareLysnMessages } from "./lysn-message";
 import { appendLysn, loadLysn, saveLysn } from "./lysn-storage";
 import { sendBrowserNotification } from "./browser-notification";
 import { maybeCelebrateLysn } from "./lysn-celebrations";
+import { applyLysnProfileAction } from "./lysn-profile-autonomy";
 
 const FIRST_MESSAGE_WAIT_MS = 15 * 60 * 1000;
 const RETRY_WAIT_MS = 30 * 60 * 1000;
@@ -59,6 +60,7 @@ export async function maybeGenerateLysnBackgroundMessage(): Promise<void> {
     const rows = await prepareLysnMessages(id, result);
     if (!loadLysn().subscribedIds.includes(id)) return;
     appendLysn(id, rows);
+    if (result[0]?.profileUpdate) await applyLysnProfileAction(id, JSON.stringify(result[0].profileUpdate));
     const latest = loadLysn();
     if (latest.settings.notificationsEnabled && !latest.rooms[id]?.muted) {
       const character = loadCharacters().find(c => c.id === id);

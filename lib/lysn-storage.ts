@@ -18,7 +18,6 @@ export type LysnSettings = {
   notificationsEnabled: boolean; fontSize: "small" | "normal" | "large";
   enterToSend: boolean; translationMode: "replace" | "fold";
   autonomousMessages: boolean; deepRealism: boolean;
-  translationApiUrl: string; translationApiKey: string;
 };
 export type LysnSticker = { id: string; name: string; imageUrl: string };
 export type LysnStickerPack = { id: string; name: string; stickers: LysnSticker[] };
@@ -33,11 +32,13 @@ export type LysnRoom = {
   stickerPacks?: LysnStickerPack[];
   favoriteMessageIds?: string[];
   birthdayCelebratedYear?: number; anniversariesShown?: number[];
+  birthdayCards?: Record<string, { original: string; translated: string }>;
+  identitySuspicion?: number; identityClueCount?: number;
+  identityHintedInChatAt?: number; identityDisclosed?: boolean;
 };
 export const DEFAULT_LYSN_SETTINGS: LysnSettings = {
   notificationsEnabled: true, fontSize: "normal", enterToSend: true,
   translationMode: "fold", autonomousMessages: true, deepRealism: false,
-  translationApiUrl: "", translationApiKey: "",
 };
 export const DEFAULT_LYSN_USER: LysnUserProfile = { name: "我", avatar: "", cover: "", birthday: "", gender: "" };
 export type LysnState = {
@@ -57,13 +58,13 @@ export function loadLysn(): LysnState {
       version: 1,
       subscribedIds: Array.isArray(parsed.subscribedIds) ? parsed.subscribedIds.filter((x): x is string => typeof x === "string") : [],
       profiles: parsed.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {},
-      messages: Array.isArray(parsed.messages) ? parsed.messages.filter(x => x && typeof x.id === "string" && typeof x.characterId === "string") : [],
+      messages: Array.isArray(parsed.messages) ? parsed.messages.filter(x => x && typeof x.id === "string" && typeof x.characterId === "string" && !(x.sender === "system" && (x.original === "🎂 生日快乐！今天是你的特别日子。" || /^💜 今天是你订阅这间聊天室的第 \d+ 天！/.test(x.original)))) : [],
       readAt: parsed.readAt && typeof parsed.readAt === "object" ? parsed.readAt : {},
       subscribedAt: parsed.subscribedAt && typeof parsed.subscribedAt === "object" ? parsed.subscribedAt : {},
       lastAutoAt: parsed.lastAutoAt && typeof parsed.lastAutoAt === "object" ? parsed.lastAutoAt : {},
       rooms: parsed.rooms && typeof parsed.rooms === "object" ? parsed.rooms : {},
       userProfile: { name: parsed.userProfile?.name || "我", avatar: parsed.userProfile?.avatar || "", cover: parsed.userProfile?.cover || "", birthday: parsed.userProfile?.birthday || "", gender: parsed.userProfile?.gender || "" },
-      settings: { ...DEFAULT_LYSN_SETTINGS, ...parsed.settings },
+      settings: { ...DEFAULT_LYSN_SETTINGS, ...Object.fromEntries(Object.entries(parsed.settings || {}).filter(([key]) => key !== "translationApiUrl" && key !== "translationApiKey")) },
     };
   } catch { return empty(); }
 }
