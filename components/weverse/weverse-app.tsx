@@ -1782,7 +1782,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
   const renderCommunityList = () => (
     <div className={styles.scrollArea}>
-      <div className={styles.communityHeader}><h2>Community</h2></div>
+      <div className={styles.communityHeader}><h2>社区</h2></div>
       <div className={styles.search}><Search size={18} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="搜索我的社区" /></div>
       <div className={styles.sectionTitle}>我的社区</div>
       <div className={styles.communityGrid}>
@@ -2005,6 +2005,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       <div className={styles.artistHero} style={community.coverUrl ? { backgroundImage: `linear-gradient(180deg,rgba(0,0,0,.04),rgba(0,0,0,.72)),url(${community.coverUrl})` } : undefined}>
         <div className={styles.artistIdentity}><Avatar text={community.official.displayName} imageUrl={community.official.avatarUrl} tone="teal" className={styles.artistProfileAvatar}/><h1>{community.official.displayName} <Verified/></h1><p>{formatCompactCount(community.fanCount)} 粉丝</p><button type="button" data-following={following ? "true" : undefined} onClick={() => toggleFollow(followKey)}>{following ? "✓ 已关注" : "关注"}</button></div>
       </div>
+      <div className={styles.artistMediaStrip}>{posts.filter((post) => post.imageUrl).slice(0, 5).length ? posts.filter((post) => post.imageUrl).slice(0, 5).map((post) => <button type="button" key={post.id} onClick={() => navigate({ type: "post", postId: post.id })}><ResolvedAssetImage src={post.imageUrl!} alt="" /></button>) : <div className={styles.mediaEmpty}>暂无媒体</div>}</div>
       <div className={styles.officialTabs}>{(["posts","comments","live"] as const).map((item)=><button type="button" key={item} className={officialTab===item?styles.activeOfficialTab:""} onClick={()=>setOfficialTab(item)}>{item==="posts"?"帖子":item==="comments"?"评论":"LIVE"}</button>)}</div>
       {officialTab === "posts" ? <div className={styles.officialPostsPane}>{posts.length ? posts.map((post)=>renderPost(post)) : <div className={styles.emptyMini}>还没有 Official Post。</div>}</div> : officialTab === "comments" ? <div className={styles.officialCommentsPane}>{comments.length ? comments.map(({post,comment}) => <button type="button" key={comment.id} onClick={() => navigate({ type:"post", postId:post.id, focusCommentId:comment.parentId || comment.id })}><Avatar text={community.official.displayName} imageUrl={community.official.avatarUrl} tone="teal"/><span><b>{community.official.displayName} <Verified/></b><p>{comment.originalBody || comment.body}</p><small>{relativeTime(comment.createdAt)}</small></span></button>) : <div className={styles.officialNoComments}>尚无发表的评论</div>}</div> : <div className={styles.officialLivePane}>
         <section className={styles.artistLiveCurrent}><div><Radio size={20}/><b>Official Live</b></div>{current ? <><p>{community.official.displayName} 正在 LIVE 中</p><button type="button" onClick={()=>navigate({type:"live",liveId:current.id})}>进入 LIVE</button></> : <><p>官方直播通常用于纪念日、活动宣传或 Behind；不会高频随机出现。</p><button type="button" onClick={()=>openLiveCreator(community, undefined, true)}>生成 Official Live</button></>}</section>
@@ -2185,7 +2186,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       {route.type === "root" ? <nav className={styles.dock} aria-label="Weverse 导航">
         <button type="button" className={tab === "feed" ? styles.activeDock : ""} onClick={() => goRoot("feed")}>
-          <span className={styles.dockSelection}><span className={styles.dockWeverseIcon}><span className={styles.dockWeverseCrop}><img src="/weverse-logo.png" alt="" /></span></span></span><small>主页</small>
+          <span className={styles.dockSelection}><span className={styles.dockWeverseIcon}><img className={styles.dockWeverseOutline} src="/weverse-home-outline.png" alt="" /><span className={styles.dockWeverseSelected}><img src="/weverse-home-glyph-white.png" alt="" /></span></span></span><small>主页</small>
         </button>
         <button type="button" className={tab === "community" ? styles.activeDock : ""} onClick={() => goRoot("community")}>
           <span className={styles.dockSelection}><span className={styles.dockCommunityIcon} aria-hidden="true"><i/><i/><i/><i/></span></span><small>社区</small>

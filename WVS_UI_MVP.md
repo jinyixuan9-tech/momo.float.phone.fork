@@ -198,3 +198,10 @@
 - Fan Post `照片库` now opens Photos directly, removing the final visible `后续接入` placeholder in the WVS UI.
 - Service Worker cache bumped to v40.
 
+## v0.5.10 · Dock icon cleanup / Official media strip
+- Shrunk the WVS root bottom dock and selection pill so the navigation takes less vertical space.
+- Rebuilt the Home tab icon from the supplied selected/unselected references instead of cropping the horizontal Weverse wordmark: outline mark when inactive, black rounded-square + white mark when active.
+- Official profile now mirrors Artist profile with the same horizontal recent-media strip below the hero; image posts open their original post.
+- Community list heading is localized from `Community` to `社区`.
+- Service Worker cache bumped to v41.
+
