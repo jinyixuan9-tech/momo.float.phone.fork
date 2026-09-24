@@ -37,10 +37,12 @@ export async function maybeGenerateLysnBackgroundMessage(): Promise<void> {
     if (!loadLysn().subscribedIds.includes(id)) return;
     appendLysn(id, [{ sender: "artist", kind, original: result.original, translated: result.translated, imageUrl, photoId }]);
     const latest = loadLysn();
-    const character = loadCharacters().find(c => c.id === id);
-    const name = latest.profiles[id]?.name || character?.name || "艺人";
-    sendBrowserNotification(`${name} · LYSN`, { body: result.original.slice(0, 90), url: `/#lysn=${encodeURIComponent(id)}` });
-    window.dispatchEvent(new CustomEvent("lysn-message-notice", { detail: { characterId: id, title: `${name} · LYSN`, body: result.original } }));
+    if (latest.settings.notificationsEnabled) {
+      const character = loadCharacters().find(c => c.id === id);
+      const name = latest.profiles[id]?.name || character?.name || "艺人";
+      sendBrowserNotification(`${name} · LYSN`, { body: result.original.slice(0, 90), url: `/#lysn=${encodeURIComponent(id)}` });
+      window.dispatchEvent(new CustomEvent("lysn-message-notice", { detail: { characterId: id, title: `${name} · LYSN`, body: result.original } }));
+    }
   } catch {
     const latest = loadLysn();
     const hasArtistMessage = latest.messages.some(m => m.characterId === id && m.sender === "artist");

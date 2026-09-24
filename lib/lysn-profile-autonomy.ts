@@ -28,7 +28,7 @@ export async function setLysnAvatarFromRecommendation(characterId: string, sourc
   }
   const state = loadLysn();
   const previous = state.profiles[characterId];
-  state.profiles[characterId] = { name: previous?.name || "", avatar, updatedAt: Date.now() };
+  state.profiles[characterId] = { ...previous, name: previous?.name || "", avatar, updatedAt: Date.now() };
   saveLysn(state);
   appendLysn(characterId, [{ sender: "system", kind: "notice", original: "艺人更换了 LYSN 头像" }]);
   return true;
@@ -47,7 +47,7 @@ export async function applyLysnProfileAction(characterId: string, content: strin
     if (photo && await getChatImageFromIndexedDB(photo.assetId).catch(() => null)) avatar = `asset://${photo.assetId}`;
   }
   if (name === current.name && avatar === current.avatar) return false;
-  state.profiles[characterId] = { name, avatar, updatedAt: Date.now() };
+  state.profiles[characterId] = { ...current, name, avatar, updatedAt: Date.now() };
   saveLysn(state);
   appendLysn(characterId, [{ sender: "system", kind: "notice", original: avatar !== current.avatar ? "艺人更换了 LYSN 头像" : "艺人更换了 LYSN 昵称" }]);
   return true;
