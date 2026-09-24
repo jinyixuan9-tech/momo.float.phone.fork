@@ -187,3 +187,14 @@
 - Replaced the plain text header brand with the supplied Weverse wordmark asset.
 - WVS now inherits the phone’s global font instead of forcing its own Inter/SF stack.
 - Service Worker cache bumped to v39.
+
+## v0.5.9 · Schedule visibility / sticky controls / root dock
+- Schedule generation and manual editing support `public` vs `internal` visibility. Internal work (recordings, shoots, productions, rehearsals, travel, etc.) is gray, hidden from the fan-facing layer, and projected to character Calendar; public schedule uses red / orange / yellow / green / blue / purple categories, with purple reserved for LIVE history after it actually happens.
+- Community / Artist / Official profile tabs are no longer sticky. Back and page actions remain available in a sticky glass control layer while long content scrolls beneath them.
+- Artist / Official follow buttons persist a simple local followed state without changing fan totals.
+- Community creation uses only the large `新建 Community` card; the duplicate title-bar plus button is removed.
+- Bottom root tabs now switch between filled and outlined icon states and move a soft selection pill between `主页` and `社区`.
+- Fan avatars use a single supplied universal default image; the notification-row flex selector was corrected so avatar geometry stays square/circular.
+- Fan Post `照片库` now opens Photos directly, removing the final visible `后续接入` placeholder in the WVS UI.
+- Service Worker cache bumped to v40.
+

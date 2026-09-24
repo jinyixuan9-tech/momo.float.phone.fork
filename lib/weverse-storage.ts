@@ -46,6 +46,7 @@ export type WeverseNotice = {
 };
 
 export type WeverseScheduleType = "media" | "anniversary" | "performance" | "recording" | "shoot" | "brand" | "release" | "other";
+export type WeverseScheduleVisibility = "public" | "internal";
 export type WeverseScheduleItem = {
   id: string;
   communityId: string;
@@ -56,6 +57,8 @@ export type WeverseScheduleItem = {
   location?: string;
   memberCharacterIds: string[];
   source: "manual" | "generated";
+  /** public = 粉丝可见公开日程；internal = 仅用户/角色管理视图可见的内部工作安排。 */
+  visibility: WeverseScheduleVisibility;
   /** 现实工作/出行类日程同步到角色手机日历；平台内 Live 不走这里。 */
   calendarSync: boolean;
   createdAt: number;
@@ -266,6 +269,11 @@ function normalizeSchedule(raw: unknown): WeverseScheduleItem | null {
     location: typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined,
     memberCharacterIds: uniqueStrings(item.memberCharacterIds),
     source: item.source === "generated" ? "generated" : "manual",
+    visibility: (item as Partial<WeverseScheduleItem>).visibility === "internal"
+      ? "internal"
+      : (item as Partial<WeverseScheduleItem>).visibility === "public"
+        ? "public"
+        : (["recording", "shoot", "other"].includes(type) ? "internal" : "public"),
     calendarSync: item.calendarSync === true,
     createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
     updatedAt: typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : Date.now(),

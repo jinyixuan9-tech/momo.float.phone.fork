@@ -68,6 +68,7 @@ export type GeneratedWeverseArtistReply = {
 
 export type GeneratedWeverseScheduleItem = {
   type: WeverseScheduleType;
+  visibility: "public" | "internal";
   title: string;
   date: string;
   startTime: string;
@@ -537,17 +538,19 @@ export async function generateWeverseScheduleBatch(
     {
       role: "system",
       content: [
-        `你在维护 Weverse「${community.name}」Community 的公开 Schedule。`,
+        `你在维护 Weverse「${community.name}」Community 的完整 Schedule。这里同时包含粉丝可见公开日程与仅内部可见的真实工作安排。`,
         `当前参考时间：${now.toISOString()}`,
         `可用成员 ID：\n${memberRows || "无"}`,
-        "请生成接下来约 4~6 周内少量、可信、不过密的公开日程。可以包含：打歌/舞台/音乐节/演出 performance，综艺/节目/内容录影 recording，杂志/画报/宣传照 shoot，品牌活动 brand，媒体公开 media，作品/内容发布 release，纪念日 anniversary，以及必要的 other。",
+        "请生成接下来约 4~6 周内少量、可信、不过密的日程，并给每条标 visibility：public 或 internal。",
+        "public 是粉丝可以在 WVS Schedule 看到的公开节点，只使用这五类：performance=舞台/现场活动，brand=品牌/时尚公开，anniversary=纪念日，release=作品/回归发布，media=节目/媒体公开。节目更新、团综上线、综艺播出、Behind/Performance/Dance Practice/采访公开都属于 media；MV/Teaser/Concept Photo/专辑/单曲/OST 等公开节点属于 release。",
+        "internal 是粉丝不应知道的真实内部工作，例如电视剧/电影拍摄、综艺节目录制、团综录制、MV/Teaser/画报/品牌拍摄、彩排、进组、内部会议、移动/飞行等。internal 可用 recording、shoot、other 等类型；这些条目会在用户管理视图里以灰色显示，并写入角色手机日历。",
         "绝对不要提前生成成员个人 LIVE。成员 Live 是临时发生后才作为历史记录挂进 WVS 日历，不能被预判。",
-        "calendarSync 只有现实中真正占用成员时间/地点的工作行程才设为 true，例如打歌、音乐节、演出、综艺录影、品牌活动、画报拍摄、进组/拍摄等；纯纪念日、内容上线、媒体公开、release 通常为 false。",
+        "calendarSync：internal 默认应为 true；public 只有现实中真正占用成员时间/地点的公开活动才设 true，例如打歌、音乐节、演出、公开品牌活动。纯纪念日、内容上线、节目更新、媒体公开、release 通常为 false。",
         "不要制造严重事故、获奖、解散、结婚等重大事实。若现有手机日历已有明确安排，尽量沿用/补充而不是冲突。",
         `现有 WVS Schedule：\n${existingRows}`,
         `成员手机日历参考：\n${communityCalendarContext(community, now)}`,
         "memberCharacterIds 只能使用上面提供的真实 ID；团体共同活动可填多个。",
-        `只输出 JSON，不要 Markdown。格式：{"items":[{"type":"performance","title":"...","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"...或空","memberCharacterIds":["真实ID"],"calendarSync":true}]}。数量建议 4~10 条。`,
+        `只输出 JSON，不要 Markdown。格式：{"items":[{"visibility":"public","type":"performance","title":"...","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"...或空","memberCharacterIds":["真实ID"],"calendarSync":true}]}。数量建议 6~12 条，公开与内部混合，但不要为了凑数虚构。`,
       ].join("\n"),
     },
     { role: "user", content: "刷新生成这段时间的 Community Schedule。" },
@@ -564,9 +567,16 @@ export async function generateWeverseScheduleBatch(
     const title = String(item.title ?? "").trim();
     const members = Array.isArray(item.memberCharacterIds) ? item.memberCharacterIds.map(String).filter((id) => allowed.has(id)) : [];
     const type = scheduleType(item.type);
-    const calendarSync = item.calendarSync === true && !["media", "release", "anniversary"].includes(type);
+    const visibility = item.visibility === "internal" ? "internal" : "public";
+    const normalizedType: WeverseScheduleType = visibility === "internal"
+      ? (["recording", "shoot", "other"].includes(type) ? type : "other")
+      : (["performance", "brand", "anniversary", "release", "media"].includes(type) ? type : "media");
+    const calendarSync = visibility === "internal"
+      ? true
+      : item.calendarSync === true && !["media", "release", "anniversary"].includes(normalizedType);
     return {
-      type,
+      type: normalizedType,
+      visibility,
       title,
       date,
       startTime,

@@ -281,3 +281,15 @@
 - Artist WVS media can be uploaded directly from the WVS member media manager; uploads first enter Photos/vision processing and are then added to that member's WVS-only public pool.
 - WVS typography now inherits the phone global font.
 - Service Worker cache v39.
+
+## v0.5.9 · WVS Schedule layers / navigation polish
+- Community / Artist / Official long pages now keep the back + action controls available while scrolling; Home / Feed / LIVE·Media and profile tabs scroll away naturally instead of staying sticky.
+- Artist and Official follow buttons are now a lightweight persisted local toggle (`关注` / `✓ 已关注`) with no follower-count mutation or ranking side effects.
+- Community list removes the duplicate top-right add button; the large `新建 Community` card is the single creation entry.
+- Root bottom navigation now uses the supplied selected/unselected visual language: a soft selection pill plus solid/outline Weverse and Community icons, with `主页 / 社区` labels.
+- Ordinary generated fan accounts use one universal default fan avatar asset; notification avatar layout no longer stretches avatars into horizontal strips.
+- Schedule now has two visibility layers: `public` and `internal`. Internal recording/shooting/production work is gray, visible only in the user's management view, and always syncs to the participating characters' phone Calendar. Public events use six color families: red performance/activity, orange brand/fashion, yellow anniversary, green release, blue program/media, purple historical LIVE. Personal LIVE is still never generated in advance.
+- Manual schedule add/edit requires choosing `对外公开` or `内部行程`; generated Schedule batches can create both layers in one pass. Pure content-release nodes stay WVS-only unless they represent a real time/place commitment.
+- Fan Post `照片库` is now wired to Photos instead of the old placeholder message.
+- Service Worker cache v40.
+
