@@ -10,6 +10,7 @@ export type LysnMessage = {
   kind: "text" | "photo" | "voice" | "sticker" | "notice";
   original: string; translated?: string; imageUrl?: string; photoId?: string;
   quote?: LysnQuote; opener?: boolean; createdAt: number;
+  sourceText?: string; seenAt?: number;
 };
 export type LysnProfile = { name: string; avatar: string; cover?: string; bio?: string; group?: string; updatedAt: number };
 export type LysnUserProfile = { name: string; avatar: string; cover: string; birthday: string; gender: string };
@@ -28,6 +29,7 @@ export type LysnRoom = {
   openerText?: string; openerShown?: boolean;
   activity?: "quiet" | "normal" | "frequent";
   quoteStyle?: "rare" | "normal" | "often";
+  readStyle?: "rare" | "normal" | "often"; nextFanReadAt?: number;
   stickerPacks?: LysnStickerPack[];
   favoriteMessageIds?: string[];
   birthdayCelebratedYear?: number; anniversariesShown?: number[];
@@ -73,6 +75,11 @@ export function lysnId(): string { return `lysn_${Date.now().toString(36)}_${Mat
 export function appendLysn(characterId: string, rows: Omit<LysnMessage, "id" | "characterId" | "createdAt">[]): LysnState {
   const state = loadLysn();
   const now = Date.now();
+  if (rows.some(row => row.sender === "artist" && !row.opener)) {
+    for (const message of state.messages) {
+      if (message.characterId === characterId && message.sender === "fan" && !message.seenAt) message.seenAt = now;
+    }
+  }
   state.messages.push(...rows.map((row, i) => ({ ...row, id: lysnId(), characterId, createdAt: now + i })));
   saveLysn(state);
   return state;
