@@ -77,6 +77,7 @@ function loadStore(): PersistedCalendarStore {
 function saveStore(store: PersistedCalendarStore): void {
   if (typeof window === "undefined") return;
   kvSet(STORAGE_KEY, JSON.stringify(store));
+  window.dispatchEvent(new CustomEvent("calendar-updated"));
 }
 
 export function loadCalendarConfig(): CalendarConfig {
@@ -191,6 +192,8 @@ export function upsertCalendarScheduleItem(
     emoji: sanitizeScheduleEmoji(item.emoji),
     colorKey: item.colorKey || pickScheduleColorKey(item.startTime),
     source: item.source,
+    externalSource: item.externalSource,
+    externalId: item.externalId,
     createdAt: item.createdAt ?? now,
     updatedAt: now,
   };
@@ -279,9 +282,9 @@ export function clearGeneratedWeekItems(
 ): CalendarScheduleItem[] {
   const existing = loadCalendarWeekPlan(ownerType, ownerId, weekStart);
   const items = existing?.items ?? [];
-  const removed = items.filter(item => item.source !== "manual");
+  const removed = items.filter(item => item.source === "generated");
   if (removed.length === 0) return [];
-  replaceCalendarWeekItems(ownerType, ownerId, weekStart, items.filter(item => item.source === "manual"));
+  replaceCalendarWeekItems(ownerType, ownerId, weekStart, items.filter(item => item.source !== "generated"));
   return removed;
 }
 
@@ -352,9 +355,9 @@ export function cloneWeekPlanWithManualEdits(
   generatedItems: CalendarScheduleItem[],
 ): CalendarWeekPlan {
   const existing = loadCalendarWeekPlan(ownerType, ownerId, weekStart);
-  const manualItems = (existing?.items ?? []).filter(item => item.source === "manual");
-  const nextItems = [...generatedItems.filter(item => item.source !== "manual")];
-  for (const item of manualItems) {
+  const preservedItems = (existing?.items ?? []).filter(item => item.source === "manual" || item.source === "weverse");
+  const nextItems = [...generatedItems.filter(item => item.source === "generated")];
+  for (const item of preservedItems) {
     const collides = nextItems.find(
       entry =>
         entry.date === item.date &&
@@ -367,6 +370,29 @@ export function cloneWeekPlanWithManualEdits(
     }
   }
   return replaceCalendarWeekItems(ownerType, ownerId, weekStart, nextItems);
+}
+
+export function deleteCalendarItemsByExternalId(externalSource: "weverse", externalId: string): void {
+  const store = loadStore();
+  let changed = false;
+  const plans = store.plans.map((plan) => {
+    const nextItems = (plan.items || []).filter((item) => !(item.externalSource === externalSource && item.externalId === externalId));
+    if (nextItems.length === (plan.items || []).length) return plan;
+    changed = true;
+    return { ...plan, items: nextItems, updatedAt: new Date().toISOString() };
+  });
+  if (changed) saveStore({ plans });
+}
+
+export function loadCalendarItemsByExternalId(externalSource: "weverse", externalId: string): Array<{ ownerType: CalendarOwnerType; ownerId: string; weekStart: string; item: CalendarScheduleItem }> {
+  const store = loadStore();
+  const rows: Array<{ ownerType: CalendarOwnerType; ownerId: string; weekStart: string; item: CalendarScheduleItem }> = [];
+  for (const plan of store.plans) {
+    for (const item of plan.items || []) {
+      if (item.externalSource === externalSource && item.externalId === externalId) rows.push({ ownerType: plan.ownerType, ownerId: plan.ownerId, weekStart: plan.weekStart, item });
+    }
+  }
+  return rows;
 }
 
 export function validateScheduleDraft(item: {

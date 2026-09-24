@@ -50,6 +50,7 @@ import {
   updateWeverseSettings,
   updateWeverseLive,
   updateWeverseUserProfile,
+  upsertWeverseScheduleItem,
   upsertWeverseCommunity,
   WEV_UPDATED_EVENT,
   type WeverseAuthorType,
@@ -60,6 +61,8 @@ import {
   type WeverseSettings,
   type WeverseHistoryMode,
   type WeverseLive,
+  type WeverseScheduleItem,
+  type WeverseScheduleType,
   type WeverseState,
 } from "@/lib/weverse-storage";
 import {
@@ -70,6 +73,7 @@ import {
   generateWeverseOfficialNotice,
   generateWeverseLiveOpening,
   generateWeverseLiveContinuation,
+  generateWeverseScheduleBatch,
 } from "@/lib/weverse-engine";
 import { resolveMediaForUse } from "@/lib/media-resolver";
 import {
@@ -89,6 +93,8 @@ import { analyzePhotosInBackground } from "@/lib/photo-library-vision";
 import { createWeverseEngagement } from "@/lib/weverse-engagement";
 import { WeverseLiveView } from "./weverse-live-view";
 import { WeverseVoicePost } from "./weverse-voice-post";
+import { formatIsoDate, getMonthMatrix, isSameMonth, parseIsoDate } from "@/lib/calendar-utils";
+import { removeWeverseScheduleItemEverywhere, syncWeverseScheduleItemToCalendar } from "@/lib/weverse-schedule-sync";
 
 import styles from "./weverse-app.module.css";
 
@@ -101,6 +107,7 @@ type MainTab = "feed" | "community";
 type CommunityTab = "home" | "feed" | "media";
 type CommunityFeedFilter = "highlight" | "fan" | "artist";
 type ArtistTab = "posts" | "comments" | "live";
+type OfficialTab = "posts" | "comments" | "live";
 type MyTab = "posts" | "comments" | "bookmarks";
 type Route =
   | { type: "root" }
@@ -108,6 +115,7 @@ type Route =
   | { type: "artist"; communityId: string; characterId: string }
   | { type: "post"; postId: string; focusCommentId?: string }
   | { type: "official"; communityId: string }
+  | { type: "schedule"; communityId: string }
   | { type: "notices"; communityId: string }
   | { type: "notice"; noticeId: string }
   | { type: "live"; liveId: string }
@@ -157,6 +165,20 @@ type LiveCreatorDraft = {
   liveType: "auto" | "visual" | "voice";
   theme: string;
   coverUrl: string;
+  official?: boolean;
+};
+
+type ScheduleEditorDraft = {
+  id?: string;
+  communityId: string;
+  type: WeverseScheduleType;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  memberCharacterIds: string[];
+  calendarSync: boolean;
 };
 
 type AiMenuContext =
@@ -241,6 +263,22 @@ function parseDateInput(value: string): number | undefined {
   return Number.isFinite(ts) ? ts : undefined;
 }
 
+const WVS_SCHEDULE_LABELS: Record<WeverseScheduleType | "live", string> = {
+  media: "媒体", anniversary: "纪念日", performance: "演出", recording: "录影", shoot: "拍摄", brand: "品牌", release: "发布", other: "日程", live: "LIVE",
+};
+
+function scheduleDateTime(date: string, time: string): number {
+  return new Date(`${date}T${time || "12:00"}:00`).getTime();
+}
+
+function scheduleDateKey(ts: number): string {
+  return formatIsoDate(new Date(ts));
+}
+
+function scheduleTimeLabel(ts: number): string {
+  return new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 function Avatar({
   text,
   imageUrl,
@@ -316,12 +354,19 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const [communityTab, setCommunityTab] = useState<CommunityTab>("home");
   const [communityFeedFilter, setCommunityFeedFilter] = useState<CommunityFeedFilter>("highlight");
   const [artistTab, setArtistTab] = useState<ArtistTab>("posts");
+  const [officialTab, setOfficialTab] = useState<OfficialTab>("posts");
   const [searchText, setSearchText] = useState("");
   const [showOriginalByPost, setShowOriginalByPost] = useState<Record<string, boolean>>({});
   const [showOriginalByComment, setShowOriginalByComment] = useState<Record<string, boolean>>({});
   const [generatingCommunityId, setGeneratingCommunityId] = useState<string | null>(null);
   const [generatingCommentsPostId, setGeneratingCommentsPostId] = useState<string | null>(null);
   const [generatingHistoryCommunityId, setGeneratingHistoryCommunityId] = useState<string | null>(null);
+  const [scheduleMonth, setScheduleMonth] = useState(() => formatIsoDate(new Date()).slice(0, 7) + "-01");
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState(() => formatIsoDate(new Date()));
+  const [scheduleFilter, setScheduleFilter] = useState<"all" | WeverseScheduleType | "live">("all");
+  const [scheduleEditor, setScheduleEditor] = useState<ScheduleEditorDraft | null>(null);
+  const [generatingScheduleCommunityId, setGeneratingScheduleCommunityId] = useState<string | null>(null);
+  const [flashCommentId, setFlashCommentId] = useState<string | null>(null);
   const [, setIdentityTick] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -337,7 +382,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const officialMediaUploadInputRef = useRef<HTMLInputElement>(null);
 
   const route = routeStack[routeStack.length - 1] ?? { type: "root" as const };
-  const immersiveRoute = route.type === "community" || route.type === "artist" || route.type === "live";
+  const immersiveRoute = route.type === "community" || route.type === "artist" || route.type === "official" || route.type === "live";
   const userIdentity = resolveUserIdentity(undefined, "weverse") ?? resolveUserIdentity();
   const userName = state.userProfile?.displayName?.trim() || userIdentity?.name?.trim() || "我";
   const userAvatar = state.userProfile?.avatarUrl || userIdentity?.avatarUrl || "";
@@ -362,9 +407,12 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
   useEffect(() => {
     if (route.type !== "post" || !route.focusCommentId) return;
+    const focusId = route.focusCommentId;
     const timer = window.setTimeout(() => {
-      document.getElementById(`wvs-comment-${route.focusCommentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 80);
+      document.getElementById(`wvs-comment-${focusId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFlashCommentId(focusId);
+      window.setTimeout(() => setFlashCommentId((current) => current === focusId ? null : current), 1200);
+    }, 100);
     return () => window.clearTimeout(timer);
   }, [route]);
 
@@ -502,8 +550,9 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   };
 
   const removeCommunity = (community: WeverseCommunity) => {
-    if (!window.confirm(`删除「${community.name}」Community？该社区里的 WVS 帖子也会一起删除。`)) return;
+    if (!window.confirm(`删除「${community.name}」Community？该社区里的 WVS 帖子与日程也会一起删除。`)) return;
     state.posts.filter((post) => post.communityId === community.id && post.authorType === "artist").forEach((post) => deleteWeverseProjectionEventsForPost(post.id));
+    state.schedules.filter((item) => item.communityId === community.id).forEach((item) => removeWeverseScheduleItemEverywhere(item.id));
     setState(deleteWeverseCommunity(community.id));
     setCommunityEditor(null);
     setCommunityMenuId(null);
@@ -557,13 +606,120 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
   const updateSettings = (patch: Partial<WeverseSettings>) => setState(updateWeverseSettings(patch));
 
-  const openLiveCreator = (community: WeverseCommunity, characterId?: string) => {
+  const openLiveCreator = (community: WeverseCommunity, characterId?: string, official = false) => {
     const chosen = characterId || community.memberCharacterIds[0] || "";
     if (!chosen) return onNotice?.("这个 Community 还没有成员");
-    const active = state.lives.find((live) => live.communityId === community.id && live.status === "live" && (live.activeCharacterIds || live.hostCharacterIds).includes(chosen));
+    const active = state.lives.find((live) => live.communityId === community.id && live.status === "live" && (official ? live.official === true : (!live.official && (live.activeCharacterIds || live.hostCharacterIds).includes(chosen))));
     if (active) return navigate({ type: "live", liveId: active.id });
     const member = resolveMember(community, chosen);
-    setLiveCreator({ communityId: community.id, characterId: chosen, liveType: "auto", theme: "", coverUrl: member.liveCoverUrl || "" });
+    setLiveCreator({ communityId: community.id, characterId: chosen, liveType: "auto", theme: "", coverUrl: official ? (community.coverUrl || community.official.avatarUrl || "") : (member.liveCoverUrl || ""), official });
+  };
+
+  const openCommunitySchedule = (community: WeverseCommunity) => {
+    const today = formatIsoDate(new Date());
+    setSelectedScheduleDate(today);
+    setScheduleMonth(`${today.slice(0, 7)}-01`);
+    navigate({ type: "schedule", communityId: community.id });
+  };
+
+  const openScheduleEditor = (community: WeverseCommunity, item?: WeverseScheduleItem) => {
+    const base = item ? new Date(item.startsAt) : new Date(`${selectedScheduleDate}T12:00:00`);
+    const end = item?.endsAt ? new Date(item.endsAt) : new Date(base.getTime() + 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setScheduleEditor({
+      id: item?.id,
+      communityId: community.id,
+      type: item?.type || "performance",
+      title: item?.title || "",
+      date: formatIsoDate(base),
+      startTime: `${pad(base.getHours())}:${pad(base.getMinutes())}`,
+      endTime: `${pad(end.getHours())}:${pad(end.getMinutes())}`,
+      location: item?.location || "",
+      memberCharacterIds: item?.memberCharacterIds?.length ? item.memberCharacterIds.slice() : community.memberCharacterIds.slice(),
+      calendarSync: item?.calendarSync ?? true,
+    });
+  };
+
+  const saveScheduleEditor = () => {
+    if (!scheduleEditor) return;
+    const community = communityMap.get(scheduleEditor.communityId);
+    if (!community) return;
+    const title = scheduleEditor.title.trim();
+    if (!title) return onNotice?.("请填写日程名称");
+    const startsAt = scheduleDateTime(scheduleEditor.date, scheduleEditor.startTime);
+    let endsAt = scheduleDateTime(scheduleEditor.date, scheduleEditor.endTime);
+    if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt)) return onNotice?.("请填写有效日期和时间");
+    if (endsAt <= startsAt) endsAt = startsAt + 60 * 60 * 1000;
+    const previous = scheduleEditor.id ? state.schedules.find((item) => item.id === scheduleEditor.id) : undefined;
+    const item: WeverseScheduleItem = {
+      id: scheduleEditor.id || createWeverseId("wvs_schedule"),
+      communityId: community.id,
+      type: scheduleEditor.type,
+      title,
+      startsAt,
+      endsAt,
+      location: scheduleEditor.location.trim() || undefined,
+      memberCharacterIds: scheduleEditor.memberCharacterIds.filter((id) => community.memberCharacterIds.includes(id)),
+      source: "manual",
+      calendarSync: scheduleEditor.calendarSync,
+      createdAt: previous?.createdAt || Date.now(),
+      updatedAt: Date.now(),
+    };
+    setState(upsertWeverseScheduleItem(item));
+    syncWeverseScheduleItemToCalendar(item);
+    setScheduleEditor(null);
+    setSelectedScheduleDate(scheduleDateKey(item.startsAt));
+    setScheduleMonth(`${scheduleDateKey(item.startsAt).slice(0, 7)}-01`);
+    onNotice?.(item.calendarSync ? "日程已保存，并同步到手机日历" : "日程已保存到 WVS Calendar");
+  };
+
+  const removeScheduleItem = (item: WeverseScheduleItem) => {
+    if (!window.confirm(`删除日程「${item.title}」？`)) return;
+    removeWeverseScheduleItemEverywhere(item.id);
+    setState(loadWeverseState());
+    if (scheduleEditor?.id === item.id) setScheduleEditor(null);
+    onNotice?.("日程已删除");
+  };
+
+  const refreshGeneratedSchedule = async (community: WeverseCommunity) => {
+    if (generatingScheduleCommunityId) return;
+    setGeneratingScheduleCommunityId(community.id);
+    onNotice?.(`正在刷新 ${community.name} Schedule…`);
+    try {
+      const current = loadWeverseState();
+      const generated = await generateWeverseScheduleBatch(community, current.schedules, { now: new Date() });
+      if (!generated.length) { onNotice?.("这次没有生成新的日程"); return; }
+      const oldGenerated = current.schedules.filter((item) => item.communityId === community.id && item.source === "generated" && item.startsAt >= Date.now() - 7 * 86400000);
+      for (const item of oldGenerated) removeWeverseScheduleItemEverywhere(item.id);
+      for (const row of generated) {
+        const startsAt = scheduleDateTime(row.date, row.startTime);
+        let endsAt = scheduleDateTime(row.date, row.endTime);
+        if (!Number.isFinite(startsAt)) continue;
+        if (!Number.isFinite(endsAt) || endsAt <= startsAt) endsAt = startsAt + 60 * 60 * 1000;
+        const item: WeverseScheduleItem = {
+          id: createWeverseId("wvs_schedule"),
+          communityId: community.id,
+          type: row.type,
+          title: row.title,
+          startsAt,
+          endsAt,
+          location: row.location,
+          memberCharacterIds: row.memberCharacterIds,
+          source: "generated",
+          calendarSync: row.calendarSync,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        upsertWeverseScheduleItem(item);
+        syncWeverseScheduleItemToCalendar(item);
+      }
+      setState(loadWeverseState());
+      onNotice?.("Schedule 已刷新；个人 Live 不会被提前生成");
+    } catch (error) {
+      onNotice?.(`Schedule 生成失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setGeneratingScheduleCommunityId(null);
+    }
   };
 
   const scheduleLiveSegments = (
@@ -677,15 +833,15 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       const live: WeverseLive = {
         id: createWeverseId("wvs_live"), communityId: community.id, hostCharacterIds: [liveCreator.characterId], activeCharacterIds: [liveCreator.characterId],
         participantPresence: [{ characterId: liveCreator.characterId, joinedAt: playbackStart }], viewerPresence: [], liveType: generated.liveType || (liveCreator.liveType === "voice" ? "voice" : "visual"), orientation: "landscape",
-        status: "live", title: generated.title || `${member.displayName} LIVE`, theme: liveCreator.theme.trim() || undefined,
-        coverUrl: liveCreator.coverUrl || member.liveCoverUrl || undefined, startedAt: playbackStart,
+        status: "live", title: generated.title || `${liveCreator.official ? community.official.displayName : member.displayName} LIVE`, theme: liveCreator.theme.trim() || undefined,
+        coverUrl: liveCreator.coverUrl || (liveCreator.official ? community.coverUrl || community.official.avatarUrl : member.liveCoverUrl) || undefined, startedAt: playbackStart, official: liveCreator.official === true,
         viewerCount, peakViewerCount: viewerCount, heartCount: Math.max(120, Math.round(viewerCount * (1.5 + Math.random() * 3.5))), roundCount: 0,
         lastConsumedUserCommentAt: playbackStart - 1, segments, comments,
       };
       setState(addWeverseLive(live));
       setLiveCreator(null);
       navigate({ type: "live", liveId: live.id });
-      onNotice?.(`${member.displayName} 开播了`);
+      onNotice?.(liveCreator.official ? `${community.official.displayName} 开启了 Official Live` : `${member.displayName} 开播了`);
     } catch (error) {
       onNotice?.(`LIVE 生成失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -890,7 +1046,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     let imageUrl: string | undefined;
     let photoLibraryId: string | undefined;
     let photoSource: WeversePost["photoSource"];
-    let photoDescription = generated.photoDescription;
+    let photoDescription: string | undefined;
     if (generated.photoDescription) {
       const media = await resolveMediaForUse({
         actor: { type: "character", characterId },
@@ -901,7 +1057,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         appId: "weverse",
       }).catch(() => null);
       if (media) {
-        if (media.imageUrl) imageUrl = media.imageUrl;
+        if (media.imageUrl) { imageUrl = media.imageUrl; photoDescription = generated.photoDescription; }
         photoLibraryId = media.photoLibraryId;
         if (media.source !== "text_placeholder") photoSource = media.source;
         if (media.placeholderDescription) photoDescription = media.placeholderDescription;
@@ -940,7 +1096,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     let imageUrl: string | undefined;
     let photoLibraryId: string | undefined;
     let photoSource: WeversePost["photoSource"];
-    let photoDescription = generated.photoDescription;
+    let photoDescription: string | undefined;
     if (generated.photoDescription || generated.preferredPhotoId) {
       const excludedPhotoIds = latestState.posts
         .filter((post) => post.communityId === community.id && post.authorType === "official" && post.photoLibraryId)
@@ -961,7 +1117,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         appId: "weverse",
       }).catch(() => null);
       if (media) {
-        if (media.imageUrl) imageUrl = media.imageUrl;
+        if (media.imageUrl) { imageUrl = media.imageUrl; photoDescription = generated.photoDescription; }
         photoLibraryId = media.photoLibraryId;
         if (media.source !== "text_placeholder") photoSource = media.source;
         if (media.placeholderDescription) photoDescription = media.placeholderDescription;
@@ -1012,12 +1168,13 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       const currentPost = loadWeverseState().posts.find((post) => post.id === targetPost.id) || targetPost;
       const allowedIds = new Set(currentPost.comments.map((comment) => comment.id));
       const comments: WeverseComment[] = [];
-      const maxNested = batch.comments.length >= 4 ? Math.max(1, Math.floor(batch.comments.length * 0.3)) : 0;
+      const allowFanReplies = targetPost.authorType !== "artist" && targetPost.authorType !== "official";
+      const maxNested = allowFanReplies && batch.comments.length >= 4 ? Math.max(1, Math.floor(batch.comments.length * 0.3)) : 0;
       let nestedCount = 0;
       const usedParents = new Set<string>();
       batch.comments.forEach((item, index) => {
-        const requestedExisting = item.replyToId && allowedIds.has(item.replyToId) ? item.replyToId : undefined;
-        const requestedGenerated = typeof item.replyToIndex === "number" && item.replyToIndex >= 0 && item.replyToIndex < comments.length
+        const requestedExisting = allowFanReplies && item.replyToId && allowedIds.has(item.replyToId) ? item.replyToId : undefined;
+        const requestedGenerated = allowFanReplies && typeof item.replyToIndex === "number" && item.replyToIndex >= 0 && item.replyToIndex < comments.length
           ? comments[item.replyToIndex]?.id
           : undefined;
         const requestedParent = requestedExisting || requestedGenerated;
@@ -1095,10 +1252,10 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     let imageUrl: string | undefined;
     let photoLibraryId: string | undefined;
     let photoSource: WeverseNotice["photoSource"];
-    let photoDescription = generated.photoDescription;
+    let photoDescription: string | undefined;
     if (generated.photoDescription || generated.preferredPhotoId) {
       const media = await resolveMediaForUse({ actor: { type: "official", officialId: community.id, photoIds: community.officialMediaPhotoIds || [], preferredPhotoId: generated.preferredPhotoId }, description: generated.photoDescription || "官方公告素材", intentKind: generated.mediaIntent || "official", channel: "wvs", targetId: community.id, appId: "weverse" }).catch(() => null);
-      if (media?.imageUrl) imageUrl = media.imageUrl;
+      if (media?.imageUrl) { imageUrl = media.imageUrl; photoDescription = generated.photoDescription; }
       if (media?.photoLibraryId) photoLibraryId = media.photoLibraryId;
       if (media && media.source !== "text_placeholder") photoSource = media.source;
       if (media?.placeholderDescription) photoDescription = media.placeholderDescription;
@@ -1431,7 +1588,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       authorType: "user",
       authorId: userIdentity?.id || "user",
       body,
-      parentId: replyTarget?.postId === post.id ? replyTarget.commentId : undefined,
+      parentId: (post.authorType === "artist" || post.authorType === "official") ? undefined : (replyTarget?.postId === post.id ? replyTarget.commentId : undefined),
       createdAt: Date.now(),
     });
     // 这是用户此刻真的新发出的评论，不是“加载出世界里原本存在的样本”，因此总体评论数 +1。
@@ -1484,7 +1641,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         </div>
         {post.authorType === "official" ? <div className={styles.noticeTag}>OFFICIAL</div> : null}
         {post.postType === "voice" && post.authorType === "artist" ? <WeverseVoicePost post={post} onNotice={onNotice} /> : post.body ? <div className={styles.postBody} onClick={() => !detail && navigate({ type: "post", postId: post.id })}>{showOriginal && post.originalBody ? post.originalBody : post.body}</div> : null}
-        {post.imageUrl ? <WeversePostImage src={post.imageUrl} onClick={() => !detail && navigate({ type: "post", postId: post.id })} /> : post.photoDescription ? <div className={styles.textPhoto} onClick={() => !detail && navigate({ type: "post", postId: post.id })}><span>图片</span><p>{post.photoDescription}</p></div> : null}
+        {post.imageUrl ? <WeversePostImage src={post.imageUrl} onClick={() => !detail && navigate({ type: "post", postId: post.id })} /> : null}
         {post.postType !== "voice" && post.originalBody && post.originalBody !== post.body ? <button type="button" className={styles.translateBtn} onClick={() => setShowOriginalByPost((prev) => ({ ...prev, [post.id]: !showOriginal }))}>{showOriginal ? "查看翻译" : "查看原文"}</button> : null}
         {renderPostActions(post, detail)}
       </article>
@@ -1494,6 +1651,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const currentTitle = () => {
     if (route.type === "post") return "Post";
     if (route.type === "official") return "Official";
+    if (route.type === "schedule") return "日历";
     if (route.type === "notices" || route.type === "notice") return "Notice";
     if (route.type === "me") return "我的 WVS";
     return null;
@@ -1561,7 +1719,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     const notices = state.notices.filter((notice) => notice.communityId === community.id).sort((a, b) => b.createdAt - a.createdAt);
     return <div className={styles.communityPane}>
       <section className={styles.homeSection}><div className={styles.sectionTitleRow}><h3>公告</h3><button type="button" onClick={() => navigate({ type: "notices", communityId: community.id })}>查看全部</button></div><button type="button" className={styles.homeCard} onClick={() => notices[0] ? navigate({ type: "notice", noticeId: notices[0].id }) : onNotice?.("暂无公告")}><div><b>{notices[0]?.title || `请查看 ${community.name} 公告`}</b><small>{notices[0] ? new Date(notices[0].createdAt).toLocaleDateString("zh-CN") : "暂无公告"}</small></div><ChevronRight size={20} /></button></section>
-      <section className={styles.homeSection}><h3>Calendar</h3><button type="button" className={styles.homeCard} onClick={() => showTodo("WVS Schedule → 原生日历联动")}><div><b>请查看 {community.name} 的日程</b><small>Schedule / Calendar 将在后续版本接入</small></div><ChevronRight size={20} /></button></section>
+      <section className={styles.homeSection}><h3>Calendar</h3><button type="button" className={styles.homeCard} onClick={() => openCommunitySchedule(community)}><div><b>请查看 {community.name} 的日程</b><small>演出 · 录影 · 纪念日 · LIVE 历史</small></div><ChevronRight size={20} /></button></section>
       <section className={styles.homeSection}><h3>About</h3><div className={styles.aboutCard}><div className={styles.aboutMembers}>{community.memberCharacterIds.map((characterId) => { const member = resolveMember(community, characterId); return <button type="button" key={characterId} onClick={() => { setArtistTab("posts"); navigate({ type: "artist", communityId: community.id, characterId }); }}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><span>{member.displayName}</span></button>; })}</div><p>{community.description || `${community.name} Official Community`}</p></div></section>
     </div>;
   };
@@ -1575,16 +1733,18 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const renderLiveReplayCard = (community: WeverseCommunity, live: WeverseLive, options?: { actions?: boolean }) => {
     const hostId = live.hostCharacterIds[0];
     const host = hostId ? resolveMember(community, hostId) : null;
-    const coverUrl = live.coverUrl || host?.liveCoverUrl || "";
+    const replayName = live.official ? community.official.displayName : (host?.displayName || community.name);
+    const replayAvatar = live.official ? (community.official.avatarUrl || community.avatarUrl) : (host?.avatarUrl || community.avatarUrl || community.official.avatarUrl);
+    const coverUrl = live.coverUrl || (live.official ? community.coverUrl || community.official.avatarUrl : host?.liveCoverUrl) || "";
     const visibleChatCount = live.comments.length;
     return <article key={live.id} className={styles.liveReplayCard}>
       <button type="button" className={styles.liveReplayMain} onClick={() => navigate({ type: "live", liveId: live.id })}>
         <div className={styles.replayThumb} style={coverUrl ? { backgroundImage: `url(${coverUrl})` } : undefined}>
-          {!coverUrl ? <div className={styles.replayThumbFallback}>{host?.avatarUrl ? <img src={host.avatarUrl} alt="" /> : <Play size={30} />}</div> : null}
+          {!coverUrl ? <div className={styles.replayThumbFallback}>{replayAvatar ? <img src={replayAvatar} alt="" /> : <Play size={30} />}</div> : null}
           <span className={live.status === "live" ? styles.liveNowTag : styles.replayDurationTag}>{live.status === "live" ? "LIVE" : formatLiveDuration(live.startedAt, live.endedAt)}</span>
         </div>
         <div className={styles.liveReplayInfo}>
-          <div className={styles.liveReplayAccount}><Avatar text={host?.displayName || community.name} imageUrl={host?.avatarUrl || community.avatarUrl || community.official.avatarUrl} tone="soft" /><span><b>{host?.displayName || community.name} <Verified /></b><small>{new Date(live.startedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</small></span></div>
+          <div className={styles.liveReplayAccount}><Avatar text={replayName} imageUrl={replayAvatar} tone={live.official ? "teal" : "soft"} /><span><b>{replayName} <Verified /></b><small>{new Date(live.startedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</small></span></div>
           <h4>{live.title}</h4>
           <div className={styles.liveReplayStats}><span>播放 {formatCompactCount(live.peakViewerCount) || "0"}</span><i>·</i><span>点赞 {formatCompactCount(live.heartCount) || "0"}</span><i>·</i><span>聊天 {formatCompactCount(visibleChatCount) || "0"}</span></div>
         </div>
@@ -1599,8 +1759,10 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const renderCommunityMedia = (community: WeverseCommunity) => {
     const lives = state.lives.filter((live) => live.communityId === community.id).sort((a,b) => b.startedAt - a.startedAt);
     const latest = lives[0];
+    const replayRows = lives.filter((live) => live.status === "ended").slice(0, 24);
     return <div className={styles.communityPane}>
-      <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>最新 LIVE</h3><button type="button" onClick={() => latest ? navigate({ type: "live", liveId: latest.id }) : undefined}><ChevronRight size={20} /></button></div>{latest ? renderLiveReplayCard(community, latest) : <div className={styles.emptyMini}>还没有成员 LIVE。进入成员主页的 LIVE 标签即可开一场。</div>}</section>
+      <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>最新 LIVE</h3><button type="button" onClick={() => latest ? navigate({ type: "live", liveId: latest.id }) : undefined}><ChevronRight size={20} /></button></div>{latest ? renderLiveReplayCard(community, latest) : <div className={styles.emptyMini}>还没有 LIVE。成员或 Official 开播后会统一汇总在这里。</div>}</section>
+      <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>LIVE · 回放</h3><span className={styles.mediaSectionCount}>{replayRows.length}</span></div>{replayRows.length ? <div className={styles.communityReplayList}>{replayRows.map((live) => renderLiveReplayCard(community, live))}</div> : <div className={styles.emptyMini}>还没有直播回放。</div>}</section>
       <section className={styles.mediaSection}><div className={styles.mediaSectionTitle}><h3>最新媒体内容</h3><button type="button" onClick={() => showTodo("Community 媒体内容")}><ChevronRight size={20} /></button></div><div className={styles.mediaGrid}><button type="button" onClick={() => setPhotoPicker({ communityId: community.id, mode: "manageOfficial" })}><Video size={25} /><span>Official Media · {community.officialMediaPhotoIds?.length || 0}</span></button><button type="button" onClick={() => showTodo("成员公开视频")}><Camera size={25} /><span>Artist Media</span></button></div></section>
     </div>;
   };
@@ -1620,21 +1782,27 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       .map((comment) => ({ post, comment, parent: comment.parentId ? post.comments.find((item) => item.id === comment.parentId) : undefined })))
       .sort((a, b) => b.comment.createdAt - a.comment.createdAt);
     if (!activity.length) return <div className={styles.emptyMini}>这个成员暂时还没有公开回复记录。</div>;
-    return <div className={styles.artistCommentActivity}>{activity.map(({ post, comment, parent }) => {
-      const member = resolveMember(community, characterId);
-      const parentAuthor = parent ? resolveCommentAuthor(parent, post) : resolvePostAuthor(post);
-      const showArtistOriginal = commentShowsOriginal(comment);
-      const showParentOriginal = parent ? commentShowsOriginal(parent) : postShowsOriginal(post);
-      const focusId = parent?.id || comment.id;
-      return <div role="button" tabIndex={0} key={comment.id} className={styles.artistReplyCard} onClick={() => navigate({ type: "post", postId: post.id, focusCommentId: focusId })} onKeyDown={(e) => { if (e.key === "Enter") navigate({ type: "post", postId: post.id, focusCommentId: focusId }); }}>
-        <div className={styles.artistReplyTop}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><div><div className={styles.artistReplyName}>{member.displayName} <Verified /></div><p>{showArtistOriginal && comment.originalBody ? comment.originalBody : comment.body}</p>{comment.originalBody && comment.originalBody !== comment.body ? <button type="button" onClick={(e) => { e.stopPropagation(); setShowOriginalByComment((prev) => ({ ...prev, [comment.id]: !showArtistOriginal })); }}>{showArtistOriginal ? "查看翻译" : "查看原文"}</button> : null}<small>{relativeTime(comment.createdAt)} · {community.name}</small></div></div>
-        <div className={styles.artistReplyContext}><span className={styles.replyRail} /><div><b>{parent?.deleted ? "此评论已删除" : parentAuthor.name}</b><p>{parent?.deleted ? "此评论已删除" : parent ? (showParentOriginal && parent.originalBody ? parent.originalBody : parent.body) : (showParentOriginal && post.originalBody ? post.originalBody : post.body)}</p>{parent && !parent.deleted && parent.originalBody && parent.originalBody !== parent.body ? <button type="button" onClick={(e) => { e.stopPropagation(); setShowOriginalByComment((prev) => ({ ...prev, [parent.id]: !showParentOriginal })); }}>{showParentOriginal ? "查看翻译" : "查看原文"}</button> : null}<small>{parent ? relativeTime(parent.createdAt) : "原帖"} · 查看原帖</small></div></div>
-      </div>;
-    })}</div>;
+    return <div className={styles.artistCommentActivity}>
+      <div className={styles.artistCommentSort}>按从新到旧排序</div>
+      {activity.map(({ post, comment, parent }) => {
+        const member = resolveMember(community, characterId);
+        const parentAuthor = parent ? resolveCommentAuthor(parent, post) : resolvePostAuthor(post);
+        const showArtistOriginal = commentShowsOriginal(comment);
+        const showParentOriginal = parent ? commentShowsOriginal(parent) : postShowsOriginal(post);
+        const focusId = parent?.id || comment.id;
+        return <div role="button" tabIndex={0} key={comment.id} className={styles.artistReplyCard} onClick={() => navigate({ type: "post", postId: post.id, focusCommentId: focusId })} onKeyDown={(e) => { if (e.key === "Enter") navigate({ type: "post", postId: post.id, focusCommentId: focusId }); }}>
+          <div className={styles.artistReplyContext}>
+            <span className={styles.replyRail} />
+            <div><b>{parent?.deleted ? "此评论已删除" : parentAuthor.name}</b><p>{parent?.deleted ? "此评论已删除" : parent ? (showParentOriginal && parent.originalBody ? parent.originalBody : parent.body) : (showParentOriginal && post.originalBody ? post.originalBody : post.body)}</p>{parent && !parent.deleted && parent.originalBody && parent.originalBody !== parent.body ? <button type="button" onClick={(e) => { e.stopPropagation(); setShowOriginalByComment((prev) => ({ ...prev, [parent.id]: !showParentOriginal })); }}>{showParentOriginal ? "查看翻译" : "查看原文"}</button> : null}</div>
+          </div>
+          <div className={styles.artistReplyTop}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><div><div className={styles.artistReplyName}>{member.displayName} <Verified /></div><p>{showArtistOriginal && comment.originalBody ? comment.originalBody : comment.body}</p>{comment.originalBody && comment.originalBody !== comment.body ? <button type="button" onClick={(e) => { e.stopPropagation(); setShowOriginalByComment((prev) => ({ ...prev, [comment.id]: !showArtistOriginal })); }}>{showArtistOriginal ? "查看翻译" : "查看原文"}</button> : null}<small>{relativeTime(comment.createdAt)}</small></div></div>
+        </div>;
+      })}
+    </div>;
   };
 
   const renderArtistLive = (community: WeverseCommunity, characterId: string, memberName: string) => {
-    const lives = state.lives.filter((live) => live.communityId === community.id && live.hostCharacterIds.includes(characterId)).sort((a,b) => b.startedAt - a.startedAt);
+    const lives = state.lives.filter((live) => live.communityId === community.id && !live.official && live.hostCharacterIds.includes(characterId)).sort((a,b) => b.startedAt - a.startedAt);
     const current = lives.find((live) => live.status === "live" && (live.activeCharacterIds || []).includes(characterId));
     const replays = lives.filter((live) => live.status === "ended").slice(0, 12);
     return <div className={styles.artistLivePane}>
@@ -1664,11 +1832,12 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     // 只给第一层回复一次轻缩进；更深的楼中楼不继续向右漂。
     const left = depth === 1 ? 24 : 0;
     const replyClass = depth === 1 ? styles.commentReplyNode : depth > 1 ? styles.commentDeepReplyNode : "";
-    return <div id={`wvs-comment-${comment.id}`} key={comment.id} className={`${styles.commentThreadNode} ${replyClass}`} style={{ marginLeft: `${left}px` }}>
-      <div className={`${styles.commentCard} ${comment.authorType === "artist" ? styles.artistComment : ""}`}>
+    const canFanReply = post.authorType !== "artist" && post.authorType !== "official";
+    return <div id={`wvs-comment-${comment.id}`} key={comment.id} className={`${styles.commentThreadNode} ${replyClass} ${flashCommentId === comment.id ? styles.commentFocusFlash : ""}`} style={{ marginLeft: `${left}px` }}>
+      <div className={`${styles.commentCard} ${comment.authorType === "artist" || comment.authorType === "official" ? styles.artistComment : ""}`}>
         {comment.deleted ? <div className={styles.deletedAvatar}>×</div> : <Avatar text={author.name} imageUrl={author.avatarUrl} tone="soft" />}
         <div className={styles.commentMain}>
-          {comment.deleted ? <p className={styles.deletedComment}>此评论已删除</p> : <><div className={styles.commentTop}><div><b>{author.name} {author.verified ? <Verified /> : null}</b><small>{relativeTime(comment.createdAt)}</small></div><button type="button" onClick={() => setCommentMenu({ postId: post.id, commentId: comment.id })}><MoreHorizontal size={16} /></button></div>{parentAuthor ? <div className={styles.replyContextLine}>回复 {parentAuthor.name}</div> : null}<p>{showOriginal && comment.originalBody ? comment.originalBody : comment.body}</p>{comment.originalBody && comment.originalBody !== comment.body ? <button type="button" className={styles.commentTranslateBtn} onClick={() => setShowOriginalByComment((prev) => ({ ...prev, [comment.id]: !showOriginal }))}>{showOriginal ? "查看翻译" : "查看原文"}</button> : null}<button type="button" className={styles.replyBtn} onClick={() => { setReplyTarget({ postId: post.id, commentId: comment.id, name: author.name }); document.getElementById("wvs-comment-input")?.focus(); }}>回复</button></>}
+          {comment.deleted ? <p className={styles.deletedComment}>此评论已删除</p> : <><div className={styles.commentTop}><div><b>{author.name} {author.verified ? <Verified /> : null}</b><small>{relativeTime(comment.createdAt)}</small></div><button type="button" onClick={() => setCommentMenu({ postId: post.id, commentId: comment.id })}><MoreHorizontal size={16} /></button></div>{parentAuthor ? <div className={styles.replyContextLine}>回复 {parentAuthor.name}</div> : null}<p>{showOriginal && comment.originalBody ? comment.originalBody : comment.body}</p>{comment.originalBody && comment.originalBody !== comment.body ? <button type="button" className={styles.commentTranslateBtn} onClick={() => setShowOriginalByComment((prev) => ({ ...prev, [comment.id]: !showOriginal }))}>{showOriginal ? "查看翻译" : "查看原文"}</button> : null}{canFanReply ? <button type="button" className={styles.replyBtn} onClick={() => { setReplyTarget({ postId: post.id, commentId: comment.id, name: author.name }); document.getElementById("wvs-comment-input")?.focus(); }}>回复</button> : null}</>}
         </div>
       </div>
       {children.map((child) => renderCommentNode(post, child, childrenByParent, depth + 1))}
@@ -1676,9 +1845,69 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   };
 
 
+  const renderSchedule = (community: WeverseCommunity) => {
+    const storedRows = state.schedules.filter((item) => item.communityId === community.id).map((item) => ({
+      id: item.id, title: item.title, startsAt: item.startsAt, endsAt: item.endsAt, type: item.type as WeverseScheduleType | "live",
+      location: item.location, memberCharacterIds: item.memberCharacterIds, calendarSync: item.calendarSync, stored: item, liveId: undefined as string | undefined,
+    }));
+    const liveRows = state.lives.filter((live) => live.communityId === community.id && live.status === "ended").map((live) => ({
+      id: `live:${live.id}`, title: live.title || "LIVE", startsAt: live.startedAt, endsAt: live.endedAt, type: "live" as const, location: undefined,
+      memberCharacterIds: live.hostCharacterIds, calendarSync: false, stored: undefined as WeverseScheduleItem | undefined, liveId: live.id,
+    }));
+    const allRows = [...storedRows, ...liveRows].sort((a,b) => a.startsAt-b.startsAt);
+    const rows = scheduleFilter === "all" ? allRows : allRows.filter((item) => item.type === scheduleFilter);
+    const monthDays = getMonthMatrix(scheduleMonth);
+    const today = formatIsoDate(new Date());
+    const selectedRows = rows.filter((item) => scheduleDateKey(item.startsAt) === selectedScheduleDate);
+    const selectedEnd = new Date(`${selectedScheduleDate}T23:59:59`).getTime();
+    const nextRow = rows.find((item) => item.startsAt > selectedEnd);
+    const shiftMonth = (delta: number) => {
+      const d = parseIsoDate(scheduleMonth); d.setMonth(d.getMonth()+delta); d.setDate(1);
+      const next = formatIsoDate(d); setScheduleMonth(next); setSelectedScheduleDate(next);
+    };
+    const typeClass = (type: WeverseScheduleType | "live") => type === "live" ? styles.scheduleTypeLive : type === "anniversary" ? styles.scheduleTypeAnniversary : type === "media" || type === "release" ? styles.scheduleTypeMedia : styles.scheduleTypeWork;
+    const memberNames = (ids: string[]) => ids.map((id) => resolveMember(community, id).displayName).join(" · ");
+    const renderRow = (item: typeof rows[number], compact = false) => <button key={item.id} type="button" className={`${styles.scheduleEventCard} ${typeClass(item.type)} ${compact ? styles.scheduleNextCard : ""}`} onClick={() => item.liveId ? navigate({ type: "live", liveId: item.liveId }) : item.stored ? openScheduleEditor(community, item.stored) : undefined}>
+      <span className={styles.scheduleEventRail} />
+      <div className={styles.scheduleEventBody}><div className={styles.scheduleEventTop}><b>{WVS_SCHEDULE_LABELS[item.type]}</b><time>{scheduleTimeLabel(item.startsAt)}{item.endsAt ? ` - ${scheduleTimeLabel(item.endsAt)}` : ""}</time></div><h4>{item.title}</h4>{item.location ? <p>{item.location}</p> : null}{item.memberCharacterIds.length ? <small>{memberNames(item.memberCharacterIds)}</small> : null}</div>
+      {item.calendarSync ? <span className={styles.scheduleSyncBadge}>手机日历</span> : null}
+    </button>;
+    return <div className={styles.schedulePage}>
+      <section className={styles.scheduleCalendarCard}>
+        <div className={styles.scheduleToolbar}><div className={styles.scheduleMonthNav}><button type="button" onClick={() => shiftMonth(-1)}><ChevronLeft size={18}/></button><b>{scheduleMonth.slice(0,7).replace("-", ".")}</b><button type="button" onClick={() => shiftMonth(1)}><ChevronRight size={18}/></button></div><div className={styles.scheduleToolbarActions}><select className={styles.scheduleFilterBtn} value={scheduleFilter} onChange={(e) => setScheduleFilter(e.target.value as "all" | WeverseScheduleType | "live")}><option value="all">全部</option><option value="performance">演出</option><option value="recording">录影</option><option value="shoot">拍摄</option><option value="brand">品牌</option><option value="media">媒体</option><option value="release">发布</option><option value="anniversary">纪念日</option><option value="live">LIVE</option><option value="other">其他</option></select><button type="button" onClick={() => { setScheduleMonth(`${today.slice(0,7)}-01`); setSelectedScheduleDate(today); }}>今天</button></div></div>
+        <div className={styles.scheduleWeekdays}>{["一","二","三","四","五","六","日"].map((day)=><span key={day}>{day}</span>)}</div>
+        <div className={styles.scheduleMonthGrid}>{monthDays.flat().map((date) => {
+          const dayRows = rows.filter((item) => scheduleDateKey(item.startsAt) === date);
+          const selected = date === selectedScheduleDate;
+          const current = date === today;
+          return <button type="button" key={date} data-muted={!isSameMonth(date, scheduleMonth) ? "true" : undefined} data-selected={selected ? "true" : undefined} data-today={current ? "true" : undefined} onClick={() => setSelectedScheduleDate(date)}><span>{Number(date.slice(-2))}</span><i>{dayRows.slice(0,3).map((item) => <em key={item.id} className={typeClass(item.type)} />)}</i></button>;
+        })}</div>
+      </section>
+      <div className={styles.scheduleManageBar}><button type="button" onClick={() => openScheduleEditor(community)}><Plus size={16}/> 手动添加</button><button type="button" disabled={generatingScheduleCommunityId === community.id} onClick={() => void refreshGeneratedSchedule(community)}><Sparkles size={16}/> {generatingScheduleCommunityId === community.id ? "生成中…" : "刷新生成"}</button></div>
+      <section className={styles.scheduleDaySection}><h3>{new Date(`${selectedScheduleDate}T00:00:00`).toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" })}</h3>{selectedRows.length ? <div className={styles.scheduleEventList}>{selectedRows.map((item) => renderRow(item))}</div> : <div className={styles.scheduleNoEvents}>当前没有日程，选择其他日期</div>}</section>
+      {nextRow ? <section className={styles.scheduleNextSection}><h3>下个日程</h3><div className={styles.scheduleNextDate}>{new Date(nextRow.startsAt).toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" })}</div>{renderRow(nextRow, true)}</section> : null}
+      <div className={styles.bottomSpacer}/>
+    </div>;
+  };
+
   const renderOfficialProfile = (community: WeverseCommunity) => {
     const posts = state.posts.filter((post) => post.communityId === community.id && post.authorType === "official").sort((a,b)=>b.createdAt-a.createdAt);
-    return <div className={styles.scrollArea}><div className={styles.officialProfileHero}><Avatar text={community.official.displayName} imageUrl={community.official.avatarUrl} tone="teal" className={styles.bigAvatar} /><div><h2>{community.official.displayName} <Verified /></h2><p>{community.official.bio || `${community.name} Official Account`}</p></div></div><div className={styles.communityFeedTitle}>Official Posts</div>{posts.length ? posts.map((post)=>renderPost(post)) : <div className={styles.emptyMini}>还没有 Official Post。</div>}<div className={styles.bottomSpacer}/></div>;
+    const comments = state.posts.flatMap((post) => post.comments.filter((comment) => comment.authorType === "official" && !comment.deleted).map((comment) => ({ post, comment }))).sort((a,b)=>b.comment.createdAt-a.comment.createdAt);
+    const officialLives = state.lives.filter((live) => live.communityId === community.id && live.official).sort((a,b)=>b.startedAt-a.startedAt);
+    const current = officialLives.find((live) => live.status === "live");
+    const replays = officialLives.filter((live) => live.status === "ended");
+    return <div className={styles.scrollArea}>
+      <div className={styles.officialHero} style={community.coverUrl ? { backgroundImage: `linear-gradient(180deg,rgba(0,0,0,.04),rgba(0,0,0,.2)),url(${community.coverUrl})` } : undefined}>
+        <div className={styles.immersiveControls}><button type="button" onClick={back}><ChevronLeft size={24}/></button><div><button type="button" onClick={() => showTodo("分享 Official 主页")}><Send size={20}/></button></div></div>
+      </div>
+      <div className={styles.officialIdentity}><Avatar text={community.official.displayName} imageUrl={community.official.avatarUrl} tone="teal" className={styles.officialProfileAvatar}/><h2>{community.official.displayName} <Verified/></h2><p>{formatCompactCount(community.fanCount)} 粉丝</p><button type="button">关注</button></div>
+      <div className={styles.officialTabs}>{(["posts","comments","live"] as const).map((item)=><button type="button" key={item} className={officialTab===item?styles.activeOfficialTab:""} onClick={()=>setOfficialTab(item)}>{item==="posts"?"帖子":item==="comments"?"评论":"LIVE"}</button>)}</div>
+      {officialTab === "posts" ? <div className={styles.officialPostsPane}>{posts.length ? posts.map((post)=>renderPost(post)) : <div className={styles.emptyMini}>还没有 Official Post。</div>}</div> : officialTab === "comments" ? <div className={styles.officialCommentsPane}>{comments.length ? comments.map(({post,comment}) => <button type="button" key={comment.id} onClick={() => navigate({ type:"post", postId:post.id, focusCommentId:comment.parentId || comment.id })}><Avatar text={community.official.displayName} imageUrl={community.official.avatarUrl} tone="teal"/><span><b>{community.official.displayName} <Verified/></b><p>{comment.originalBody || comment.body}</p><small>{relativeTime(comment.createdAt)}</small></span></button>) : <div className={styles.officialNoComments}>尚无发表的评论</div>}</div> : <div className={styles.officialLivePane}>
+        <section className={styles.artistLiveCurrent}><div><Radio size={20}/><b>Official Live</b></div>{current ? <><p>{community.official.displayName} 正在 LIVE 中</p><button type="button" onClick={()=>navigate({type:"live",liveId:current.id})}>进入 LIVE</button></> : <><p>官方直播通常用于纪念日、活动宣传或 Behind；不会高频随机出现。</p><button type="button" onClick={()=>openLiveCreator(community, undefined, true)}>生成 Official Live</button></>}</section>
+        <section className={styles.artistReplaySection}><h3>官方直播回放</h3>{replays.length ? <div className={styles.artistReplayList}>{replays.map((live)=>renderLiveReplayCard(community,live,{actions:true}))}</div> : <div className={styles.emptyMini}>还没有 Official Live 回放。</div>}</section>
+      </div>}
+      <div className={styles.bottomSpacer}/>
+    </div>;
   };
 
   const renderNoticeList = (community: WeverseCommunity) => {
@@ -1689,11 +1918,14 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const renderNoticeDetail = (notice: WeverseNotice) => {
     const community = communityMap.get(notice.communityId);
     const showOriginal = Boolean(showOriginalByPost[`notice:${notice.id}`]);
-    return <div className={styles.scrollArea}><article className={styles.noticeDetail}><div className={styles.noticeDetailMeta}>{community?.official.displayName || "Official"} · {new Date(notice.createdAt).toLocaleString("zh-CN")}</div><h1>{notice.title}</h1><div className={styles.noticeBody}>{showOriginal && notice.originalBody ? notice.originalBody : notice.body}</div>{notice.imageUrl?<ResolvedAssetImage src={notice.imageUrl} className={styles.noticeImage} alt="Notice"/>:notice.photoDescription?<div className={styles.textPhoto}><span>图片</span><p>{notice.photoDescription}</p></div>:null}{notice.originalBody && notice.originalBody!==notice.body?<button type="button" className={styles.translateBtn} onClick={()=>setShowOriginalByPost((prev)=>({...prev,[`notice:${notice.id}`]:!showOriginal}))}>{showOriginal?"查看翻译":"查看原文"}</button>:null}<div className={styles.noticeManage}><button type="button" onClick={()=>openNoticeEditor(notice.communityId,notice)}><Pencil size={16}/> 编辑</button><button type="button" onClick={()=>removeNotice(notice)}><Trash2 size={16}/> 删除</button></div></article></div>;
+    return <div className={styles.scrollArea}><article className={styles.noticeDetail}><div className={styles.noticeDetailMeta}>{community?.official.displayName || "Official"} · {new Date(notice.createdAt).toLocaleString("zh-CN")}</div><h1>{notice.title}</h1><div className={styles.noticeBody}>{showOriginal && notice.originalBody ? notice.originalBody : notice.body}</div>{notice.imageUrl?<ResolvedAssetImage src={notice.imageUrl} className={styles.noticeImage} alt="Notice"/>:null}{notice.originalBody && notice.originalBody!==notice.body?<button type="button" className={styles.translateBtn} onClick={()=>setShowOriginalByPost((prev)=>({...prev,[`notice:${notice.id}`]:!showOriginal}))}>{showOriginal?"查看翻译":"查看原文"}</button>:null}<div className={styles.noticeManage}><button type="button" onClick={()=>openNoticeEditor(notice.communityId,notice)}><Pencil size={16}/> 编辑</button><button type="button" onClick={()=>removeNotice(notice)}><Trash2 size={16}/> 删除</button></div></article></div>;
   };
 
   const renderPostDetail = (post: WeversePost) => {
-    const comments = [...post.comments].sort((a, b) => a.createdAt - b.createdAt);
+    const comments = [...post.comments].filter((comment) => !comment.deleted).sort((a, b) => a.createdAt - b.createdAt);
+    const isArtistOrOfficialPost = post.authorType === "artist" || post.authorType === "official";
+    const artistComments = comments.filter((comment) => comment.authorType === "artist" || comment.authorType === "official").sort((a,b) => b.createdAt-a.createdAt);
+    const fanComments = comments.filter((comment) => comment.authorType !== "artist" && comment.authorType !== "official" && !comment.parentId).sort((a,b) => b.createdAt-a.createdAt);
     const childrenByParent = new Map<string, WeverseComment[]>();
     for (const comment of comments) {
       if (!comment.parentId) continue;
@@ -1701,28 +1933,40 @@ export function WeverseApp({ onClose, onNotice }: Props) {
       list.push(comment);
       childrenByParent.set(comment.parentId, list);
     }
-    const roots = comments.filter((comment) => !comment.parentId || !comments.some((parent) => parent.id === comment.parentId));
-    const latestArtistReply = (comment: WeverseComment): number => {
-      let latest = comment.authorType === "artist" && !comment.deleted ? comment.createdAt : 0;
-      for (const child of childrenByParent.get(comment.id) || []) latest = Math.max(latest, latestArtistReply(child));
-      return latest;
+    const roots = comments.filter((comment) => !comment.parentId || !comments.some((parent) => parent.id === comment.parentId)).sort((a,b)=>b.createdAt-a.createdAt);
+    const renderArtistHighlight = (comment: WeverseComment) => {
+      const author = resolveCommentAuthor(comment, post);
+      const showOriginal = commentShowsOriginal(comment);
+      const parent = comment.parentId ? post.comments.find((item) => item.id === comment.parentId) : undefined;
+      return <button type="button" key={comment.id} className={styles.postArtistCommentCard} onClick={() => {
+        if (!parent) return;
+        const el = document.getElementById(`wvs-comment-${parent.id}`);
+        if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); setFlashCommentId(parent.id); window.setTimeout(() => setFlashCommentId((id) => id === parent.id ? null : id), 1200); }
+      }}>
+        <Avatar text={author.name} imageUrl={author.avatarUrl} tone="soft" />
+        <div><div className={styles.postArtistCommentMeta}><b>{author.name} {author.verified ? <Verified /> : null}</b><small>{relativeTime(comment.createdAt)}</small></div><p>{showOriginal && comment.originalBody ? comment.originalBody : comment.body}</p>{comment.originalBody && comment.originalBody !== comment.body ? <span className={styles.commentTranslateBtn} onClick={(e) => { e.stopPropagation(); setShowOriginalByComment((prev) => ({ ...prev, [comment.id]: !showOriginal })); }}>{showOriginal ? "查看翻译" : "查看原文"}</span> : null}{parent ? <small className={styles.postArtistJumpHint}>回复 @{resolveCommentAuthor(parent, post).name} · 点击查看原评论</small> : null}</div>
+      </button>;
     };
-    roots.sort((a, b) => {
-      const aArtist = latestArtistReply(a); const bArtist = latestArtistReply(b);
-      if (aArtist || bArtist) return bArtist - aArtist;
-      return b.createdAt - a.createdAt;
-    });
     return <div className={styles.postDetailPage}>
       <div className={styles.postDetailScroller}>
         <div className={styles.postDetailPost}>{renderPost(post, true)}</div>
-        <div className={styles.commentsTitleRow}><div className={styles.commentsTitle}>Comments <span>{formatCompactCount(post.commentCount)}</span></div></div>
-        <div className={styles.commentsScroller}>
-          <div className={styles.commentsList}>{roots.map((comment) => renderCommentNode(post, comment, childrenByParent))}{!post.comments.length ? <div className={styles.emptyComment}>还没有展开评论</div> : null}</div>
-          {post.commentCount > post.comments.filter((comment) => !comment.deleted).length ? <button type="button" className={styles.loadMoreComments} disabled={generatingCommentsPostId === post.id} onClick={() => generateMoreComments(post)}>{generatingCommentsPostId === post.id ? "─── 加载中… ───" : "─── 加载更多评论 ───"}</button> : <div className={styles.commentsExhausted}>─── 已加载全部评论 ───</div>}
-        </div>
+        {isArtistOrOfficialPost ? <>
+          <section className={styles.artistCommentsSection}>
+            <div className={styles.commentSectionHeading}><b>艺人的评论</b><span>{artistComments.length}</span></div>
+            {artistComments.length ? <div className={styles.artistCommentHighlightList}>{artistComments.map(renderArtistHighlight)}</div> : <div className={styles.emptyComment}>暂无艺人评论</div>}
+          </section>
+          <section className={styles.allCommentsSection}>
+            <div className={styles.commentSectionHeading}><b>所有评论</b><span>{formatCompactCount(post.commentCount)}</span></div>
+            <div className={styles.commentsList}>{fanComments.map((comment) => renderCommentNode(post, comment, new Map()))}{!fanComments.length ? <div className={styles.emptyComment}>还没有展开评论</div> : null}</div>
+          </section>
+        </> : <>
+          <div className={styles.commentsTitleRow}><div className={styles.commentsTitle}>Comments <span>{formatCompactCount(post.commentCount)}</span></div></div>
+          <div className={styles.commentsScroller}><div className={styles.commentsList}>{roots.map((comment) => renderCommentNode(post, comment, childrenByParent))}{!post.comments.length ? <div className={styles.emptyComment}>还没有展开评论</div> : null}</div></div>
+        </>}
+        {post.commentCount > post.comments.filter((comment) => !comment.deleted).length ? <button type="button" className={styles.loadMoreComments} disabled={generatingCommentsPostId === post.id} onClick={() => generateMoreComments(post)}>{generatingCommentsPostId === post.id ? "─── 加载中… ───" : "─── 加载更多评论 ───"}</button> : <div className={styles.commentsExhausted}>─── 已加载全部评论 ───</div>}
       </div>
-      {replyTarget?.postId === post.id ? <div className={styles.replyingBar}>正在回复 {replyTarget.name}<button type="button" onClick={() => setReplyTarget(null)}><X size={14} /></button></div> : null}
-      <div className={styles.commentComposer}><input id="wvs-comment-input" value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder={replyTarget?.postId === post.id ? `回复 ${replyTarget.name}…` : "留下评论…"} onKeyDown={(e) => { if (e.key === "Enter") submitComment(post); }} /><button type="button" onClick={() => submitComment(post)}><Send size={17} /></button></div>
+      {replyTarget?.postId === post.id && !isArtistOrOfficialPost ? <div className={styles.replyingBar}>正在回复 {replyTarget.name}<button type="button" onClick={() => setReplyTarget(null)}><X size={14} /></button></div> : null}
+      <div className={styles.commentComposer}><input id="wvs-comment-input" value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder={isArtistOrOfficialPost ? "留下评论…" : replyTarget?.postId === post.id ? `回复 ${replyTarget.name}…` : "留下评论…"} onKeyDown={(e) => { if (e.key === "Enter") submitComment(post); }} /><button type="button" onClick={() => submitComment(post)}><Send size={17} /></button></div>
     </div>;
   };
 
@@ -1747,6 +1991,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     if (route.type === "artist") { const community = communityMap.get(route.communityId); return community ? renderArtist(community, route.characterId) : renderCommunityList(); }
     if (route.type === "post") { const post = postMap.get(route.postId); return post ? renderPostDetail(post) : renderFeed(); }
     if (route.type === "official") { const community = communityMap.get(route.communityId); return community ? renderOfficialProfile(community) : renderCommunityList(); }
+    if (route.type === "schedule") { const community = communityMap.get(route.communityId); return community ? renderSchedule(community) : renderCommunityList(); }
     if (route.type === "notices") { const community = communityMap.get(route.communityId); return community ? renderNoticeList(community) : renderCommunityList(); }
     if (route.type === "notice") { const notice = noticeMap.get(route.noticeId); return notice ? renderNoticeDetail(notice) : renderCommunityList(); }
     if (route.type === "live") { const live = liveMap.get(route.liveId); return live ? renderLive(live) : renderCommunityList(); }
@@ -1804,6 +2049,31 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       {composerOpen ? <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) { setComposerOpen(false); setEditingPostId(null); } }}><section className={styles.sheet}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>{editingPostId ? "编辑贴文" : composerAuthorType === "official" ? "Official Post" : "Fan Post"}</h2><button type="button" className={styles.iconBtn} onClick={() => { setComposerOpen(false); setEditingPostId(null); }}><X size={20} /></button></div><label className={styles.fieldLabel}>发布到</label><div className={styles.lockedCommunity}>{communityMap.get(draftCommunityId)?.name || "Community"}</div><textarea className={styles.textarea} value={draftText} onChange={(event) => setDraftText(event.target.value)} placeholder={composerAuthorType === "official" ? "写一条 Official Post…" : "写点什么吧…"} />{draftImageUrl ? <div className={styles.composePreview}><ResolvedAssetImage src={draftImageUrl} alt="预览" /><button type="button" onClick={() => { setDraftImageUrl(""); setDraftPhotoLibraryId(null); }}><X size={16} /></button></div> : null}<div className={styles.mediaTools}><button type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={18} /> {composerAuthorType === "official" ? "从手机上传" : "本地图片"}</button><button type="button" onClick={() => composerAuthorType === "official" ? setPhotoPicker({ communityId: draftCommunityId, mode: "composeOfficial" }) : showTodo("Fan Post 素材选择器")}><Sparkles size={18} /> {composerAuthorType === "official" ? "官方媒体池" : "照片库"}</button></div><input ref={fileInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { if (composerAuthorType === "official") { const community = communityMap.get(draftCommunityId); if (community) await importOfficialMediaFiles(community, [file], true); } else { setDraftImageUrl(await fileToDataUrl(file)); setDraftPhotoLibraryId(null); } } event.currentTarget.value = ""; }} /><button type="button" className={styles.primaryButton} onClick={publish}><Send size={18} /> {editingPostId ? "保存修改" : "发布"}</button></section></div> : null}
 
+      {scheduleEditor ? (() => {
+        const community = communityMap.get(scheduleEditor.communityId);
+        if (!community) return null;
+        const autoSyncTypes = new Set<WeverseScheduleType>(["performance", "recording", "shoot", "brand"]);
+        return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setScheduleEditor(null); }}>
+          <section className={styles.sheet}>
+            <div className={styles.sheetHandle} />
+            <div className={styles.sheetTitle}><h2>{scheduleEditor.id ? "编辑日程" : "添加日程"}</h2><button type="button" className={styles.iconBtn} onClick={() => setScheduleEditor(null)}><X size={20} /></button></div>
+            <label className={styles.fieldLabel}>类型</label>
+            <select className={styles.select} value={scheduleEditor.type} onChange={(e) => { const type = e.target.value as WeverseScheduleType; setScheduleEditor({ ...scheduleEditor, type, calendarSync: autoSyncTypes.has(type) }); }}>
+              {Object.entries(WVS_SCHEDULE_LABELS).filter(([key]) => key !== "live").map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            <label className={styles.fieldLabel}>日程名称</label>
+            <input className={styles.select} value={scheduleEditor.title} onChange={(e) => setScheduleEditor({ ...scheduleEditor, title: e.target.value })} placeholder="例如：Music Bank 录制 / 音乐节 / 画报拍摄" />
+            <div className={styles.scheduleEditorGrid}><label><span>日期</span><input type="date" value={scheduleEditor.date} onChange={(e) => setScheduleEditor({ ...scheduleEditor, date: e.target.value })} /></label><label><span>开始</span><input type="time" value={scheduleEditor.startTime} onChange={(e) => setScheduleEditor({ ...scheduleEditor, startTime: e.target.value })} /></label><label><span>结束</span><input type="time" value={scheduleEditor.endTime} onChange={(e) => setScheduleEditor({ ...scheduleEditor, endTime: e.target.value })} /></label></div>
+            <label className={styles.fieldLabel}>地点 / 平台</label>
+            <input className={styles.select} value={scheduleEditor.location} onChange={(e) => setScheduleEditor({ ...scheduleEditor, location: e.target.value })} placeholder="可留空" />
+            <label className={styles.fieldLabel}>参与成员</label>
+            <div className={styles.scheduleMemberPicker}>{community.memberCharacterIds.map((id) => { const m = resolveMember(community, id); const checked = scheduleEditor.memberCharacterIds.includes(id); return <button type="button" key={id} data-checked={checked ? "true" : undefined} onClick={() => setScheduleEditor({ ...scheduleEditor, memberCharacterIds: checked ? scheduleEditor.memberCharacterIds.filter((value) => value !== id) : [...scheduleEditor.memberCharacterIds, id] })}><Avatar text={m.displayName} imageUrl={m.avatarUrl} tone="soft"/><span>{m.displayName}</span></button>; })}</div>
+            <label className={styles.scheduleSyncToggle}><span><b>同步到手机日历</b><small>只用于真实占用成员时间/地点的工作行程；WVS Live 不会同步。</small></span><input type="checkbox" checked={scheduleEditor.calendarSync} onChange={(e) => setScheduleEditor({ ...scheduleEditor, calendarSync: e.target.checked })}/></label>
+            <div className={styles.scheduleEditorActions}>{scheduleEditor.id ? <button type="button" className={styles.scheduleDeleteButton} onClick={() => { const item = state.schedules.find((row) => row.id === scheduleEditor.id); if (item) removeScheduleItem(item); }}><Trash2 size={16}/> 删除</button> : null}<button type="button" className={styles.primaryButton} onClick={saveScheduleEditor}>保存日程</button></div>
+          </section>
+        </div>;
+      })() : null}
+
       {liveCreator ? (() => {
         const community = communityMap.get(liveCreator.communityId);
         if (!community) return null;
@@ -1811,23 +2081,23 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target && !startingLive) setLiveCreator(null); }}>
           <section className={styles.sheet}>
             <div className={styles.sheetHandle} />
-            <div className={styles.sheetTitle}><h2>生成成员 LIVE</h2><button type="button" className={styles.iconBtn} disabled={startingLive} onClick={() => setLiveCreator(null)}><X size={20} /></button></div>
-            <div className={styles.liveCreatorMember}><Avatar text={member.displayName} imageUrl={member.avatarUrl} tone="soft" /><div><b>{member.displayName}</b><span>{community.name}</span></div></div>
+            <div className={styles.sheetTitle}><h2>{liveCreator.official ? "生成 Official Live" : "生成成员 LIVE"}</h2><button type="button" className={styles.iconBtn} disabled={startingLive} onClick={() => setLiveCreator(null)}><X size={20} /></button></div>
+            <div className={styles.liveCreatorMember}><Avatar text={liveCreator.official ? community.official.displayName : member.displayName} imageUrl={liveCreator.official ? (community.official.avatarUrl || community.avatarUrl) : member.avatarUrl} tone={liveCreator.official ? "teal" : "soft"} /><div><b>{liveCreator.official ? community.official.displayName : member.displayName}</b><span>{liveCreator.official ? `${community.name} · Official` : community.name}</span></div></div>
             <label className={styles.fieldLabel}>直播类型</label>
             <div className={styles.liveTypePicker}>
               <button type="button" className={liveCreator.liveType === "auto" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "auto" })}><Sparkles size={15} /><b>角色决定</b><small>按人设和当时状态选择</small></button>
-              <button type="button" className={liveCreator.liveType === "visual" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "visual" })}><Video size={15} /><b>露脸 LIVE</b><small>原来的横屏文字舞台</small></button>
-              <button type="button" className={liveCreator.liveType === "voice" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "voice" })}><Radio size={15} /><b>语音 LIVE</b><small>头像、发言气泡与评论</small></button>
+              <button type="button" className={liveCreator.liveType === "visual" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "visual" })}><Video size={15} /><b>Video Live</b><small>横屏直播舞台</small></button>
+              <button type="button" className={liveCreator.liveType === "voice" ? styles.liveTypePickerActive : ""} onClick={() => setLiveCreator({ ...liveCreator, liveType: "voice" })}><Radio size={15} /><b>Voice Live</b><small>头像、发言气泡与评论</small></button>
             </div>
             <label className={styles.fieldLabel}>本场主题 · 可不填</label>
             <textarea className={styles.textareaSmall} value={liveCreator.theme} onChange={(e) => setLiveCreator({ ...liveCreator, theme: e.target.value })} placeholder={"留空：让角色自己决定为什么开播\n也可以写：活动后台 / 吃饭 / 睡前聊聊天 / 推歌…"} />
             <label className={styles.fieldLabel}>本场回放封面</label>
             <div className={styles.liveCoverEditor}>
               <div className={styles.liveCoverPreview} style={liveCreator.coverUrl ? { backgroundImage: `url(${liveCreator.coverUrl})` } : undefined}>{!liveCreator.coverUrl ? <span>未设置封面</span> : null}</div>
-              <div><button type="button" onClick={() => liveCreatorCoverInputRef.current?.click()}><ImagePlus size={15} /> 更换本场封面</button>{member.liveCoverUrl && liveCreator.coverUrl !== member.liveCoverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: member.liveCoverUrl })}>使用角色默认封面</button> : null}{liveCreator.coverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: "" })}>本场不使用封面</button> : null}</div>
+              <div><button type="button" onClick={() => liveCreatorCoverInputRef.current?.click()}><ImagePlus size={15} /> 更换本场封面</button>{!liveCreator.official && member.liveCoverUrl && liveCreator.coverUrl !== member.liveCoverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: member.liveCoverUrl })}>使用角色默认封面</button> : null}{liveCreator.official && (community.coverUrl || community.official.avatarUrl) && liveCreator.coverUrl !== (community.coverUrl || community.official.avatarUrl) ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: community.coverUrl || community.official.avatarUrl || "" })}>使用 Official 默认封面</button> : null}{liveCreator.coverUrl ? <button type="button" onClick={() => setLiveCreator({ ...liveCreator, coverUrl: "" })}>本场不使用封面</button> : null}</div>
             </div>
             <input ref={liveCreatorCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; if (file) setLiveCreator({ ...liveCreator, coverUrl: await fileToDataUrl(file, 1400, 0.88) }); e.currentTarget.value = ""; }} />
-            <p className={styles.editorHint}>主题只是软方向；直播多久、聊多少、什么时候下播，以及同 Community 成员是否来围观或连线，都按人设和当次情境决定。选择“角色决定”时，角色会自己判断露脸还是只开语音。</p>
+            <p className={styles.editorHint}>主题只是软方向；直播多久、聊多少、什么时候下播，以及同 Community 成员是否来围观或连线，都按人设和当次情境决定。选择“角色决定”时，角色会自己判断 Video Live 或 Voice Live。</p>
             <button type="button" className={styles.primaryButton} disabled={startingLive} onClick={startLive}><Radio size={18} /> {startingLive ? "正在准备 LIVE…" : "开始生成 LIVE"}</button>
           </section>
         </div>;
@@ -1837,9 +2107,9 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       {postMenuId ? (() => { const post = postMap.get(postMenuId); if (!post) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setPostMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><button type="button" onClick={() => openPostEditor(post)}><Pencil size={18} /> 编辑贴文</button><button type="button" className={styles.dangerSheetAction} onClick={() => removePost(post)}><Trash2 size={18} /> 删除贴文</button><button type="button" onClick={() => setPostMenuId(null)}>取消</button></section></div>; })() : null}
 
-      {commentMenu ? (() => { const post = postMap.get(commentMenu.postId); const comment = post?.comments.find((item) => item.id === commentMenu.commentId); if (!post || !comment) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommentMenu(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><button type="button" onClick={() => { const author = resolveCommentAuthor(comment, post); setReplyTarget({ postId: post.id, commentId: comment.id, name: author.name }); setCommentMenu(null); setTimeout(() => document.getElementById("wvs-comment-input")?.focus(), 30); }}><MessageCircle size={18} /> 回复</button><button type="button" className={styles.dangerSheetAction} onClick={() => removeComment(post, comment)}><Trash2 size={18} /> 删除评论</button><button type="button" onClick={() => setCommentMenu(null)}>取消</button></section></div>; })() : null}
+      {commentMenu ? (() => { const post = postMap.get(commentMenu.postId); const comment = post?.comments.find((item) => item.id === commentMenu.commentId); if (!post || !comment) return null; const allowReply = post.authorType !== "artist" && post.authorType !== "official"; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommentMenu(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} />{allowReply ? <button type="button" onClick={() => { const author = resolveCommentAuthor(comment, post); setReplyTarget({ postId: post.id, commentId: comment.id, name: author.name }); setCommentMenu(null); setTimeout(() => document.getElementById("wvs-comment-input")?.focus(), 30); }}><MessageCircle size={18} /> 回复</button> : null}<button type="button" className={styles.dangerSheetAction} onClick={() => removeComment(post, comment)}><Trash2 size={18} /> 删除评论</button><button type="button" onClick={() => setCommentMenu(null)}>取消</button></section></div>; })() : null}
 
-      {communityMenuId ? (() => { const community = communityMap.get(communityMenuId); if (!community) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommunityMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>{community.name} 管理</h2><button type="button" className={styles.iconBtn} onClick={() => setCommunityMenuId(null)}><X size={19} /></button></div><button type="button" onClick={() => { setCommunityMenuId(null); openCommunityEditor(community); }}><Settings size={18} /> 管理 Community</button><button type="button" onClick={() => { setCommunityMenuId(null); openComposer("official", community.id); }}><Send size={18} /> 发布 Official Post</button><button type="button" onClick={() => { setCommunityMenuId(null); openNoticeEditor(community.id); }}><CalendarDays size={18} /> 发布官方公告</button><button type="button" onClick={() => { setCommunityMenuId(null); setPhotoPicker({ communityId: community.id, mode: "manageOfficial" }); }}><ImagePlus size={18} /> 管理官方媒体 · {community.officialMediaPhotoIds?.length || 0}</button><button type="button" disabled={generatingCommunityId === community.id} onClick={() => generateCommunityRound(community)}><Sparkles size={18} /> {generatingCommunityId === community.id ? "正在生成…" : "生成一轮 AI 社区动态"}</button><button type="button" onClick={() => showTodo("Official Schedule / Calendar")}><CalendarDays size={18} /> 安排行程</button><button type="button" onClick={() => showTodo("Official LIVE")}><Radio size={18} /> 发起官方 LIVE</button><button type="button" onClick={() => setCommunityMenuId(null)}>取消</button></section></div>; })() : null}
+      {communityMenuId ? (() => { const community = communityMap.get(communityMenuId); if (!community) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommunityMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>{community.name} 管理</h2><button type="button" className={styles.iconBtn} onClick={() => setCommunityMenuId(null)}><X size={19} /></button></div><button type="button" onClick={() => { setCommunityMenuId(null); openCommunityEditor(community); }}><Settings size={18} /> 管理 Community</button><button type="button" onClick={() => { setCommunityMenuId(null); openComposer("official", community.id); }}><Send size={18} /> 发布 Official Post</button><button type="button" onClick={() => { setCommunityMenuId(null); openNoticeEditor(community.id); }}><CalendarDays size={18} /> 发布官方公告</button><button type="button" onClick={() => { setCommunityMenuId(null); setPhotoPicker({ communityId: community.id, mode: "manageOfficial" }); }}><ImagePlus size={18} /> 管理官方媒体 · {community.officialMediaPhotoIds?.length || 0}</button><button type="button" disabled={generatingCommunityId === community.id} onClick={() => generateCommunityRound(community)}><Sparkles size={18} /> {generatingCommunityId === community.id ? "正在生成…" : "生成一轮 AI 社区动态"}</button><button type="button" onClick={() => { setCommunityMenuId(null); openCommunitySchedule(community); }}><CalendarDays size={18} /> 安排行程</button><button type="button" onClick={() => { setCommunityMenuId(null); openLiveCreator(community, undefined, true); }}><Radio size={18} /> 发起 Official Live</button><button type="button" onClick={() => setCommunityMenuId(null)}>取消</button></section></div>; })() : null}
 
       {aiMenuContext ? <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setAiMenuContext(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><div className={styles.sheetTitle}><h2>AI 生成</h2><button type="button" className={styles.iconBtn} onClick={() => setAiMenuContext(null)}><X size={19} /></button></div>{aiMenuContext.type === "post" ? (() => { const post = postMap.get(aiMenuContext.postId); return post ? <><button type="button" disabled={generatingCommentsPostId === post.id} onClick={() => generateMoreComments(post)}><MessageCircle size={18} /> {generatingCommentsPostId === post.id ? "正在加载评论…" : "加载更多评论"}</button><p className={styles.sheetHint}>只追加，不覆盖原评论；粉丝会以韩语为主，艺人可能回复，也可能不回复。</p></> : null; })() : aiMenuContext.type === "community" ? (() => { const community = communityMap.get(aiMenuContext.communityId); return community ? <><button type="button" onClick={() => generateCommunityRound(community)}><Sparkles size={18} /> 生成一轮混合社区动态</button><button type="button" onClick={() => generateArtistOnly(community)}><UserRound size={18} /> 只生成 Artist Post</button><button type="button" onClick={() => generateFanOnly(community)}><UsersRound size={18} /> 只刷新粉丝内容</button><button type="button" onClick={() => generateOfficialOnly(community)}><Send size={18} /> 生成 Official Post</button><button type="button" onClick={() => generateNoticeOnly(community)}><CalendarDays size={18} /> 生成 Official Notice</button></> : null; })() : <><p className={styles.sheetHint}>选择一个 Community 刷新，或按顺序刷新全部。</p>{state.communities.map((community) => <button type="button" key={community.id} onClick={() => generateCommunityRound(community)}><Sparkles size={18} /> {community.name}</button>)}{state.communities.length > 1 ? <button type="button" onClick={generateAllCommunities}><UsersRound size={18} /> 全部 Community 各生成一轮</button> : null}</>}<button type="button" onClick={() => setAiMenuContext(null)}>取消</button></section></div> : null}
 

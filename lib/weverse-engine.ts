@@ -16,11 +16,11 @@ import { loadMemoryConfig } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { prepareShortTermContext } from "./short-term-assembler";
-import { buildCalendarScheduleMarker } from "./calendar-storage";
+import { buildCalendarScheduleMarker, loadOwnerCalendarPlans } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext, buildGroupTimeContext, getSystemTimeZone, formatZonedChineseDateTime, getZonedWeekday } from "./character-time";
 import { loadPhotoLibrary } from "./photo-library-storage";
-import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, WeverseLive } from "./weverse-storage";
+import type { WeverseComment, WeverseCommunity, WeversePost, WeverseSettings, WeverseLive, WeverseScheduleItem, WeverseScheduleType } from "./weverse-storage";
 
 export type WeverseMediaIntent = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
 
@@ -64,6 +64,17 @@ export type GeneratedWeverseFanComment = {
 export type GeneratedWeverseArtistReply = {
   original: string;
   translated: string;
+};
+
+export type GeneratedWeverseScheduleItem = {
+  type: WeverseScheduleType;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  location?: string;
+  memberCharacterIds: string[];
+  calendarSync: boolean;
 };
 
 type ResolvedGeneration = {
@@ -404,8 +415,12 @@ export async function generateWeverseFanBatch(
         targetPost ? `本轮主要给这条帖子增加互动：\n${targetPost.id} | ${targetPost.authorType}: ${targetPost.originalBody || targetPost.body}` : "",
         targetPost ? `现有评论（replyToId 只能引用这里真实存在的评论 id，或留空）：\n${commentContext(targetPost)}` : "",
         includePosts ? `posts 生成 ${counts.postRange} 条；如果这轮没有自然的新粉丝帖，可以为 0。` : "posts 必须为空数组。",
-        targetPost ? `comments 生成 ${counts.commentRange} 条，允许为 0。默认大多数（至少约 70%）必须是独立顶级评论；只允许少量自然的粉丝互回小楼。不要把本批后续评论全部挂到第一条下面。艺人回复由另一个角色模型处理。` : "comments 必须为空数组；没有指定目标帖子时，本轮只负责生成 Fan Post。",
-        "若某条新评论确实需要回复本批前面已经生成的评论，可填 replyToIndex；若回复既有评论则填 replyToId；否则必须留空作为顶级评论。连续多条指向同一个 parent 是不自然的，应避免。",
+        targetPost ? (targetPost.authorType === "artist" || targetPost.authorType === "official"
+          ? `comments 生成 ${counts.commentRange} 条，允许为 0。这个帖子属于艺人/官方评论区：所有粉丝评论都必须是独立顶级评论，禁止粉丝回复粉丝，replyToId 与 replyToIndex 必须留空。艺人/官方回复由另外的角色逻辑处理。`
+          : `comments 生成 ${counts.commentRange} 条，允许为 0。默认大多数（至少约 70%）必须是独立顶级评论；只允许少量自然的粉丝互回小楼。不要把本批后续评论全部挂到第一条下面。艺人回复由另一个角色模型处理。`) : "comments 必须为空数组；没有指定目标帖子时，本轮只负责生成 Fan Post。",
+        targetPost && (targetPost.authorType === "artist" || targetPost.authorType === "official")
+          ? "本轮禁止任何粉丝互回；所有 comments 都不要填写 replyToId / replyToIndex。"
+          : "若某条新评论确实需要回复本批前面已经生成的评论，可填 replyToIndex；若回复既有评论则填 replyToId；否则必须留空作为顶级评论。连续多条指向同一个 parent 是不自然的，应避免。",
         "只输出 JSON，不要 Markdown。格式：{\"posts\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\"}],\"comments\":[{\"displayName\":\"...\",\"original\":\"...\",\"translated\":\"...\",\"replyToId\":\"现有评论id或空\",\"replyToIndex\":null或前面评论序号}]}。",
       ].filter(Boolean).join("\n"),
     },
@@ -415,12 +430,13 @@ export async function generateWeverseFanBatch(
   const parsed = extractJsonObject(raw);
   const fanPosts = normalizeBilingualItems(parsed?.posts).slice(0, counts.maxPosts).map(({ displayName, original, translated }) => ({ displayName, original, translated }));
   const allowedReplyIds = new Set(targetPost?.comments.map((comment) => comment.id) || []);
+  const fanRepliesAllowed = !targetPost || (targetPost.authorType !== "artist" && targetPost.authorType !== "official");
   const comments = normalizeBilingualItems(parsed?.comments).slice(0, counts.maxComments).map((item) => ({
     displayName: item.displayName,
     original: item.original,
     translated: item.translated,
-    replyToId: item.replyToId && allowedReplyIds.has(item.replyToId) ? item.replyToId : undefined,
-    replyToIndex: item.replyToIndex,
+    replyToId: fanRepliesAllowed && item.replyToId && allowedReplyIds.has(item.replyToId) ? item.replyToId : undefined,
+    replyToIndex: fanRepliesAllowed ? item.replyToIndex : undefined,
   }));
   return { posts: fanPosts, comments };
 }
@@ -469,6 +485,88 @@ export async function generateWeverseArtistReply(
   return { original: original || translated, translated: translated || original };
 }
 
+
+function scheduleType(value: unknown): WeverseScheduleType {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["media","anniversary","performance","recording","shoot","brand","release","other"].includes(text)
+    ? text as WeverseScheduleType : "other";
+}
+
+function communityCalendarContext(community: WeverseCommunity, now: Date): string {
+  const rows: string[] = [];
+  const threshold = now.getTime() - 7 * 86400000;
+  for (const characterId of community.memberCharacterIds) {
+    const character = loadCharacters().find((item) => item.id === characterId);
+    const items = loadOwnerCalendarPlans("character", characterId)
+      .flatMap((plan) => plan.items)
+      .filter((item) => new Date(`${item.date}T${item.endTime || "23:59"}:00`).getTime() >= threshold)
+      .sort((a,b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`))
+      .slice(0, 16);
+    if (!items.length) continue;
+    rows.push(`${character?.name || characterId}：${items.map((item) => `${item.date} ${item.startTime}-${item.endTime} ${item.title}${item.location ? ` @${item.location}` : ""}`).join("；")}`);
+  }
+  return rows.length ? rows.join("\n") : "成员手机日历中暂无可参考的近期工作安排。";
+}
+
+export async function generateWeverseScheduleBatch(
+  community: WeverseCommunity,
+  existing: WeverseScheduleItem[],
+  options?: { now?: Date },
+): Promise<GeneratedWeverseScheduleItem[]> {
+  const resolved = await resolveCommunityApi(community);
+  const now = options?.now ?? new Date();
+  const characters = loadCharacters().filter((item) => community.memberCharacterIds.includes(item.id));
+  const memberRows = characters.map((item) => `${item.id} = ${item.name}`).join("\n");
+  const existingRows = existing
+    .filter((item) => item.communityId === community.id)
+    .sort((a,b) => a.startsAt-b.startsAt)
+    .slice(-24)
+    .map((item) => `${new Date(item.startsAt).toISOString()} | ${item.type} | ${item.title} | members=${item.memberCharacterIds.join(",")}`)
+    .join("\n") || "暂无 WVS Schedule 条目。";
+  const messages: LLMMessage[] = [
+    {
+      role: "system",
+      content: [
+        `你在维护 Weverse「${community.name}」Community 的公开 Schedule。`,
+        `当前参考时间：${now.toISOString()}`,
+        `可用成员 ID：\n${memberRows || "无"}`,
+        "请生成接下来约 4~6 周内少量、可信、不过密的公开日程。可以包含：打歌/舞台/音乐节/演出 performance，综艺/节目/内容录影 recording，杂志/画报/宣传照 shoot，品牌活动 brand，媒体公开 media，作品/内容发布 release，纪念日 anniversary，以及必要的 other。",
+        "绝对不要提前生成成员个人 LIVE。成员 Live 是临时发生后才作为历史记录挂进 WVS 日历，不能被预判。",
+        "calendarSync 只有现实中真正占用成员时间/地点的工作行程才设为 true，例如打歌、音乐节、演出、综艺录影、品牌活动、画报拍摄、进组/拍摄等；纯纪念日、内容上线、媒体公开、release 通常为 false。",
+        "不要制造严重事故、获奖、解散、结婚等重大事实。若现有手机日历已有明确安排，尽量沿用/补充而不是冲突。",
+        `现有 WVS Schedule：\n${existingRows}`,
+        `成员手机日历参考：\n${communityCalendarContext(community, now)}`,
+        "memberCharacterIds 只能使用上面提供的真实 ID；团体共同活动可填多个。",
+        `只输出 JSON，不要 Markdown。格式：{"items":[{"type":"performance","title":"...","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"...或空","memberCharacterIds":["真实ID"],"calendarSync":true}]}。数量建议 4~10 条。`,
+      ].join("\n"),
+    },
+    { role: "user", content: "刷新生成这段时间的 Community Schedule。" },
+  ];
+  const raw = await sendLLMRequest(resolved.apiConfig, resolved.preset, messages, resolved.regexes, { characterName: `Weverse Schedule:${community.name}` }, { appId: "weverse", appTags: ["weverse","schedule"], skipOutputRegex: true });
+  const parsed = extractJsonObject(raw);
+  const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
+  const allowed = new Set(community.memberCharacterIds);
+  return rawItems.slice(0, 12).map((rawItem) => {
+    const item = rawItem && typeof rawItem === "object" ? rawItem as Record<string, unknown> : {};
+    const date = String(item.date ?? "").trim();
+    const startTime = String(item.startTime ?? "").trim();
+    const endTime = String(item.endTime ?? "").trim();
+    const title = String(item.title ?? "").trim();
+    const members = Array.isArray(item.memberCharacterIds) ? item.memberCharacterIds.map(String).filter((id) => allowed.has(id)) : [];
+    const type = scheduleType(item.type);
+    const calendarSync = item.calendarSync === true && !["media", "release", "anniversary"].includes(type);
+    return {
+      type,
+      title,
+      date,
+      startTime,
+      endTime,
+      location: String(item.location ?? "").trim() || undefined,
+      memberCharacterIds: members.length ? Array.from(new Set(members)) : community.memberCharacterIds.slice(),
+      calendarSync,
+    };
+  }).filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date) && /^\d{2}:\d{2}$/.test(item.startTime) && /^\d{2}:\d{2}$/.test(item.endTime) && Boolean(item.title));
+}
 
 export type GeneratedWeverseLiveSegment = {
   kind: "speech" | "action";
@@ -601,12 +699,12 @@ function liveFormatRules(opening = false, liveType: "visual" | "voice" | "auto" 
       ? "现在是刚开播阶段。通常先调一下状态、等观众陆续进来、随口说几句；不要一开场就进入高强度问答或大型节目。"
       : "这是直播中途的一小段推进。延续之前的话题与状态，不要像新开一场直播一样重新自我介绍。",
     liveType === "voice"
-      ? "这是纯语音 LIVE：前台只有渐变语音舞台、成员头像、当前发言文字气泡与评论，不露脸、不展示环境。所有 segment 必须为 speech，绝对不要输出 action 或任何动作/画面描写。"
+      ? "这是 Voice Live：前台只有渐变语音舞台、成员头像、当前发言文字气泡与评论，不展示画面环境。所有 segment 必须为 speech，绝对不要输出 action 或任何动作/画面描写。"
       : liveType === "auto"
-        ? "本场类型尚未指定。请按角色当时状态自然选择露脸 visual 或纯语音 voice；若选择 voice，所有 segment 必须为 speech，绝对不要输出 action 或画面描写。"
-        : "这是露脸 LIVE，使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
+        ? "本场类型尚未指定。请按角色当时状态自然选择 Video Live（visual）或 Voice Live（voice）；若选择 voice，所有 segment 必须为 speech，绝对不要输出 action 或画面描写。"
+        : "这是 Video Live，使用横屏 LIVE Stage。不要讨论竖屏模板，也不要描述真实视频文件、编码、清晰度等技术细节。",
     "speech 使用该角色本人最自然的语言；若不是简体中文，同时给出简体中文 translated。",
-    liveType === "voice" ? "纯语音 LIVE 不输出动作。" : "visual 模式下 action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。",
+    liveType === "voice" ? "Voice Live 不输出动作。" : "visual 模式下 action 不是必填：只有角色真的发生了新的动作、姿态变化或环境操作时才输出；动作没变化就完全省略，禁止为了凑格式硬写。action 使用省略主语的现场描写，不写‘他/她/角色/姓名……’这类第三人称主语，不加括号，只写简体中文、不做双语。",
     "粉丝留言要像真实直播间：在线人数远高于活跃发言人数，观众里可以有核心粉丝、普通关注者和路人。韩语为主，少量日语、英语、中文；不要人人都像资深粉丝。",
     opening
       ? "开场留言以轻松即时反应为主，例如终于开播、爱你、今天好帅/可爱、最近吃什么、是不是瘦了胖了、最近在忙什么等；不要一上来全是深度问题。"

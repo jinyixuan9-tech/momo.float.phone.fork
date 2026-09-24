@@ -42,6 +42,23 @@ export type WeverseComment = {
 export type WeverseNotice = {
   id: string; communityId: string; title: string; body: string; originalBody?: string; imageUrl?: string; photoLibraryId?: string; photoSource?: "album" | "generated" | "manual"; photoDescription?: string; createdAt: number; historical?: boolean;
 };
+
+export type WeverseScheduleType = "media" | "anniversary" | "performance" | "recording" | "shoot" | "brand" | "release" | "other";
+export type WeverseScheduleItem = {
+  id: string;
+  communityId: string;
+  type: WeverseScheduleType;
+  title: string;
+  startsAt: number;
+  endsAt?: number;
+  location?: string;
+  memberCharacterIds: string[];
+  source: "manual" | "generated";
+  /** 现实工作/出行类日程同步到角色手机日历；平台内 Live 不走这里。 */
+  calendarSync: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
 export type WeversePost = {
   id: string; communityId: string; authorType: WeverseAuthorType; authorId: string; authorName?: string; authorAvatarUrl?: string;
   /** Artist Post can be published as a compact voice post. The transcript stays in body/originalBody. */
@@ -107,6 +124,8 @@ export type WeverseLive = {
   roundCount: number;
   /** 已经提交给角色处理过的用户评论时间上界。 */
   lastConsumedUserCommentAt?: number;
+  /** 官方账号名义的 LIVE；Stage 仍由实际参与成员发言。 */
+  official?: boolean;
   segments: WeverseLiveSegment[];
   comments: WeverseLiveComment[];
 };
@@ -120,14 +139,14 @@ export type WeverseSettings = {
   generationScope: "current" | "all";
   notifications: { artistReply: boolean; fanReply: boolean; artistPost: boolean; officialPost: boolean; live: boolean };
 };
-export type WeverseState = { version: 7; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
+export type WeverseState = { version: 8; communities: WeverseCommunity[]; posts: WeversePost[]; notices: WeverseNotice[]; lives: WeverseLive[]; schedules: WeverseScheduleItem[]; userProfile?: WeverseUserProfile; settings: WeverseSettings };
 
 export const DEFAULT_WEV_SETTINGS: WeverseSettings = {
   translationDefault: "translated", autoTranslateComments: true, fanActivity: "normal", fanLanguagePreset: "korean_mixed", generationScope: "current",
   notifications: { artistReply: true, fanReply: true, artistPost: true, officialPost: true, live: true },
 };
-const EMPTY_STATE: WeverseState = { version: 7, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
-function cloneEmpty(): WeverseState { return { version: 7, communities: [], posts: [], notices: [], lives: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
+const EMPTY_STATE: WeverseState = { version: 8, communities: [], posts: [], notices: [], lives: [], schedules: [], userProfile: {}, settings: DEFAULT_WEV_SETTINGS };
+function cloneEmpty(): WeverseState { return { version: 8, communities: [], posts: [], notices: [], lives: [], schedules: [], userProfile: {}, settings: { ...DEFAULT_WEV_SETTINGS, notifications: { ...DEFAULT_WEV_SETTINGS.notifications } } }; }
 function uniqueStrings(value: unknown): string[] { return Array.isArray(value) ? Array.from(new Set(value.filter((v): v is string => typeof v === "string" && Boolean(v.trim())).map(v => v.trim()))) : []; }
 function finiteNonNegative(value: unknown, fallback = 0): number { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback; }
 function normalizeSettings(value: unknown): WeverseSettings {
@@ -200,6 +219,7 @@ function normalizeLive(raw: unknown): WeverseLive | null {
     viewerCount, peakViewerCount: Math.max(viewerCount, finiteNonNegative(item.peakViewerCount, viewerCount)),
     heartCount: finiteNonNegative(item.heartCount, 0), roundCount: finiteNonNegative(item.roundCount, 0),
     lastConsumedUserCommentAt: typeof (item as any).lastConsumedUserCommentAt === "number" && Number.isFinite((item as any).lastConsumedUserCommentAt) ? (item as any).lastConsumedUserCommentAt : startedAt - 1,
+    official: (item as any).official === true,
     segments, comments,
   };
 }
@@ -224,6 +244,30 @@ function normalizeCommunity(raw: unknown): WeverseCommunity | null {
     historyCursorAt: typeof item.historyCursorAt === "number" && Number.isFinite(item.historyCursorAt) ? item.historyCursorAt : undefined,
     createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(), updatedAt: typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : Date.now() };
 }
+function normalizeSchedule(raw: unknown): WeverseScheduleItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Partial<WeverseScheduleItem>;
+  if (typeof item.id !== "string" || typeof item.communityId !== "string" || typeof item.title !== "string") return null;
+  const type: WeverseScheduleType = ["media","anniversary","performance","recording","shoot","brand","release","other"].includes(String(item.type))
+    ? item.type as WeverseScheduleType : "other";
+  const startsAt = typeof item.startsAt === "number" && Number.isFinite(item.startsAt) ? item.startsAt : Date.now();
+  const endsAt = typeof item.endsAt === "number" && Number.isFinite(item.endsAt) && item.endsAt > startsAt ? item.endsAt : undefined;
+  return {
+    id: item.id,
+    communityId: item.communityId,
+    type,
+    title: item.title.trim() || "Schedule",
+    startsAt,
+    endsAt,
+    location: typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined,
+    memberCharacterIds: uniqueStrings(item.memberCharacterIds),
+    source: item.source === "generated" ? "generated" : "manual",
+    calendarSync: item.calendarSync === true,
+    createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(),
+    updatedAt: typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : Date.now(),
+  };
+}
+
 function hash01(text: string): number { let h = 2166136261; for (let i=0;i<text.length;i+=1) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; }
 function legacyCounts(id: string, type: WeverseAuthorType, fanCount: number, visibleComments: number): { likeCount:number; commentCount:number } {
   const r = hash01(id); const base = Math.max(1000, fanCount);
@@ -246,7 +290,8 @@ function normalizeState(raw: unknown): WeverseState {
     id: item.id, communityId: item.communityId, title: item.title, body: typeof item.body === "string" ? item.body : "", originalBody: typeof item.originalBody === "string" ? item.originalBody : undefined, imageUrl: typeof item.imageUrl === "string" ? item.imageUrl : undefined, photoLibraryId: typeof item.photoLibraryId === "string" ? item.photoLibraryId : undefined, photoSource: item.photoSource === "album" || item.photoSource === "generated" || item.photoSource === "manual" ? item.photoSource : undefined, photoDescription: typeof item.photoDescription === "string" ? item.photoDescription : undefined, createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : Date.now(), historical: item.historical === true,
   }));
   const lives = Array.isArray((source as any).lives) ? (source as any).lives.map(normalizeLive).filter((v: WeverseLive | null): v is WeverseLive => Boolean(v)) : [];
-  return { version: 7, communities, posts, notices, lives, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
+  const schedules = Array.isArray((source as any).schedules) ? (source as any).schedules.map(normalizeSchedule).filter((v: WeverseScheduleItem | null): v is WeverseScheduleItem => Boolean(v)) : [];
+  return { version: 8, communities, posts, notices, lives, schedules, userProfile: source.userProfile && typeof source.userProfile === "object" ? source.userProfile as WeverseUserProfile : {}, settings: normalizeSettings(source.settings) };
 }
 export function loadWeverseState(): WeverseState { if (typeof window === "undefined") return EMPTY_STATE; try { const raw=kvGet(WEV_STATE_KEY); return raw ? normalizeState(JSON.parse(raw)) : cloneEmpty(); } catch { return cloneEmpty(); } }
 export function saveWeverseState(state: WeverseState): WeverseState { const normalized=normalizeState(state); if (typeof window !== "undefined") { kvSet(WEV_STATE_KEY, JSON.stringify(normalized)); window.dispatchEvent(new CustomEvent(WEV_UPDATED_EVENT)); } return normalized; }
@@ -291,7 +336,7 @@ export function updateWeverseMemberProfile(
 }
 export function updateWeverseSettings(patch: Partial<WeverseSettings>): WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,settings:normalizeSettings({...state.settings,...patch,notifications:{...state.settings.notifications,...(patch.notifications||{})}})}); }
 export function upsertWeverseCommunity(community: WeverseCommunity): WeverseState { const state=loadWeverseState(); const i=state.communities.findIndex(v=>v.id===community.id); const communities=[...state.communities]; if(i>=0) communities[i]=community; else communities.unshift(community); return saveWeverseState({...state,communities}); }
-export function deleteWeverseCommunity(communityId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,communities:state.communities.filter(v=>v.id!==communityId),posts:state.posts.filter(v=>v.communityId!==communityId),notices:state.notices.filter(v=>v.communityId!==communityId),lives:state.lives.filter(v=>v.communityId!==communityId)}); }
+export function deleteWeverseCommunity(communityId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,communities:state.communities.filter(v=>v.id!==communityId),posts:state.posts.filter(v=>v.communityId!==communityId),notices:state.notices.filter(v=>v.communityId!==communityId),lives:state.lives.filter(v=>v.communityId!==communityId),schedules:state.schedules.filter(v=>v.communityId!==communityId)}); }
 export function addWeversePost(post:WeversePost):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,posts:[post,...state.posts]}); }
 export function addWeversePosts(posts:WeversePost[]):WeverseState { if(!posts.length) return loadWeverseState(); const state=loadWeverseState(); return saveWeverseState({...state,posts:[...posts,...state.posts]}); }
 export function updateWeversePost(postId:string,patch:Partial<WeversePost>):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,posts:state.posts.map(v=>v.id===postId?{...v,...patch}:v)}); }
@@ -304,6 +349,16 @@ export function createWeverseId(prefix:string):string { return `${prefix}_${Date
 export function addWeverseNotice(notice:WeverseNotice):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,notices:[notice,...state.notices]}); }
 export function updateWeverseNotice(noticeId:string,patch:Partial<WeverseNotice>):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,notices:state.notices.map(v=>v.id===noticeId?{...v,...patch}:v)}); }
 export function deleteWeverseNotice(noticeId:string):WeverseState { const state=loadWeverseState(); return saveWeverseState({...state,notices:state.notices.filter(v=>v.id!==noticeId)}); }
+
+export function upsertWeverseScheduleItem(item: WeverseScheduleItem): WeverseState {
+  const state = loadWeverseState();
+  const schedules = [item, ...state.schedules.filter((entry) => entry.id !== item.id)];
+  return saveWeverseState({ ...state, schedules });
+}
+export function deleteWeverseScheduleItem(itemId: string): WeverseState {
+  const state = loadWeverseState();
+  return saveWeverseState({ ...state, schedules: state.schedules.filter((entry) => entry.id !== itemId) });
+}
 
 export function addWeverseLive(live: WeverseLive): WeverseState {
   const state = loadWeverseState();

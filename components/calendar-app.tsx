@@ -47,6 +47,7 @@ import {
 import { CalendarMonthPage } from "./calendar/month-page";
 import { CalendarDetailPage } from "./calendar/detail-page";
 import { CalendarEventEditModal, type CalendarEventDraft } from "./calendar/event-edit-modal";
+import { removeWeverseScheduleItemEverywhere, syncCalendarProjectionBackToWeverse } from "@/lib/weverse-schedule-sync";
 
 type OwnerOption = {
   key: string;
@@ -304,6 +305,8 @@ export function PhoneCalendarApp({
       title: item.title,
       emoji: item.emoji || "",
       colorKey: item.colorKey,
+      externalSource: item.externalSource,
+      externalId: item.externalId,
     });
   };
 
@@ -318,6 +321,10 @@ export function PhoneCalendarApp({
     const endDate = editingItem.endDate || editingItem.date;
     if (endDate < startDate) {
       onNotice?.("结束日期不能早于开始日期");
+      return;
+    }
+    if (editingItem.externalSource === "weverse" && endDate !== startDate) {
+      onNotice?.("WVS 同步日程暂时只支持单日日程；请在 WVS 日历中调整参与成员或日期");
       return;
     }
     const dayCount = Math.round((parseIsoDate(endDate).getTime() - parseIsoDate(startDate).getTime()) / 86400000) + 1;
@@ -346,8 +353,19 @@ export function PhoneCalendarApp({
         location: editingItem.location,
         title: editingItem.title,
         emoji: sanitizeScheduleEmoji(editingItem.emoji),
-        source: "manual",
+        source: editingItem.externalSource === "weverse" ? "weverse" : "manual",
+        externalSource: editingItem.externalSource,
+        externalId: editingItem.externalId,
         colorKey: editingItem.colorKey ?? pickScheduleColorKey(editingItem.startTime),
+      });
+    }
+    if (editingItem.externalSource === "weverse" && editingItem.externalId && dayCount === 1) {
+      syncCalendarProjectionBackToWeverse(editingItem.externalId, {
+        date: editingItem.date,
+        startTime: editingItem.startTime,
+        endTime: editingItem.endTime,
+        location: editingItem.location,
+        title: editingItem.title,
       });
     }
     setEditingItem(null);
@@ -358,7 +376,11 @@ export function PhoneCalendarApp({
   const handleDeleteItem = () => {
     if (!selectedOwner || !editingItem?.id) return;
     const targetWeekStart = getWeekStartIso(parseIsoDate(editingItem.originalDate || editingItem.date));
-    deleteCalendarScheduleItem(selectedOwner.ownerType, selectedOwner.ownerId, targetWeekStart, editingItem.id);
+    if (editingItem.externalSource === "weverse" && editingItem.externalId) {
+      removeWeverseScheduleItemEverywhere(editingItem.externalId);
+    } else {
+      deleteCalendarScheduleItem(selectedOwner.ownerType, selectedOwner.ownerId, targetWeekStart, editingItem.id);
+    }
     setEditingItem(null);
     refreshPlans();
     onNotice?.("日程已删除");

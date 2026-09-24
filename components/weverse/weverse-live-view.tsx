@@ -229,7 +229,7 @@ export function WeverseLiveView({ live, speakerNames, speakerAvatars, userName, 
               <b>{displayedVoiceSegment.characterId ? (speakerNames[displayedVoiceSegment.characterId] || displayedVoiceSegment.characterId) : "LIVE"}</b>
               <p>{displayedVoiceSegment.original}</p>
               {displayedVoiceSegment.translated && displayedVoiceSegment.translated !== displayedVoiceSegment.original ? <small>{displayedVoiceSegment.translated}</small> : null}
-            </div> : <div className={styles.voiceLiveBubble}><p>正在连接语音 LIVE…</p></div>}
+            </div> : <div className={styles.voiceLiveBubble}><p>正在连接 Voice Live…</p></div>}
             <div className={styles.voiceLiveAvatars}>{voiceParticipantIds.map((characterId) => {
               const segment = [...visibleSegments].reverse().find((item) => item.kind === "speech" && item.characterId === characterId);
               const active = Boolean(segment && (voiceLoadingSegmentId === segment.id || playingVoiceSegmentId === segment.id));

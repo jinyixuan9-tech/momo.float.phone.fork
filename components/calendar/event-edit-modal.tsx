@@ -16,6 +16,8 @@ export type CalendarEventDraft = {
   title: string;
   emoji: string;
   colorKey?: CalendarColorKey;
+  externalSource?: "weverse";
+  externalId?: string;
 };
 
 const EMOJI_PRESETS = [

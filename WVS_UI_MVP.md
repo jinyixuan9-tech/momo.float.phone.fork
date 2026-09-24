@@ -138,7 +138,7 @@
 - 同 Community 成员可围观彼此 LIVE：可以潜水，也可留下艺人评论。艺人评论有独立入口/列表，带艺人头像、认证、时间、原文与中文翻译；主播通常更容易注意艺人评论，但不强制逐条回复。
 - 同 Community 成员也可中途连线加入同一 LiveSession。连线不改变页面成视频分屏，只在 Stage 中以 WVS ID 区分发言者，并用系统行标注加入/离开。艺人围观与连线参与是两种独立状态。
 - 结束后为主持/连线参与者与纯围观艺人分别生成精简的 WVS LIVE 记忆投影，避免角色忘记自己来过；不同 Community 暂不互相围观或连线。
-- Official LIVE 延后与 Official 账号主页一起实现；普通 LIVE 的点播 TTS 与纯语音 LIVE 也不在本版。
+- Official LIVE 延后与 Official 账号主页一起实现；普通 LIVE 的点播 TTS 与Voice Live 也不在本版。
 
 ## v0.5.3 · LIVE TTS / Artist comments drawer
 - 普通文字 LIVE 接入 Weverse 绑定的 TTS：直播 Stage 左下提供单一语音按钮，点击只朗读当前最新一条可见角色原话；不自动播放，不朗读动作或中文翻译；再次点击可停止，播完后可重复播放。
@@ -150,8 +150,19 @@
 - 单条播放只读该条原话；action、系统行、中文翻译不显示语音键也不朗读。多人连线按每条发言的 `characterId` 使用各自 Weverse TTS 绑定。
 
 ## v0.5.5 · Voice LIVE / Voice Artist Post
-- 开播面板支持“角色决定 / 露脸 LIVE / 语音 LIVE”。角色决定模式允许模型按人设、时间与当下情境选择 `visual` 或 `voice`。
-- 纯语音 LIVE 不生成 action，使用渐变舞台、头像、当前发言悬浮卡与舞台内滚动评论；点击头像只点播该成员最近一段原话。
+- 开播面板支持“角色决定 / Video Live / Voice Live”。角色决定模式允许模型按人设、时间与当下情境选择 `visual` 或 `voice`。
+- Voice Live 不生成 action，使用渐变舞台、头像、当前发言悬浮卡与舞台内滚动评论；点击头像只点播该成员最近一段原话。
 - 围观、艺人评论折叠抽屉、连线、懒播放、记忆、下播与回放继续复用同一 LiveSession；回放列表外观不因语音模式另起一套。
 - Artist Post 可自然选择语音动态：Feed 正文位置显示语音条；点击后播放 TTS 并展开原话，中文翻译需要再次点击“查看翻译”。
 - 存储状态升至 v7，并向后兼容旧 Post / Live。
+
+
+## v0.5.6 · WVS Finish / Official / Schedule
+- 艺人/Official Post 评论区关闭粉丝互回：粉丝只生成一级评论；上方新增“艺人的评论”聚合区，下方“所有评论”保留粉丝原评论。艺人回复粉丝时，点击上方回复卡会自动滚到对应原评论并短暂高亮。
+- 成员主页“评论”Tab 调整为粉丝原评论 + 艺人回复的上下文卡片，接近真实 WVS 展示方式。
+- Official 主页补齐封面、官方头像/认证、粉丝数、帖子/评论，并按自定义需求增加 LIVE 入口；Community `LIVE·Media` 同时聚合成员与 Official 的全部直播回放。
+- 新增 Community Schedule：月历、类型筛选、选中日期日程、“下个日程”、刷新生成、手动新增/编辑/删除。个人 Live 不可被提前生成，只在实际结束后作为 WVS 历史日程出现；“下个日程”始终相对当前选中日期计算。
+- 真实工作/出行日程可同步到手机 Calendar（演出/打歌、录影、拍摄、品牌等），WVS Live 与纯平台事件不进入手机日历；手机日历对关联条目的单日编辑/删除会回写 WVS Schedule。
+- Live 类型对外统一命名为 `Video Live / Voice Live`。
+- 修复 WVS `album_only` 媒体策略下匹配失败仍显示文字图片的问题：未获得真实图片时帖子/公告直接按纯文字发布，不再显示伪图片占位。
+- Weverse state version 升至 v8；Service Worker cache version 升至 v37。

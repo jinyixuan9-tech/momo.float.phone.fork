@@ -214,7 +214,7 @@
 - 观众数与活跃评论分离：在线观众可明显多于发言者，生成规则包含核心粉丝、普通关注者、路人和潜水观众；私人 LIVE 冷启动先等人进来，评论从“终于开播 / 今天好帅 / 最近吃啥”等即时反应逐渐升温。
 - 点赞数、当前/峰值观看数随直播推进持久化；角色决定自然下播后，最后一段内容和弹幕播放完才切换 REPLAY，成员页与 LIVE·Media 可进入回放。
 - Live 数据进入 Weverse state v5；旧 state 自动补空 lives，不要求手动迁移。
-- 纯语音 LIVE / TTS 播放壳暂不在本版实现，等文字 LIVE 交互稳定后复用同一底层。
+- Voice Live / TTS 播放壳暂不在本版实现，等文字 LIVE 交互稳定后复用同一底层。
 - Service Worker cache version 升至 v31。
 
 ## v0.5.1 · WVS LIVE UI / History / Exit Fix
@@ -234,7 +234,7 @@
 - 同一 Community 内新增艺人围观：其他成员可作为普通观众进入、离开，并可留下“艺人评论”。艺人评论可短暂混入实时评论，同时汇总到独立 `X 条艺人评论` 入口；独立页显示艺人头像、认证、时间、原文与翻译。
 - 同一 Community 内新增动态连线：单人 LIVE 可中途让其他成员加入/离开，不做视频分屏，继续使用同一个文字 Stage；系统提示加入/离开，后续发言用角色 ID 区分。不同 Community 的角色不进入围观、艺人评论或连线候选。
 - LIVE 结束时为实际参与者和纯围观艺人分别写入简短角色视角记忆，区分“主持/连线参与”和“普通围观”，不向角色灌入整场逐字稿。
-- Official LIVE 暂不实现，后续与 Official 账号主页一起设计；普通 LIVE TTS 与纯语音 LIVE 仍留待后续。
+- Official LIVE 暂不实现，后续与 Official 账号主页一起设计；普通 LIVE TTS 与Voice Live 仍留待后续。
 - Weverse state version 升至 v6；Service Worker cache version 升至 v33。
 
 ### v0.5.3 · WVS LIVE TTS / Artist Comments Drawer
@@ -251,9 +251,20 @@
 - Service Worker cache version 升至 v35。
 
 ### v0.5.5 · WVS Voice LIVE / Voice Post
-- 成员 LIVE 新增 `visual / voice` 正式类型。手动生成时可明确选择露脸 LIVE、纯语音 LIVE，或交给角色按人设、当时状态与主题自行决定。
-- 纯语音 LIVE 复用现有懒播放、评论、小飞机推进、爱心、同 Community 艺人围观/艺人评论、多人连线、记忆与回放数据；生成层彻底禁止 action，只保存角色 speech。
+- 成员 LIVE 新增 `visual / voice` 正式类型。手动生成时可明确选择Video Live、Voice Live，或交给角色按人设、当时状态与主题自行决定。
+- Voice Live 复用现有懒播放、评论、小飞机推进、爱心、同 Community 艺人围观/艺人评论、多人连线、记忆与回放数据；生成层彻底禁止 action，只保存角色 speech。
 - 语音 LIVE 观看壳改为渐变舞台：顶部显示观看/点赞，中央显示当前发言悬浮文字卡和参与成员头像，下方评论直接在渐变背景内滚动。点击成员头像手动点播该成员最近一段原话，不自动播放，翻译不朗读。
 - 语音 LIVE 外部回放卡继续使用现有封面、时长、标题与数据样式；点进回放后按 `liveType` 恢复语音壳。
 - AI Artist Post 新增 `voice` 类型。语音动态沿用普通 Feed 卡片头部与互动区，只把正文替换成轻量语音条；点击后手动 TTS 并展开原话，再由独立按钮展开中文翻译。
 - 旧 WVS 数据自动迁移：旧 Live 默认为 `visual`，旧 Post 默认为 `text`，不改变 v0.5.4 已有内容与回放。Weverse state version 升至 v7；Service Worker cache version 升至 v36。
+
+
+## v0.5.6 · WVS Finish / Official / Schedule
+- 艺人/Official Post 评论区关闭粉丝互回：粉丝只生成一级评论；上方新增“艺人的评论”聚合区，下方“所有评论”保留粉丝原评论。艺人回复粉丝时，点击上方回复卡会自动滚到对应原评论并短暂高亮。
+- 成员主页“评论”Tab 调整为粉丝原评论 + 艺人回复的上下文卡片，接近真实 WVS 展示方式。
+- Official 主页补齐封面、官方头像/认证、粉丝数、帖子/评论，并按自定义需求增加 LIVE 入口；Community `LIVE·Media` 同时聚合成员与 Official 的全部直播回放。
+- 新增 Community Schedule：月历、类型筛选、选中日期日程、“下个日程”、刷新生成、手动新增/编辑/删除。个人 Live 不可被提前生成，只在实际结束后作为 WVS 历史日程出现；“下个日程”始终相对当前选中日期计算。
+- 真实工作/出行日程可同步到手机 Calendar（演出/打歌、录影、拍摄、品牌等），WVS Live 与纯平台事件不进入手机日历；手机日历对关联条目的单日编辑/删除会回写 WVS Schedule。
+- Live 类型对外统一命名为 `Video Live / Voice Live`。
+- 修复 WVS `album_only` 媒体策略下匹配失败仍显示文字图片的问题：未获得真实图片时帖子/公告直接按纯文字发布，不再显示伪图片占位。
+- Weverse state version 升至 v8；Service Worker cache version 升至 v37。

@@ -21,7 +21,10 @@ export type CalendarScheduleItem = {
   /** 事项 emoji 图标（可选，一个 emoji） */
   emoji?: string;
   colorKey: CalendarColorKey;
-  source: "manual" | "generated";
+  source: "manual" | "generated" | "weverse";
+  /** 外部平台同步来源；用于把同一条 WVS 工作日程与手机日历关联起来。 */
+  externalSource?: "weverse";
+  externalId?: string;
   createdAt: string;
   updatedAt: string;
 };
