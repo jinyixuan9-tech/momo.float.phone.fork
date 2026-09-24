@@ -300,3 +300,8 @@
 - Community list heading is localized from `Community` to `社区`.
 - Service Worker cache bumped to v41.
 
+## v0.5.10-fix · Dock icon sizing
+
+- WVS bottom dock only: Home and Community icons now use the same 27×27 visual box and are slightly smaller than v0.5.10, preventing the selected Home glyph from crowding the label.
+- No dock container, label, navigation, or WVS feature logic changes.
+- Service Worker cache bumped to v42.

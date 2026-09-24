@@ -242,16 +242,16 @@
 .dock > button::before { content:""; position:absolute; inset:2px 4px; border-radius:28px; background:transparent; transition:background .16s ease; }
 .dock > button.activeDock::before { background:rgba(227,228,228,.82); }
 .dockSelection, .dock > button small { position:relative; z-index:1; }
-.dockSelection { width:36px; height:31px; display:grid; place-items:center; }
+.dockSelection { width:30px; height:27px; display:grid; place-items:center; }
 .dock > button small { font-size:11.5px; line-height:1; font-weight:700; }
 .dock .activeDock small { font-weight:900; }
-.dockWeverseIcon { width:34px; height:31px; display:grid; place-items:center; position:relative; }
-.dockWeverseOutline { width:33px; height:33px; object-fit:contain; display:block; }
-.dockWeverseSelected { width:32px; height:32px; border-radius:10px; background:#111; display:none; place-items:center; }
-.dockWeverseSelected img { width:24px; height:17px; object-fit:contain; display:block; }
+.dockWeverseIcon { width:27px; height:27px; display:grid; place-items:center; position:relative; }
+.dockWeverseOutline { width:27px; height:27px; object-fit:contain; display:block; }
+.dockWeverseSelected { width:27px; height:27px; border-radius:8px; background:#111; display:none; place-items:center; }
+.dockWeverseSelected img { width:20px; height:14px; object-fit:contain; display:block; }
 .dock .activeDock .dockWeverseOutline { display:none; }
 .dock .activeDock .dockWeverseSelected { display:grid; }
-.dockCommunityIcon { width:25px; height:25px; display:grid; grid-template-columns:repeat(2,1fr); grid-template-rows:repeat(2,1fr); gap:3px; }
+.dockCommunityIcon { width:27px; height:27px; display:grid; grid-template-columns:repeat(2,1fr); grid-template-rows:repeat(2,1fr); gap:3px; }
 .dockCommunityIcon i { display:block; border:2.5px solid #111; border-radius:5px; background:transparent; }
 .dock .activeDock .dockCommunityIcon i { background:#111; border-color:#111; }
 .bottomSpacer { height: 78px; }
