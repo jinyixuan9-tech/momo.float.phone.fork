@@ -168,3 +168,56 @@
 .voiceViewerAvatar{width:120px;height:120px}
 .voiceViewerPlayer{width:100%;max-width:190px}
 .voiceViewerTranslation{width:100%;padding-top:4px;color:#5d5669;font-size:14px;line-height:1.6;white-space:pre-wrap}
+
+/* v0.7.2: Bubble references, compact proportions, and transparent avatar gap */
+.artistAvatarRing{border:0!important;box-shadow:none!important}
+.artistAvatarRing::before{inset:-5px;border:2px solid transparent;border-radius:50%;background:linear-gradient(135deg,#ec43e9,#a763f2 58%,#755cff) border-box;mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);mask-composite:exclude}
+.artistAvatarRing .avatarInner{inset:0}
+.artistBadgeImage{display:inline-flex;align-items:center;justify-content:center;width:auto;height:auto!important;padding:3px 7px;border-radius:99px;background:linear-gradient(100deg,#6547ef,#db63ed);color:#fff;font-size:10px;font-weight:800;line-height:1.15;letter-spacing:.015em;white-space:nowrap}
+.senderLine .artistBadgeImage{padding:2px 5px;font-size:9px}
+.profileIdentity .artistBadgeImage{font-size:11px;padding:4px 8px}
+.bubbleDays{display:flex;align-items:center;gap:5px;height:21px;white-space:nowrap}
+.bubbleDays>span{font-family:Georgia,serif;font-size:16px;font-weight:900;font-style:italic;letter-spacing:-.09em;color:#17151d;line-height:1}
+.bubbleDays svg{display:block;width:17px;height:17px;overflow:visible}
+.chatHeader{min-height:calc(var(--page-header-safe-top,48px) + 54px);padding:var(--page-header-safe-top,48px) 8px 5px;border-radius:0;background:#fff}
+.chatHeader>div{gap:2px}.chatHeader strong{font-size:14px;line-height:1.15}
+.chatHeader button{min-width:38px;min-height:38px}
+.messageAvatar{width:31px;height:31px}
+.senderLine b{font-size:11px}
+.ourBoxIconImage{width:20px;height:19px;flex:none}
+.ourBoxButton{background:#f1e8ff;color:#6f46bd;border-radius:12px;font-size:14px;letter-spacing:.015em}
+.voiceBubbleShell{padding:0;background:transparent!important;box-shadow:none!important}
+.voiceBubbleContent{min-width:0}
+.voiceButton{min-width:125px;min-height:47px;padding:7px 13px;border-radius:14px 14px 14px 4px;background:#fff;color:#17151d;gap:17px}
+.voiceIconWrap{width:25px;height:25px;color:#19171c}.voiceIconWrap svg{width:21px;height:21px}
+.voiceDuration{font-size:17px;font-weight:500}
+.voiceTranslation{display:block;max-width:100%;margin-top:7px;padding:9px 12px;border-radius:14px 14px 14px 4px;background:#fff;color:#24212a!important;font-size:13px;line-height:1.45;white-space:pre-wrap}
+.mine .voiceButton{background:#a18af2;color:#fff}.mine .voiceIconWrap{color:#fff}.mine .voiceTranslation{background:#a18af2;color:#fff!important}
+.composer{gap:9px;padding:9px 13px max(10px,env(safe-area-inset-bottom))}
+.inputShell textarea{min-height:42px;padding:11px 49px 10px 15px;border:0;background:#f3f6fa;border-radius:22px;color:#17151d}
+.inputTranslateButton{right:5px;bottom:4px;width:33px!important;height:33px!important;border-radius:50%!important;background:transparent!important;color:#6c6675!important}
+.inputTranslateButton span{display:grid;place-items:center;width:22px;height:22px;border:1.5px solid currentColor;border-radius:8px;font-size:15px;font-weight:600;line-height:1}
+.composer>button[type=submit]{width:39px;height:39px;min-width:39px;background:#8751d9;color:white}.composer>button[type=submit]:disabled{background:#c7b7e3}
+.translatePreviewCard{margin:5px 13px 0;padding:12px 14px 13px;background:#fff;border-top:1px solid #f2eff5;border-radius:0}
+.translateTargetButton{color:#85808a}.translatePreviewBody{padding:6px 0 12px;min-height:38px;color:#24212a}
+.useTranslateButton{background:#f3f6fa;color:#27232e;border-radius:10px}
+.mediaGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-content:start;align-items:end;gap:8px;padding:20px 15px 38px}
+.mediaTile{min-width:0;align-self:end}.mediaTile:has(.libraryDate){grid-column:1}
+.mediaGrid .libraryDate{width:calc(300% + 16px);margin:33px 0 19px;color:#aaaab0;font-size:12px}
+.mediaTile:first-child .libraryDate{margin-top:13px}
+.mediaImage,.mediaVoiceCard{width:100%;height:auto;aspect-ratio:1;margin:0;padding:0;border-radius:11px;overflow:hidden}
+.mediaImage img{width:100%;height:100%;border-radius:11px;object-fit:cover}
+.mediaVoiceCard{position:relative;justify-content:center;gap:7px;background:#333;color:#fff}
+.mediaVoiceCardName{font-size:11px;font-weight:650;color:#aaa;opacity:1}
+.mediaVoiceAvatar{width:45%;height:auto;aspect-ratio:1}
+.mediaVoiceDuration{position:absolute;bottom:7px;left:7px;padding:4px 6px;border-radius:7px;background:#252525;color:#fff;font-size:10px;font-weight:600}
+.voiceViewer{background:#303030;color:#fff}
+.voiceViewerCard{position:relative;width:100%;height:100%;max-width:none;padding:0 20px;border-radius:0;background:transparent;color:#fff;justify-content:center;gap:0}
+.voiceViewerPortrait{position:relative;width:136px;height:136px;margin-top:-12vh}
+.voiceViewerAvatar{width:136px;height:136px;border-radius:50%}
+.voiceViewerPlayer{position:absolute;inset:0;display:grid;place-items:center;width:100%;max-width:none;height:100%;min-width:0;min-height:0;padding:0;border-radius:50%;background:transparent;color:#fff}
+.voiceViewerPlayer .voiceIconWrap{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:#28282c88;color:#fff}
+.voiceViewerPlayer .voiceIconWrap svg{width:27px;height:27px}
+.voiceViewerCard h3{margin:18px 0 5px;font-size:20px;line-height:1.3;font-weight:650}
+.voiceViewerCard p{margin:0;font-size:13px;color:#a8a8a8}
+.voiceViewerTranslation{position:absolute;top:70%;left:8%;width:84%;padding:0;color:#c8c8c8;font-size:18px;font-weight:600;line-height:1.5}

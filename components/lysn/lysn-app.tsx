@@ -99,19 +99,17 @@ function Avatar({ src, name, className = "" }: { src?: string | null; name: stri
 }
 
 function ArtistBadge() {
-  return <img src="/lysn-assets/artist-pill.png" className={styles.artistBadgeImage} alt="ARTIST" />;
+  return <span className={styles.artistBadgeImage}>ARTIST</span>;
 }
 
 function BubbleBrand() {
   return (
-    <span className={styles.bubbleDays}>
-      <img src="/lysn-assets/bubble-heart.png" alt="bubble" />
-    </span>
+    <span className={styles.bubbleDays} aria-label="bubble"><span>bubble</span><svg viewBox="0 0 28 28" aria-hidden="true"><defs><linearGradient id="lysnHeart" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#ff9cc9"/><stop offset="1" stopColor="#965dff"/></linearGradient></defs><path d="M14 25 3.6 14.8C-3 8.1 5.8-1.9 13.9 5.7 22-1.9 31 8.1 24.4 14.8 14 25Z" fill="url(#lysnHeart)"/></svg></span>
   );
 }
 
 function OurBoxMark() {
-  return <img src="/lysn-assets/ourbox-heart.png" className={styles.ourBoxIconImage} alt="Our Box" />;
+  return <svg className={styles.ourBoxIconImage} viewBox="0 0 32 30" aria-hidden="true"><defs><linearGradient id="ourBoxHeart" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#b95aff"/><stop offset="1" stopColor="#7855ed"/></linearGradient></defs><path d="M1 9 9 1h7l3 3 3-3h8v9L16 29 1 13Z" fill="url(#ourBoxHeart)"/><circle cx="25" cy="7" r="1.6" fill="white"/></svg>;
 }
 
 function formatClock(ts: number) {
@@ -169,7 +167,7 @@ async function requestTranslation(url: string, apiKey: string, text: string, tar
   throw new Error("翻译接口没有返回可用内容");
 }
 
-function VoicePlayer({ message, className = "", compact = false, onNotice }: { message: LysnMessage; className?: string; compact?: boolean; onNotice?: (text: string) => void }) {
+function VoicePlayer({ message, className = "", compact = false, iconOnly = false, onNotice }: { message: LysnMessage; className?: string; compact?: boolean; iconOnly?: boolean; onNotice?: (text: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [playing, setPlaying] = useState(false);
   const playback = useRef<ReturnType<typeof playAudioBlobViaMediaElement> | null>(null);
@@ -206,9 +204,9 @@ function VoicePlayer({ message, className = "", compact = false, onNotice }: { m
   };
 
   return (
-    <button type="button" className={`${styles.voiceButton} ${compact ? styles.voiceButtonCompact : ""} ${className}`} onClick={play} disabled={busy}>
-      <span className={styles.voiceIconWrap}>{busy ? <LoaderCircle size={20} className={styles.spin}/> : playing ? <Pause size={20}/> : <Mic2 size={20}/>}</span>
-      <span className={styles.voiceDuration}>{durationLabel(message)}</span>
+    <button type="button" className={`${styles.voiceButton} ${compact ? styles.voiceButtonCompact : ""} ${className}`} onClick={e => { e.stopPropagation(); void play(); }} disabled={busy} aria-label={playing ? "暂停语音" : "播放语音"}>
+      <span className={styles.voiceIconWrap}>{busy ? <LoaderCircle size={20} className={styles.spin}/> : playing ? <Pause size={20} fill="currentColor"/> : iconOnly ? <Play size={20} fill="currentColor"/> : <Mic2 size={20}/>}</span>
+      {!iconOnly && <span className={styles.voiceDuration}>{durationLabel(message)}</span>}
     </button>
   );
 }
@@ -696,6 +694,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
     const displayText = hasTranslation && showTranslation && state.settings.translationMode === "replace" ? m.translated || m.original : m.original;
     const translationText = hasTranslation ? showName(m.translated || "") : "";
     const bubbleClick = () => {
+      if (touchActionOpened.current) { touchActionOpened.current = false; return; }
       if (m.sender === "artist" && hasTranslation && m.kind !== "photo" && m.kind !== "sticker") {
         setTranslatedIds(prev => ({ ...prev, [m.id]: !prev[m.id] }));
       }
@@ -724,15 +723,11 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
           <div className={`${styles.bubble} ${m.kind === "voice" ? styles.voiceBubbleShell : ""}`} onClick={bubbleClick}>
             {m.kind === "photo" && m.imageUrl && <button type="button" className={styles.photoButton} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl} className={styles.photo}/></button>}
             {m.kind === "sticker" && m.imageUrl && <AssetImage src={m.imageUrl} className={styles.stickerBubble}/>}
-            {m.kind === "voice" && (
-              <div className={styles.voiceBubbleContent}>
-                <VoicePlayer message={m} onNotice={onNotice} />
-                <small className={styles.voiceTranslation}>{translationText || showName(m.original)}</small>
-              </div>
-            )}
+            {m.kind === "voice" && <VoicePlayer message={m} onNotice={onNotice} />}
             {m.kind !== "sticker" && m.kind !== "voice" && <p>{showName(displayText)}</p>}
             {hasTranslation && showTranslation && state.settings.translationMode === "fold" && m.kind !== "voice" && <small className={styles.translation}>{translationText}</small>}
           </div>
+          {m.kind === "voice" && <small className={styles.voiceTranslation}>{translationText || showName(m.original)}</small>}
         </div>
         <div className={styles.messageMeta}><time>{formatClock(m.createdAt)}</time></div>
       </div>
@@ -760,7 +755,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
 
       {route === "artist" && character && <div className={styles.fullProfile}>{profile?.cover ? <AssetImage src={profile.cover} className={styles.coverImage}/> : <div className={styles.coverFallback}/>}<div className={styles.coverShade}/><button type="button" className={styles.coverBack} onClick={back} aria-label="返回"><X size={29}/></button><button type="button" className={styles.coverEdit} onClick={startArtistEdit} aria-label="编辑艺人资料"><Settings2 size={21}/></button><div className={styles.profileIdentity}><Avatar src={avatar} name={displayName} className={`${styles.largeAvatar} ${styles.artistAvatarRing}`}/><h2><ArtistBadge/>{displayName}</h2><p>{profile?.bio || ""}</p>{profile?.group && <span className={styles.groupPill}>{profile.group} · {character.name}</span>}</div><div className={styles.profileFooter}>{!subscribed && <button type="button" className={styles.preSubscribeButton} onClick={() => { setDetailsReturn("artist"); setRoute("details"); setRoomSheet(true); }}>订阅前设置</button>}<button type="button" onClick={() => subscribed ? openChat(character.id) : subscribe(character.id)}>{subscribed ? "进入 bubble 聊天" : "添加 bubble 好友"}</button></div></div>}
 
-      {route === "chat" && character && <><header className={styles.chatHeader}><button type="button" aria-label="返回聊天室列表" onClick={back}><ChevronLeft size={25}/></button><div><strong>{roomName}</strong><BubbleBrand/></div><button type="button" aria-label="聊天详情" onClick={() => { setDetailsReturn("chat"); setRoute("details"); }}><MoreHorizontal size={23}/></button></header><main className={styles.messages}>{messageItems.length ? messageItems.map(renderMessage) : <div className={styles.empty}>{opening === selected ? "正在准备开场白…" : "还没有消息。点击发送召唤艺人。"}</div>}<div ref={endRef}/></main><div className={styles.composerWrap}>{inputTranslateOpen && <div className={styles.translatePreviewCard}><button type="button" className={styles.translateTargetButton} onClick={() => setInputLanguageSheetOpen(true)}>翻译为{inputTargetLabel} <ChevronRight size={17}/></button><div className={styles.translatePreviewBody}>{inputTranslationLoading ? <span className={styles.translatePlaceholder}>翻译中…</span> : inputTranslationPreview ? <p>{inputTranslationPreview}</p> : <span className={styles.translatePlaceholder}>输入内容后点右侧翻译按钮预览</span>}</div><button type="button" className={styles.useTranslateButton} onClick={useTranslatedDraft} disabled={!inputTranslationPreview.trim()}>使用翻译</button></div>}<form className={styles.composer} onSubmit={e => { e.preventDefault(); void summonArtist(); }}><div className={styles.inputShell}><textarea rows={1} aria-label="回复艺人" placeholder={state.settings.deepRealism ? `${remaining}/3 条 · 每条 ${limit} 字` : "输入消息"} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendFan(); } }} /><button type="button" className={styles.inputTranslateButton} aria-label="翻译输入内容" onClick={() => { void translateDraft(); }}><Languages size={19}/><span>{inputTargetLabel.slice(0, 1)}</span></button></div><button type="submit" disabled={busy} aria-label="发送并召唤艺人回复" title="发送并召唤艺人回复">{busy ? <LoaderCircle size={21} className={styles.spin}/> : <ArrowUp size={21}/>}</button></form></div></>}
+      {route === "chat" && character && <><header className={styles.chatHeader}><button type="button" aria-label="返回聊天室列表" onClick={back}><ChevronLeft size={25}/></button><div><strong>{roomName}</strong><BubbleBrand/></div><button type="button" aria-label="聊天详情" onClick={() => { setDetailsReturn("chat"); setRoute("details"); }}><MoreHorizontal size={23}/></button></header><main className={styles.messages}>{messageItems.length ? messageItems.map(renderMessage) : <div className={styles.empty}>{opening === selected ? "正在准备开场白…" : "还没有消息。点击发送召唤艺人。"}</div>}<div ref={endRef}/></main><div className={styles.composerWrap}>{inputTranslateOpen && <div className={styles.translatePreviewCard}><button type="button" className={styles.translateTargetButton} onClick={() => setInputLanguageSheetOpen(true)}>翻译为{inputTargetLabel} <ChevronRight size={17}/></button><div className={styles.translatePreviewBody}>{inputTranslationLoading ? <span className={styles.translatePlaceholder}>翻译中…</span> : inputTranslationPreview ? <p>{inputTranslationPreview}</p> : <span className={styles.translatePlaceholder}>输入内容后点右侧翻译按钮预览</span>}</div><button type="button" className={styles.useTranslateButton} onClick={useTranslatedDraft} disabled={!inputTranslationPreview.trim()}>使用翻译</button></div>}<form className={styles.composer} onSubmit={e => { e.preventDefault(); void summonArtist(); }}><div className={styles.inputShell}><textarea rows={1} aria-label="回复艺人" placeholder={state.settings.deepRealism ? `${remaining}/3 条 · 每条 ${limit} 字` : "输入消息"} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendFan(); } }} /><button type="button" className={styles.inputTranslateButton} aria-label="翻译输入内容" onClick={() => { void translateDraft(); }}><span>{inputTargetLabel.slice(0, 1)}</span></button></div><button type="submit" disabled={busy} aria-label="发送并召唤艺人回复" title="发送并召唤艺人回复">{busy ? <LoaderCircle size={21} className={styles.spin}/> : <ArrowUp size={21}/>}</button></form></div></>}
 
       {route === "details" && character && <><>{header("聊天详情")}</><main className={styles.detailsScroll}>
         <section className={styles.detailsCard}><button type="button" className={styles.identityRow} onClick={() => { setArtistReturn("details"); setRoute("artist"); }}><Avatar src={avatar} name={displayName} className={styles.artistAvatarRing}/><span><b><ArtistBadge/> {displayName}</b><small>查看艺人资料</small></span><ChevronRight size={19}/></button><div className={styles.identityRow}><Avatar src={room.avatar || user.avatar} name={room.nickname || user.name}/><span><b>{room.nickname || user.name}</b><small>当前聊天室的我的资料</small></span></div><button type="button" className={styles.ourBoxButton} onClick={() => setRoute("ourBox")}><OurBoxMark/> OUR BOX</button></section>
@@ -771,7 +766,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
 
       {route === "ourBox" && <>{header("OUR BOX")}<main className={styles.libraryScroll}>{messages.filter(m => (room.favoriteMessageIds || []).includes(m.id)).length ? messages.filter(m => (room.favoriteMessageIds || []).includes(m.id)).map(m => <div key={m.id} className={styles.savedMessage}><time>{new Date(m.createdAt).toLocaleString()}</time><div>{m.sender === "artist" ? <Avatar src={avatar} name={displayName} className={styles.artistAvatarRing}/> : <Avatar src={room.avatar || user.avatar} name={room.nickname || user.name}/>}<p>{showName(m.original)}</p></div><button type="button" onClick={() => toggleFavorite(m.id)}>移出收藏</button></div>) : <p className={styles.empty}>长按消息，就能收藏到这里。</p>}</main></>}
 
-      {route === "media" && <>{header("总览")}<main className={styles.libraryScroll}>{mediaItems.length ? mediaItems.map((m, index, arr) => <div key={m.id}>{(index === 0 || formatDateGroup(arr[index - 1].createdAt) !== formatDateGroup(m.createdAt)) && <p className={styles.libraryDate}>{formatDateGroup(m.createdAt)}</p>}{m.kind === "photo" && m.imageUrl ? <button type="button" className={styles.mediaImage} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl}/></button> : <button type="button" className={styles.mediaVoiceCard} onClick={() => setVoiceViewer(m)}><div className={styles.mediaVoiceCardName}>{displayName}</div><Avatar src={avatar} name={displayName} className={styles.mediaVoiceAvatar}/><div className={styles.mediaVoiceDuration}>{`00:${String(estimateVoiceSeconds(m)).padStart(2, "0")}`}</div></button>}</div>) : <p className={styles.empty}>艺人发送的图片和语音会自动收在这里。</p>}</main></>}
+      {route === "media" && <>{header("总览")}<main className={`${styles.libraryScroll} ${styles.mediaGrid}`}>{mediaItems.length ? mediaItems.map((m, index, arr) => <div key={m.id} className={styles.mediaTile}>{(index === 0 || formatDateGroup(arr[index - 1].createdAt) !== formatDateGroup(m.createdAt)) && <p className={styles.libraryDate}>{formatDateGroup(m.createdAt)}</p>}{m.kind === "photo" && m.imageUrl ? <button type="button" className={styles.mediaImage} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl}/></button> : <button type="button" className={styles.mediaVoiceCard} onClick={() => setVoiceViewer(m)}><div className={styles.mediaVoiceCardName}>{displayName}</div><Avatar src={avatar} name={displayName} className={styles.mediaVoiceAvatar}/><div className={styles.mediaVoiceDuration}>{`00:${String(estimateVoiceSeconds(m)).padStart(2, "0")}`}</div></button>}</div>) : <p className={styles.empty}>艺人发送的图片和语音会自动收在这里。</p>}</main></>}
 
       {route === "stickers" && <>{header("本聊天室的表情包", <button type="button" onClick={() => { const name = stickerPackName.trim(); if (!name) { onNotice?.("先填写分类名称"); return; } updatePacks([...(room.stickerPacks || []), { id: lysnId(), name, stickers: [] }]); setStickerPackName(""); }}>创建</button>)}<main className={styles.libraryScroll}><p className={styles.settingsNote}>只供 {roomName} 在 LYSN 使用，与「聊天」App 的表情库分开。</p><label className={styles.field}><span>新分类名称</span><input value={stickerPackName} onChange={e => setStickerPackName(e.target.value)} placeholder="例如：小动物、日常表情" /></label><div className={styles.packGrid}>{(room.stickerPacks || []).map(pack => <button type="button" key={pack.id} onClick={() => { setActivePackId(pack.id); setRoute("stickerPack"); }}><Languages size={30}/><b>{pack.name}</b><small>{pack.stickers.length} 个表情</small></button>)}</div>{!(room.stickerPacks || []).length && <p className={styles.empty}>创建分类后，可以上传图片或填写图片 URL。</p>}</main></>}
 
@@ -800,7 +795,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
 
       {viewerUrl && <div className={styles.imageViewer} role="dialog" aria-label="查看图片" onClick={() => setViewerUrl("")}><button type="button" aria-label="关闭图片"><X size={26}/></button><AssetImage src={viewerUrl}/></div>}
 
-      {voiceViewer && <div className={styles.voiceViewer} role="dialog" aria-label="查看语音"><button type="button" className={styles.voiceViewerClose} onClick={() => setVoiceViewer(null)} aria-label="关闭语音"><X size={24}/></button><div className={styles.voiceViewerCard}><Avatar src={avatar} name={displayName} className={styles.voiceViewerAvatar}/><h3>{displayName}</h3><p>语音 · 0:{String(estimateVoiceSeconds(voiceViewer)).padStart(2, "0")}</p><VoicePlayer message={voiceViewer} onNotice={onNotice} className={styles.voiceViewerPlayer}/><div className={styles.voiceViewerTranslation}>{showName(voiceViewer.translated || voiceViewer.original)}</div></div></div>}
+      {voiceViewer && <div className={styles.voiceViewer} role="dialog" aria-label="查看语音"><button type="button" className={styles.voiceViewerClose} onClick={() => setVoiceViewer(null)} aria-label="关闭语音"><X size={24}/></button><div className={styles.voiceViewerCard}><div className={styles.voiceViewerPortrait}><Avatar src={avatar} name={displayName} className={styles.voiceViewerAvatar}/><VoicePlayer message={voiceViewer} onNotice={onNotice} className={styles.voiceViewerPlayer} iconOnly/></div><h3>{displayName}</h3><p>语音 · 0:{String(estimateVoiceSeconds(voiceViewer)).padStart(2, "0")}</p><div className={styles.voiceViewerTranslation}>{showName(voiceViewer.translated || voiceViewer.original)}</div></div></div>}
     </div>
   );
 }
