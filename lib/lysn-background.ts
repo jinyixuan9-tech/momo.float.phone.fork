@@ -25,17 +25,21 @@ export async function maybeGenerateLysnBackgroundMessage(): Promise<void> {
   state.lastAutoAt[id] = now; saveLysn(state);
   try {
     const result = await generateLysn(id, state.messages.filter(m => m.characterId === id), "new");
-    let kind = result.kind;
-    let imageUrl: string | undefined;
-    let photoId: string | undefined;
-    if (kind === "photo") {
-      const media = await resolveMediaForUse({ actor: { type: "character", characterId: id }, description: result.photoDescription || result.original, intentKind: result.mediaIntent, channel: "bubble", targetId: id, appId: "lysn" });
-      if (media?.imageUrl) { imageUrl = media.imageUrl; photoId = media.photoLibraryId; }
-      else kind = "text";
+    const rows = [];
+    for (const item of [result, ...(result.extra || [])]) {
+      let kind = item.kind;
+      let imageUrl: string | undefined;
+      let photoId: string | undefined;
+      if (kind === "photo") {
+        const media = await resolveMediaForUse({ actor: { type: "character", characterId: id }, description: item.photoDescription || item.original, intentKind: item.mediaIntent, channel: "bubble", targetId: id, appId: "lysn" });
+        if (media?.imageUrl) { imageUrl = media.imageUrl; photoId = media.photoLibraryId; }
+        else kind = "text";
+      }
+      rows.push({ sender: "artist" as const, kind, original: item.original, translated: item.translated, imageUrl, photoId });
     }
     // Recheck: subscription can change while the model is responding.
     if (!loadLysn().subscribedIds.includes(id)) return;
-    appendLysn(id, [{ sender: "artist", kind, original: result.original, translated: result.translated, imageUrl, photoId }]);
+    appendLysn(id, rows);
     const latest = loadLysn();
     if (latest.settings.notificationsEnabled) {
       const character = loadCharacters().find(c => c.id === id);

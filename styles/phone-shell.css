@@ -176,6 +176,11 @@
   transition: color 0.3s ease;
 }
 
+/* LYSN owns the top row; the decorative shell status bar must not cover its buttons. */
+.phone-shell[data-active-app="lysn"] > .phone-status-bar {
+  pointer-events: none;
+}
+
 .status-island {
   width: 126px;
   height: 36px;
