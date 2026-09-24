@@ -305,3 +305,13 @@
 - WVS bottom dock only: Home and Community icons now use the same 27×27 visual box and are slightly smaller than v0.5.10, preventing the selected Home glyph from crowding the label.
 - No dock container, label, navigation, or WVS feature logic changes.
 - Service Worker cache bumped to v42.
+
+## v0.5.11 · Fish Audio TTS provider
+
+- Voice API settings now support `Fish Audio` as a first-class TTS provider alongside Minimax and OpenAI.
+- Fish Audio config fields: API Key, Base URL (`https://api.fish.audio/v1`), model (`s2.1-pro-free` / `s2.1-pro` / manual), and Voice ID (`reference_id`).
+- TTS requests use `POST /v1/tts`, Bearer auth, the `model` request header, `text`, optional `reference_id`, and `format: mp3`.
+- The existing shared `synthesizeSpeech()` path now routes Fish Audio automatically, so Chat voice playback/calls, WVS Video/Voice Live speech, WVS Voice Post, and other consumers using the common TTS service can reuse the same character voice binding without app-specific Fish code.
+- Fish Audio is TTS-only in this provider entry; selecting it does not claim OpenAI-compatible STT support.
+- Weixin/local assistant duplicated TTS runtimes also recognize Fish Audio voice configs.
+- Service Worker cache bumped to v43.

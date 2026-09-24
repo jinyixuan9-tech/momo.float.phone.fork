@@ -1570,6 +1570,7 @@ async function synthesizeVoiceDataUrl(text, voiceConfig) {
   const provider = String(voiceConfig.provider || "").trim();
   if (provider === "Minimax") return synthesizeMinimaxVoiceDataUrl(cleanText, voiceConfig, timeoutMs);
   if (provider === "OpenAI") return synthesizeOpenAIVoiceDataUrl(cleanText, voiceConfig, timeoutMs);
+  if (provider === "FishAudio") return synthesizeFishAudioVoiceDataUrl(cleanText, voiceConfig, timeoutMs);
   return "";
 }
 
@@ -1610,6 +1611,31 @@ async function synthesizeMinimaxVoiceDataUrl(text, config, timeoutMs = TTS_TIMEO
   for (let i = 0; i < hex.length; i += 2) {
     audio[i / 2] = Number.parseInt(hex.slice(i, i + 2), 16);
   }
+  if (audio.length === 0) return "";
+  return `data:audio/mpeg;base64,${audio.toString("base64")}`;
+}
+
+async function synthesizeFishAudioVoiceDataUrl(text, config, timeoutMs = TTS_TIMEOUT_MS) {
+  const apiKey = String(config.apiKey || "").trim();
+  if (!apiKey) return "";
+  const baseUrl = String(config.baseUrl || "https://api.fish.audio/v1").replace(/\/+$/, "");
+  const model = String(config.model || "s2.1-pro-free").trim();
+  const referenceId = String(config.defaultVoice || "").trim();
+  const response = await fetchWithTimeout(`${baseUrl}/tts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      model,
+    },
+    body: JSON.stringify({
+      text,
+      format: "mp3",
+      ...(referenceId ? { reference_id: referenceId } : {}),
+    }),
+  }, timeoutMs);
+  if (!response.ok) return "";
+  const audio = Buffer.from(await response.arrayBuffer());
   if (audio.length === 0) return "";
   return `data:audio/mpeg;base64,${audio.toString("base64")}`;
 }
