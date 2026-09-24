@@ -268,3 +268,9 @@
 - Live 类型对外统一命名为 `Video Live / Voice Live`。
 - 修复 WVS `album_only` 媒体策略下匹配失败仍显示文字图片的问题：未获得真实图片时帖子/公告直接按纯文字发布，不再显示伪图片占位。
 - Weverse state version 升至 v8；Service Worker cache version 升至 v37。
+
+## v0.5.7 · Netlify filename hotfix
+- Renamed all legacy static asset paths containing literal `#Uxxxx` filename encoding to ASCII-safe names.
+- Updated widget, bird, and MiSans font references to the renamed assets.
+- Renamed the encoded docs filename as well so the repository contains no `#` path segments.
+- Service Worker cache bumped to v38 so clients do not retain stale renamed asset paths.

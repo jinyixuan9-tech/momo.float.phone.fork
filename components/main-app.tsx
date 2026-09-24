@@ -53,9 +53,9 @@ const BUILTIN_FONT_URLS = [
   "/fonts/game-hall/zen-maru-gothic-500.woff2",
   "/fonts/game-hall/zen-maru-gothic-700.woff2",
   "/fonts/game-hall/zen-maru-gothic-900.woff2",
-  "/fonts/\u5B57\u4F53/MISANS-REGULAR.woff2",
-  "/fonts/\u5B57\u4F53/MISANS-MEDIUM.woff2",
-  "/fonts/\u5B57\u4F53/MISANS-SEMIBOLD.woff2",
+  "/fonts/misans/MISANS-REGULAR.woff2",
+  "/fonts/misans/MISANS-MEDIUM.woff2",
+  "/fonts/misans/MISANS-SEMIBOLD.woff2",
 ] as const;
 
 const BUILTIN_FONT_LOAD_SPECS = [

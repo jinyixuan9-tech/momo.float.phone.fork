@@ -419,10 +419,10 @@ export default function MusicApp({ onClose }: Props) {
             {player.currentTrack && (
                 <div className="music-now-bar" onClick={player.openFullPlayer}>
                     <div className="music-birds">
-                        <img src="/birds/小鸟1.png" className="music-bird bird-1" alt="bird" />
-                        <img src="/birds/小鸟2.png" className="music-bird bird-2" alt="bird" />
-                        <img src="/birds/小鸟3.png" className="music-bird bird-3" alt="bird" />
-                        <img src="/birds/小鸟4.png" className="music-bird bird-4" alt="bird" />
+                        <img src="/birds/bird-1.png" className="music-bird bird-1" alt="bird" />
+                        <img src="/birds/bird-2.png" className="music-bird bird-2" alt="bird" />
+                        <img src="/birds/bird-3.png" className="music-bird bird-3" alt="bird" />
+                        <img src="/birds/bird-4.png" className="music-bird bird-4" alt="bird" />
                     </div>
                     <div className="music-now-bar-cover" {...(player.isPlaying ? { "data-playing": "" } : {})}>
                         {player.currentTrack.coverUrl ? (

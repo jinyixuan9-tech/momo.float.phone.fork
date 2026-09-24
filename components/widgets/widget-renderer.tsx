@@ -180,7 +180,7 @@ function CameraFrameWidget({ config, widgetId, onConfigChange, preview }: any) {
       />
       <div 
         className="wg-cf-overlay" 
-        style={{ backgroundImage: `url('/widgets/19老橙子素材.png')` }}
+        style={{ backgroundImage: `url('/widgets/19-orange-material.png')` }}
       />
     </div>
   );
@@ -202,7 +202,7 @@ function ColorPickerFrameWidget({ config, widgetId, onConfigChange, preview }: a
       {input}
       <div className="wg-cp-wrapper">
         <img 
-          src="/widgets/9老橙子素材.png" 
+          src="/widgets/9-orange-material.png" 
           className="wg-cp-overlay-img" 
           alt="Color Picker Frame"
         />
@@ -226,7 +226,7 @@ function FreestyleFrame18Widget({ config, widgetId, onConfigChange, preview }: a
     >
       <div className="wg-f18-wrapper">
         <img 
-          src="/widgets/18老橙子素材.png" 
+          src="/widgets/18-orange-material.png" 
           className="wg-f18-overlay-img" 
           alt="Frame 18"
         />
@@ -251,7 +251,7 @@ function FreestyleFrame4Widget({ config, widgetId, onConfigChange, preview }: an
       {input}
       <div className="wg-f4-wrapper">
         <img 
-          src="/widgets/4老橙子素材.png" 
+          src="/widgets/4-orange-material.png" 
           className="wg-f4-overlay-img" 
           alt="Frame 4"
         />
@@ -280,7 +280,7 @@ function FreestyleFrame31Widget({ config, widgetId, onConfigChange, preview }: a
       {input}
       <div className="wg-f31-wrapper">
         <img 
-          src="/widgets/31老橙子素材.png" 
+          src="/widgets/31-orange-material.png" 
           className="wg-f31-overlay-img" 
           alt="Frame 31"
         />
@@ -309,7 +309,7 @@ function FreestyleFrame33Widget({ config, widgetId, onConfigChange, preview }: a
       {input}
       <div className="wg-f33-wrapper">
         <img 
-          src="/widgets/33老橙子素材.png" 
+          src="/widgets/33-orange-material.png" 
           className="wg-f33-overlay-img" 
           alt="Frame 33"
         />
@@ -338,7 +338,7 @@ function FreestyleFrame36Widget(_props: {
     >
       <div className="wg-f36-wrapper">
         <img 
-          src="/widgets/36老橙子素材.png" 
+          src="/widgets/36-orange-material.png" 
           className="wg-f36-overlay-img" 
           alt="Frame 36"
         />
@@ -363,7 +363,7 @@ function FreestyleFrame49Widget({ config, widgetId, onConfigChange, preview }: a
       {input}
       <div className="wg-f49-wrapper">
         <img 
-          src="/widgets/49老橙子素材.png" 
+          src="/widgets/49-orange-material.png" 
           className="wg-f49-overlay-img" 
           alt="Frame 49"
         />
@@ -392,7 +392,7 @@ function FreestyleFrame54Widget({ config, widgetId, onConfigChange, preview }: a
       {input}
       <div className="wg-f54-wrapper">
         <img 
-          src="/widgets/54老橙子素材.png" 
+          src="/widgets/54-orange-material.png" 
           className="wg-f54-overlay-img" 
           alt="Frame 54"
         />
@@ -413,7 +413,7 @@ function FreestyleFrame68Widget({ config, widgetId, onConfigChange, preview }: a
     <div className="wg-frame68">
       <div className="wg-f68-wrapper">
         <img 
-          src="/widgets/68老橙子素材.png" 
+          src="/widgets/68-orange-material.png" 
           className="wg-f68-overlay-img" 
           alt="Frame 68"
         />
@@ -469,7 +469,7 @@ function FreestyleFrame72Widget({ config, widgetId, onConfigChange, preview }: a
         />
         
         <img 
-          src="/widgets/72老橙子素材.png" 
+          src="/widgets/72-orange-material.png" 
           className="wg-f72-overlay-img" 
           alt="Frame 72"
         />
@@ -498,7 +498,7 @@ function FreestyleFrame88Widget({ config, widgetId, onConfigChange, preview }: a
           style={bgUrl ? { backgroundImage: `url(${bgUrl})` } : {}} 
         />
         <img 
-          src="/widgets/88老橙子素材.png" 
+          src="/widgets/88-orange-material.png" 
           className="wg-f88-overlay-img" 
           alt="Frame 88"
         />
@@ -554,7 +554,7 @@ function FreestyleFrame90Widget({ config, widgetId, onConfigChange, preview }: a
         />
         
         <img 
-          src="/widgets/90老橙子素材.png" 
+          src="/widgets/90-orange-material.png" 
           className="wg-f90-overlay-img" 
           alt="Frame 90"
         />
