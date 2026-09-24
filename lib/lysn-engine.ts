@@ -4,23 +4,22 @@ import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, loadWorldBooks, resolveBinding } from "./settings-storage";
 import type { RegexConfig, WorldBookConfig } from "./settings-types";
 import { buildCharacterTimeContext } from "./character-time";
-import type { LysnMessage, LysnQuote } from "./lysn-storage";
+import { loadLysn, type LysnMessage, type LysnQuote } from "./lysn-storage";
 
-type Generated = {
-  kind: "text" | "photo" | "voice";
-  original: string;
-  translated: string;
+export type GeneratedLysn = {
+  kind: "text" | "photo" | "voice" | "sticker";
+  original: string; translated: string; quote?: LysnQuote; stickerName?: string;
   photoDescription?: string;
   mediaIntent?: "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "other";
-  quote?: LysnQuote;
-  extra?: Generated[];
 };
 function parseJson(raw: string): Record<string, unknown> {
   const start = raw.indexOf("{"); const end = raw.lastIndexOf("}");
   if (start < 0 || end < start) throw new Error("LYSN 没有返回有效消息，请重试。");
   return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
 }
-export async function generateLysn(characterId: string, history: LysnMessage[], mode: "new" | "reply", fanMessage?: string): Promise<Generated> {
+const asText = (value: unknown) => typeof value === "string" ? value.trim() : "";
+/** Empty result is a deliberate decision to stay silent, rather than an error. */
+export async function generateLysn(characterId: string, history: LysnMessage[], mode: "new" | "reply" | "opening" | "birthday", fanMessage?: string): Promise<GeneratedLysn[]> {
   const character = loadCharacters().find(c => c.id === characterId);
   if (!character) throw new Error("角色已不存在。");
   const slot = resolveBinding(loadBindingConfig(), characterId, "lysn");
@@ -30,38 +29,42 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   const preset = presets.find(x => x.id === slot.presetId) || presets.find(x => x.builtIn) || null;
   const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(x => x.id === id)).filter(Boolean) as WorldBookConfig[];
   const regexes = (slot.regexIds || []).map(id => loadRegexes().find(x => x.id === id)).filter(Boolean) as RegexConfig[];
+  const room = loadLysn().rooms[characterId];
+  const stickers = (room?.stickerPacks || []).flatMap(p => p.stickers).filter(s => s.name.trim() && s.imageUrl);
+  // There is no private Chat history or Chat user identity in this prompt.
   const prompt = assemblePromptPayload({ character, history: [], preset, worldBooks, regexes,
     appId: "lysn", appTags: ["lysn", "bubble"], timeContext: buildCharacterTimeContext(character.timeZone) });
-  const timeline = history.slice(-18).map(m => `${m.id} | ${m.sender === "fan" ? "订阅粉丝" : m.sender === "artist" ? "艺人" : "系统"}: ${m.original}`).join("\n");
+  const timeline = history.slice(-18).map(m => `${m.sender === "fan" ? "匿名粉丝" : m.sender === "artist" ? m.opener ? "频道开场白" : "艺人" : "系统"}: ${m.original}`).join("\n");
+  const mayQuote = (mode === "new" || mode === "reply") && Math.random() < ({ rare: .1, normal: .32, often: .7 }[room?.quoteStyle || "normal"]);
   const instruction: LLMMessage = { role: "system", content: [
-    "你正在 LYSN 的 Bubble 订阅频道给粉丝发消息。这是面向所有订阅粉丝的艺人频道，不是你和某个人的私人 Chat。",
-    "订阅粉丝可以回复，但你看到的是匿名粉丝反馈；即使现实中认识这个人，也不能由此认定这条消息是对方发的，不能泄露私下关系、昵称或秘密。",
-    "自然地写符合本人语言习惯的短消息，不要每次像营业公告。只在适合时发送照片或语音。",
-    "original 使用角色实际说话的语言；translated 提供简体中文忠实翻译，原文是中文时两项相同。不要翻译系统状态。",
-    "你可以偶尔使用 Bubble 的“引用回复”样式。引用内容默认是你根据频道语境自行生成的一条匿名粉丝留言；只有确实要引用最近收到的用户留言时，才引用时间线中 sender=订阅粉丝 的原文。quote.original 写被引用原文，quote.translated 写简体中文翻译。没有必要引用时不要输出 quote。",
-    "只输出 JSON：{\"messages\":[{\"kind\":\"text/photo/voice\",\"original\":\"...\",\"translated\":\"...\",\"quote\":{\"original\":\"可选引用原文\",\"translated\":\"可选引用中文\"},\"photoDescription\":\"想发的照片内容或空\",\"mediaIntent\":\"selfie/portrait/group/food/scenery/object/pet/other\"}]}。自然决定发一至三条消息；每条必须有各自的翻译。",
-    "kind=photo 时必须填 photoDescription；kind=voice 时正文就是适合直接读出的逐字稿；没合适照片就发文字。",
+    "你正在 LYSN Bubble 面向全部订阅者的艺人频道发消息。回复是匿名粉丝反馈，不是与某个人的私聊。绝不识别发送者真实身份、推断私下关系或泄露秘密。",
+    "自然地按人设发短消息，不要总写公告。original 使用你实际说话语言，translated 是忠实简体中文翻译；原文中文则相同。",
+    "艺人可以使用 {{nickname}} 占位符自然称呼每位订阅者；系统会为每位订阅者替换，绝不能把某人的私密姓名写进面向全部粉丝的文本。",
+    mode === "opening" ? "这是首次进入频道显示的一次性开场白，写一条符合人设的开场消息。它不算正式到场或回复，也不要提及已经读到粉丝来信。" : "",
+    mode === "birthday" ? "今天是当前订阅者的生日。写一条给订阅者的生日祝福，可以使用 {{nickname}} 占位符。" : "",
+    mode === "reply" ? "你看到了若干匿名粉丝来信。可以因此发新消息，也可以选择暂时不公开发消息；没有发消息不表示没看到。" : "",
+    mayQuote ? "如果自然合适，可以先模拟一条匿名粉丝留言并引用它，然后再作公开回复。quote 必须有 original 和 translated，两者分别是模拟留言原文和中文翻译。引用只存在于艺人消息里，不要把模拟留言当作用户发言。" : "这轮不要引用粉丝留言，也不要输出 quote。",
+    stickers.length ? `本聊天室可发送表情包的名称：${stickers.map(s => s.name).join("、")}。发送时 kind=sticker 且 stickerName 严格使用列表中某个名称，original 填该名称。` : "没有配置表情包，不要发送表情包。",
+    "只输出 JSON：{\"publish\":true/false,\"messages\":[{\"kind\":\"text/photo/voice/sticker\",\"original\":\"...\",\"translated\":\"...\",\"quote\":{\"original\":\"...\",\"translated\":\"...\"},\"stickerName\":\"...\",\"photoDescription\":\"...\",\"mediaIntent\":\"selfie/portrait/group/food/scenery/object/pet/other\"}]}。无需 quote 时省略该字段。",
+    mode === "opening" || mode === "birthday" ? "publish 必须为 true，写一条消息。" : "可以决定 publish=false 且 messages=[]，这表示艺人暂时没有公开消息。publish=true 时自然发一至三条。",
+    "photo 必须填写照片描述，voice 的 original 是逐字稿。",
     `频道最近消息：\n${timeline || "暂无消息"}`,
-    fanMessage ? `最近收到的匿名粉丝回复：${fanMessage}` : "",
+    fanMessage ? `最近收到的匿名粉丝来信：${fanMessage}` : "",
   ].filter(Boolean).join("\n") };
-  const raw = await sendLLMRequest(api, preset, [...prompt, instruction, { role: "user", content: mode === "reply" ? "根据最近的匿名粉丝反馈，自然地向所有订阅粉丝发一至三条消息。" : "自然地向订阅粉丝发一至三条新的 Bubble 消息。" }], regexes, { characterName: `LYSN:${character.name}`, userName: "订阅粉丝" }, { appId: "lysn", appTags: ["lysn", "bubble"], skipOutputRegex: true });
+  const raw = await sendLLMRequest(api, preset, [...prompt, instruction, { role: "user", content: mode === "opening" ? "生成一次性频道开场白。" : mode === "birthday" ? "今天生日，发送一条生日祝福。" : mode === "reply" ? "判断艺人现在是否想公开发消息，如想发请自然回应匿名反馈。" : "判断艺人现在是否想公开发新消息。" }], regexes, { characterName: `LYSN:${character.name}`, userName: "订阅粉丝" }, { appId: "lysn", appTags: ["lysn", "bubble"], skipOutputRegex: true });
   const data = parseJson(raw);
+  if (data.publish === false && mode !== "opening" && mode !== "birthday") return [];
   const rows = (Array.isArray(data.messages) ? data.messages : [data]).slice(0, 3).map(item => {
     const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
-    const original = String(row.original || "").trim();
-    const kind = row.kind === "photo" || row.kind === "voice" ? row.kind : "text";
-    const quoteData = row.quote && typeof row.quote === "object" ? row.quote as Record<string, unknown> : null;
-    const quoteOriginal = quoteData ? String(quoteData.original || "").trim() : "";
-    const quote = quoteOriginal ? { original: quoteOriginal, translated: String(quoteData?.translated || quoteOriginal).trim() } : undefined;
-    return {
-      kind,
-      original,
-      translated: String(row.translated || original).trim(),
-      quote,
-      photoDescription: String(row.photoDescription || "").trim(),
-      mediaIntent: ["selfie", "portrait", "group", "food", "scenery", "object", "pet", "other"].includes(String(row.mediaIntent)) ? row.mediaIntent as Generated["mediaIntent"] : "other",
-    } satisfies Generated;
+    const rawKind = asText(row.kind);
+    let kind: GeneratedLysn["kind"] = rawKind === "photo" || rawKind === "voice" || rawKind === "sticker" ? rawKind : "text";
+    const sticker = kind === "sticker" ? stickers.find(s => s.name === asText(row.stickerName) || s.name === asText(row.original)) : undefined;
+    if (kind === "sticker" && !sticker) kind = "text";
+    const original = kind === "sticker" && sticker ? sticker.name : asText(row.original);
+    const quoteData = mayQuote && row.quote && typeof row.quote === "object" ? row.quote as Record<string, unknown> : null;
+    const quote = quoteData && asText(quoteData.original) ? { original: asText(quoteData.original), translated: asText(quoteData.translated) || asText(quoteData.original) } : undefined;
+    return { kind, original, translated: asText(row.translated) || original, quote, stickerName: sticker?.name, photoDescription: asText(row.photoDescription), mediaIntent: ["selfie", "portrait", "group", "food", "scenery", "object", "pet", "other"].includes(asText(row.mediaIntent)) ? asText(row.mediaIntent) as GeneratedLysn["mediaIntent"] : "other" } satisfies GeneratedLysn;
   }).filter(row => row.original);
-  if (!rows.length) throw new Error("LYSN 没有返回有效正文，请重试。");
-  return { ...rows[0], extra: rows.slice(1) };
+  if (!rows.length && data.publish !== false) throw new Error("LYSN 没有返回有效正文，请重试。");
+  return rows;
 }
