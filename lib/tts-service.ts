@@ -155,27 +155,57 @@ async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?:
 async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promise<Blob | null> {
     if (!config.apiKey) throw new Error("Fish Audio API Key 未配置");
 
-    const baseUrl = (config.baseUrl || "https://api.fish.audio/v1").replace(/\/$/, "");
+    const baseUrl = (config.baseUrl || "https://api.fish.audio/v1").replace(/\/+$/, "");
     const voiceId = (config.defaultVoice || "").trim();
     const model = (config.model || "s2.1-pro-free").trim();
+    const isOfficialFishApi = /^https:\/\/api\.fish\.audio\/v1$/i.test(baseUrl);
 
-    const response = await fetchWithTimeout(`${baseUrl}/tts`, {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "Content-Type": "application/json",
-            model,
-        },
-        body: JSON.stringify({
-            text,
-            format: "mp3",
-            ...(voiceId ? { reference_id: voiceId } : {}),
-        }),
-    });
+    // Fish Audio's cloud endpoint is intended for server-side API calls. Calling it
+    // directly from the browser can fail at the CORS/preflight layer before Fish
+    // returns an HTTP status at all (surfacing only as `Failed to fetch`). Route the
+    // official endpoint through our same-origin Next API proxy so browser CORS never
+    // enters the path. A custom Base URL is still called directly, which keeps support
+    // for user-owned reverse proxies that explicitly enable browser CORS.
+    const response = isOfficialFishApi
+        ? await fetchWithTimeout("/api/voice/fish-tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                apiKey: config.apiKey,
+                model,
+                voiceId,
+                text,
+            }),
+        })
+        : await fetchWithTimeout(`${baseUrl}/tts`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${config.apiKey}`,
+                "Content-Type": "application/json",
+                model,
+            },
+            body: JSON.stringify({
+                text,
+                format: "mp3",
+                ...(voiceId ? { reference_id: voiceId } : {}),
+            }),
+        }).catch((error: unknown) => {
+            if (error instanceof TypeError) {
+                throw new Error("Fish Audio 自定义 Base URL 无法从浏览器访问（可能被 CORS 或网络策略拦截）；请使用默认官方 Base URL，或使用已开启 CORS 的自有反代。");
+            }
+            throw error;
+        });
 
     if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new Error(`Fish Audio TTS 请求失败 (${response.status}): ${errText}`);
+        const contentType = response.headers.get("content-type") || "";
+        let detail = "";
+        if (contentType.includes("application/json")) {
+            const data = await response.json().catch(() => null) as { message?: unknown; error?: unknown } | null;
+            detail = String(data?.message || data?.error || "").trim();
+        } else {
+            detail = (await response.text().catch(() => "")).trim();
+        }
+        throw new Error(`Fish Audio TTS 请求失败 (${response.status})${detail ? `: ${detail}` : ""}`);
     }
 
     const blob = await response.blob();

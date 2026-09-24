@@ -315,3 +315,11 @@
 - Fish Audio is TTS-only in this provider entry; selecting it does not claim OpenAI-compatible STT support.
 - Weixin/local assistant duplicated TTS runtimes also recognize Fish Audio voice configs.
 - Service Worker cache bumped to v43.
+
+
+## v0.5.11-fix · Fish Audio browser CORS repair
+- Official Fish Audio TTS no longer calls `https://api.fish.audio/v1/tts` directly from browser code.
+- Added same-origin `POST /api/voice/fish-tts` Next route which performs the Fish request server-side and returns binary audio.
+- This avoids browser CORS/preflight failures that surfaced only as `Failed to fetch`.
+- Custom Fish Base URLs remain direct browser calls so user-owned CORS-enabled reverse proxies still work; failures now explain the likely CORS/network cause.
+- Service Worker cache bumped to v44.
