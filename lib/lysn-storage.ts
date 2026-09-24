@@ -1,0 +1,39 @@
+import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+
+export const LYSN_KEY = "ai_phone_lysn_v1";
+export const LYSN_EVENT = "lysn-updated";
+registerKvMigration(LYSN_KEY);
+
+export type LysnMessage = {
+  id: string; characterId: string; sender: "artist" | "fan" | "system";
+  kind: "text" | "photo" | "voice" | "notice";
+  original: string; translated?: string; imageUrl?: string; photoId?: string;
+  createdAt: number;
+};
+export type LysnProfile = { name: string; avatar: string; updatedAt: number };
+export type LysnState = {
+  version: 1; subscribedIds: string[]; profiles: Record<string, LysnProfile>;
+  messages: LysnMessage[]; readAt: Record<string, number>;
+  subscribedAt: Record<string, number>; lastAutoAt: Record<string, number>;
+};
+const EMPTY: LysnState = { version: 1, subscribedIds: [], profiles: {}, messages: [], readAt: {}, subscribedAt: {}, lastAutoAt: {} };
+export function loadLysn(): LysnState {
+  try {
+    const value = kvGet(LYSN_KEY);
+    if (!value) return { ...EMPTY };
+    const parsed = JSON.parse(value) as Partial<LysnState>;
+    return { version: 1, subscribedIds: Array.isArray(parsed.subscribedIds) ? parsed.subscribedIds.filter((x): x is string => typeof x === "string") : [], profiles: parsed.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {}, messages: Array.isArray(parsed.messages) ? parsed.messages.filter(x => x && typeof x.id === "string" && typeof x.characterId === "string") : [], readAt: parsed.readAt && typeof parsed.readAt === "object" ? parsed.readAt : {}, subscribedAt: parsed.subscribedAt && typeof parsed.subscribedAt === "object" ? parsed.subscribedAt : {}, lastAutoAt: parsed.lastAutoAt && typeof parsed.lastAutoAt === "object" ? parsed.lastAutoAt : {} };
+  } catch { return { ...EMPTY }; }
+}
+export function saveLysn(state: LysnState): void {
+  kvSet(LYSN_KEY, JSON.stringify(state));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(LYSN_EVENT));
+}
+export function lysnId(): string { return `lysn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`; }
+export function appendLysn(characterId: string, rows: Omit<LysnMessage, "id" | "characterId" | "createdAt">[]): LysnState {
+  const state = loadLysn();
+  const now = Date.now();
+  state.messages.push(...rows.map((row, i) => ({ ...row, id: lysnId(), characterId, createdAt: now + i })));
+  saveLysn(state);
+  return state;
+}

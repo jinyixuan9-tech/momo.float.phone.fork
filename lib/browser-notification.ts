@@ -47,6 +47,8 @@ function constructNotification(title: string, payload: NotificationOptions): voi
         const notification = new Notification(title, payload);
         notification.onclick = () => {
             window.focus();
+            const target = (payload.data as { url?: string } | undefined)?.url;
+            if (target?.startsWith("/#lysn=")) window.location.hash = target.slice(1);
             notification.close();
         };
     } catch {
@@ -65,7 +67,7 @@ function constructNotification(title: string, payload: NotificationOptions): voi
  */
 export function sendBrowserNotification(
     title: string,
-    options?: { body?: string; icon?: string },
+    options?: { body?: string; icon?: string; url?: string },
 ): void {
     if (!isNotificationEnabled()) return;
     if (!document.hidden) return;
@@ -74,6 +76,7 @@ export function sendBrowserNotification(
         body: options?.body,
         icon: options?.icon || "/icon-192.png",
         tag: `ai-phone-${Date.now()}-${_notifCounter++}`,
+        data: options?.url ? { url: options.url, type: "lysn" } : undefined,
     };
 
     if ("serviceWorker" in navigator) {

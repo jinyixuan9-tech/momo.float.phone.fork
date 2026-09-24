@@ -1,4 +1,4 @@
-const CACHE_VERSION = "ai-phone-pwa-v44";
+const CACHE_VERSION = "ai-phone-pwa-v45";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -162,6 +162,10 @@ self.addEventListener("notificationclick", (event) => {
               callTs: notificationData.callTs || 0,
             });
             client.postMessage({ type: "push_outbox_ready" });
+          }
+          if (notificationData.type === "lysn") {
+            const id = new URL(targetUrl, self.location.origin).hash.match(/^#lysn=(.*)$/)?.[1];
+            if (id) client.postMessage({ type: "open_lysn", characterId: decodeURIComponent(id) });
           }
           return client.focus();
         }

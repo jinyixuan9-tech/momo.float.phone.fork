@@ -226,6 +226,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_xiaohongshu_state_v1",
           "ai_phone_friend_requests_v1",
           "ai_phone_weverse_state_v1",
+          "ai_phone_lysn_v1",
         ],
         prefixes: ["checkphone:xiaohongshu:readThreads", "xiaohongshu_events_", "ai_phone_xiaohongshu_events_"],
       },

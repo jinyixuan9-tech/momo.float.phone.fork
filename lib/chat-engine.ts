@@ -27,6 +27,7 @@ import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-to
 import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent, inferAvatarRecommendationPlatform } from "./chat-avatar-intent";
 import { buildChatProfileAutonomyPrompt, isExplicitChatProfileRequestTurn } from "./chat-profile-autonomy";
 import { buildWeverseProfileAutonomyPrompt, isExplicitWeverseProfileRequestTurn } from "./weverse-profile-autonomy";
+import { lysnProfilePrompt, explicitLysnProfileRequest } from "./lysn-profile-autonomy";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -1875,9 +1876,10 @@ export async function buildChatPromptMessages(
         && !session.isGroup
         && !recommendationTurnForTools
         && isExplicitWeverseProfileRequestTurn(historyForPrompt, session.id);
+    const explicitLysnRequest = resolvedAppId === "chat" && !session.isGroup && !recommendationTurnForTools && explicitLysnProfileRequest(historyForPrompt, session.id);
     // 角色资料更新是本地动作；明确要求改 Chat/WVS 资料时不暴露外部工具，避免被误判成生图/搜索。
     // 用户直接发图推荐头像继续沿用原有推荐链，不改它已经稳定的执行方式。
-    const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode && !explicitChatProfileRequest && !explicitWeverseProfileRequest;
+    const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode && !explicitChatProfileRequest && !explicitWeverseProfileRequest && !explicitLysnRequest;
     const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
     const toolsEnabled = enabledTools.length > 0
         && (options?.forceEnableTools === true || presetIncludesToolsMacro(preset, resolvedAppId, effectiveAppTags));
@@ -2014,6 +2016,8 @@ export async function buildChatPromptMessages(
                 llmMessages.push({ role: "system", content: weverseProfileAutonomyPrompt });
             }
         }
+        const lysnAutonomy = lysnProfilePrompt(character, explicitLysnRequest);
+        if (lysnAutonomy) llmMessages.push({ role: "system", content: lysnAutonomy });
     }
     if (promptProfile?.output === "plain_text") {
         llmMessages.push({

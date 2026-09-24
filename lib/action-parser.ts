@@ -22,6 +22,7 @@ import { attachMomentPhotoInBackground, parseMomentPostResponse } from "./moment
 import { isAbortError, throwIfAborted } from "./abort-utils";
 import { applyAutonomousChatProfileAction } from "./chat-profile-autonomy";
 import { applyAutonomousWeverseProfileAction } from "./weverse-profile-autonomy";
+import { applyLysnProfileAction } from "./lysn-profile-autonomy";
 
 // ── Types ──
 
@@ -271,7 +272,9 @@ async function dispatchProfileUpdate(action: ActionTag, context: ActionContext):
     }
     if (target === "wvs" || target === "weverse") {
         await applyAutonomousWeverseProfileAction(context.characterId, action.content);
+        return;
     }
+    if (target === "lysn" || target === "bubble") await applyLysnProfileAction(context.characterId, action.content);
 }
 
 /**

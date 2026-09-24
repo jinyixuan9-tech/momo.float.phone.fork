@@ -16,6 +16,7 @@ import { parseAIResponse } from "./rich-message-parser";
 import { extractTextToolDirectiveText } from "./text-tool-protocol";
 import { findUserAvatarChangeIntent, inferAvatarDecisionFromReply, inferAvatarRecommendationPlatform } from "./chat-avatar-intent";
 import { setWeverseMemberAvatarFromRecommendation } from "./weverse-profile-autonomy";
+import { setLysnAvatarFromRecommendation } from "./lysn-profile-autonomy";
 
 export const DEFAULT_VISION_IMAGE_PROMPT_LIMIT = 1;
 export const MAX_VISION_IMAGE_PROMPT_LIMIT = 20;
@@ -252,7 +253,7 @@ export type ChatMessage = {
         appHistoryRole?: ChatMessageRole;
         avatarRecommendationForCharacterId?: string;
         avatarRecommendationStatus?: "pending" | "accepted" | "declined";
-        avatarRecommendationTargetPlatform?: "chat" | "wvs";
+        avatarRecommendationTargetPlatform?: "chat" | "wvs" | "lysn";
     };
     isTyping?: boolean; // temporary flag for UI rendering
     statusPanel?: string; // AI display-only status content from [状态栏] tags
@@ -462,6 +463,8 @@ function resolvePendingAvatarRecommendation(message: ChatMessage): void {
         if (targetPlatform === "wvs") {
             // 沿用原本“推荐图 -> 接受 -> 真换头像”的执行链，只把目标平台切到 WVS。
             setWeverseMemberAvatarFromRecommendation(session.contactId, recommendation.mediaUrl, detectedIntent?.intentText);
+        } else if (targetPlatform === "lysn") {
+            void setLysnAvatarFromRecommendation(session.contactId, recommendation.mediaUrl);
         } else {
             updateChatCharacterProfile(session.contactId, { avatarUrl: recommendation.mediaUrl });
         }

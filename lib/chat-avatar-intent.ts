@@ -13,11 +13,12 @@ const AVATAR_DECISION_PLACEHOLDER_SUFFIX = "_\uE10B";
 const AVATAR_INTENT_LOOKBACK_MESSAGES = 12;
 const AVATAR_INTENT_LOOKBACK_MS = 30 * 60 * 1000;
 
-export type AvatarRecommendationPlatform = "chat" | "wvs";
+export type AvatarRecommendationPlatform = "chat" | "wvs" | "lysn";
 
 /** 显式提到 WVS / Weverse / 위버스 时，头像推荐属于 WVS；否则沿用 Chat。 */
 export function inferAvatarRecommendationPlatform(text: string): AvatarRecommendationPlatform {
     const normalized = text.replace(/\s+/g, " ").trim();
+    if (/(?:\blysn\b|bubble|泡泡)/i.test(normalized)) return "lysn";
     return /(?:\bwvs\b|weverse|위버스)/i.test(normalized) ? "wvs" : "chat";
 }
 

@@ -567,7 +567,7 @@ export async function generateWeverseScheduleBatch(
     const title = String(item.title ?? "").trim();
     const members = Array.isArray(item.memberCharacterIds) ? item.memberCharacterIds.map(String).filter((id) => allowed.has(id)) : [];
     const type = scheduleType(item.type);
-    const visibility = item.visibility === "internal" ? "internal" : "public";
+    const visibility: "internal" | "public" = item.visibility === "internal" ? "internal" : "public";
     const normalizedType: WeverseScheduleType = visibility === "internal"
       ? (["recording", "shoot", "other"].includes(type) ? type : "other")
       : (["performance", "brand", "anniversary", "release", "media"].includes(type) ? type : "media");

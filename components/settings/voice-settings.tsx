@@ -65,6 +65,14 @@ const DEFAULT_FISH_AUDIO_MODELS = [
     { id: "s2.1-pro-free", name: "s2.1-pro-free" },
     { id: "s2.1-pro", name: "s2.1-pro" },
 ];
+const FISH_PREVIEW_TEXT = {
+    "中文": "你好，今天过得怎么样？我刚刚想到一件很有意思的事，等会儿说给你听。",
+    "English": "Hey, how’s your day going? I just thought of something funny. I’ll tell you about it in a second.",
+    "日本語": "こんにちは。今日はどんな一日でしたか？さっきちょっと面白いことを思いついたので、あとで話しますね。",
+    "한국어": "안녕하세요. 오늘 하루는 어땠어요? 방금 재미있는 생각이 하나 났는데, 조금 있다가 이야기해 줄게요.",
+    "Français": "Salut, comment s’est passée ta journée ? Je viens de penser à quelque chose d’amusant, je te raconte ça dans un instant.",
+} as const;
+type FishPreviewLanguage = keyof typeof FISH_PREVIEW_TEXT;
 
 const MINIMAX_LANGUAGE_OPTIONS = [
     { value: "", label: "不指定（保持默认）" },
@@ -242,6 +250,13 @@ export function VoiceSettings() {
     const [isNewConfig, setIsNewConfig] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+    const [fishPreviewLanguage, setFishPreviewLanguage] = useState<FishPreviewLanguage>(() => {
+        if (typeof window === "undefined") return "中文";
+        try {
+            const saved = localStorage.getItem("ii_phone_fish_preview_language");
+            return saved && saved in FISH_PREVIEW_TEXT ? saved as FishPreviewLanguage : "中文";
+        } catch { return "中文"; }
+    });
     const [cloneTargetId, setCloneTargetId] = useState<string | null>(null);
     const [cloneVoiceId, setCloneVoiceId] = useState("");
     const [cloneFile, setCloneFile] = useState<File | null>(null);
@@ -556,7 +571,7 @@ export function VoiceSettings() {
         setPlayingVoiceId(config.id);
 
         try {
-            const previewText = config.provider === "Minimax" && config.languageBoost
+            const previewText = config.provider === "FishAudio" ? FISH_PREVIEW_TEXT[fishPreviewLanguage] : config.provider === "Minimax" && config.languageBoost
                 ? MINIMAX_PREVIEW_TEXT[config.languageBoost] || "你好，很高兴认识你。这是一段语音试听。"
                 : "你好，我现在是" + (config.defaultVoice || "默认") + "音色。很高兴认识你。";
             const blob = await synthesizeSpeech(
@@ -1005,7 +1020,7 @@ export function VoiceSettings() {
                                                 </div>
 
                                                 {config.provider === "FishAudio" && (
-                                                    <span className="menu-desc ml-1">Voice ID 对应 Fish Audio 的 reference_id；试听和角色绑定都会直接使用这里的值。</span>
+                                                    <div className="flex flex-col gap-2 ml-1"><span className="menu-desc">Voice ID 对应 Fish Audio 的 reference_id；选择试听文案只改变输入文本。</span><div className="flex flex-wrap gap-1" aria-label="Fish Audio 试听语言">{(Object.keys(FISH_PREVIEW_TEXT) as FishPreviewLanguage[]).map(language => <button type="button" key={language} aria-pressed={fishPreviewLanguage === language} className={`ui-btn ${fishPreviewLanguage === language ? "ui-btn-soft-action" : ""}`} onClick={() => { setFishPreviewLanguage(language); try { localStorage.setItem("ii_phone_fish_preview_language", language); } catch {} }}>{language}</button>)}</div></div>
                                                 )}
 
                                                 {fetchError[config.id] && (

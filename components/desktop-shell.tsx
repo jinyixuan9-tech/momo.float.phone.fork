@@ -11,6 +11,8 @@ import { PhoneThemeApp } from "@/components/phone-theme-app";
 import { PhoneCharacterApp } from "@/components/phone-character-app";
 import { PhotosApp } from "@/components/photos/photos-app";
 import { WeverseApp } from "@/components/weverse/weverse-app";
+import { LysnApp } from "@/components/lysn/lysn-app";
+import { maybeGenerateLysnBackgroundMessage } from "@/lib/lysn-background";
 import { PhoneSettingsApp } from "@/components/phone-settings-app";
 import { PhoneChatApp } from "@/components/chat/phone-chat-app";
 import { PhonePlaceholderApp } from "@/components/phone-placeholder-app";
@@ -1056,6 +1058,30 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [glassPaintPass, setGlassPaintPass] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeApp, setActiveApp] = useState<DesktopIconId | null>(null);
+  useEffect(() => {
+    const timer = window.setInterval(() => { void maybeGenerateLysnBackgroundMessage(); }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const openLysn = (characterId: string) => {
+      if (!characterId) return;
+      setActiveApp("lysn");
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("lysn-open-character", { detail: { characterId } })), 100);
+    };
+    const handleHash = () => {
+      const match = window.location.hash.match(/^#lysn=(.*)$/);
+      if (!match) return;
+      try { openLysn(decodeURIComponent(match[1])); } catch { /* ignore invalid hash */ }
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    };
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "open_lysn") openLysn(String(event.data.characterId || ""));
+    };
+    handleHash();
+    window.addEventListener("hashchange", handleHash);
+    navigator.serviceWorker?.addEventListener("message", handleMessage);
+    return () => { window.removeEventListener("hashchange", handleHash); navigator.serviceWorker?.removeEventListener("message", handleMessage); };
+  }, []);
   const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
   // 自定义 APP 桌面图标样式偏好（global = 忽略上传图标走全局效果）
   const [customAppIconStyles, setCustomAppIconStyles] = useState<Record<string, CustomAppIconStyle>>({});
@@ -2418,8 +2444,24 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
   const handleNoticeClick = useCallback(() => {
     if (noticeDragRef.current.far) { noticeDragRef.current.far = false; return; }
-    if (chatMessageNotice) openChatSessionFromNotice(chatMessageNotice.sessionId);
+    if (chatMessageNotice?.sessionId.startsWith("lysn:")) {
+      const characterId = chatMessageNotice.sessionId.slice(5);
+      setChatMessageNotice(null);
+      setActiveApp("lysn");
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("lysn-open-character", { detail: { characterId } })), 30);
+    } else if (chatMessageNotice) openChatSessionFromNotice(chatMessageNotice.sessionId);
   }, [chatMessageNotice, openChatSessionFromNotice]);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ characterId: string; title: string; body: string }>).detail;
+      if (!detail?.characterId) return;
+      if (chatMessageNoticeTimerRef.current !== null) window.clearTimeout(chatMessageNoticeTimerRef.current);
+      setChatMessageNotice({ sessionId: `lysn:${detail.characterId}`, title: detail.title, body: detail.body, avatar: null, isGroup: false });
+      chatMessageNoticeTimerRef.current = window.setTimeout(() => setChatMessageNotice(null), 6000);
+    };
+    window.addEventListener("lysn-message-notice", handler);
+    return () => window.removeEventListener("lysn-message-notice", handler);
+  }, [activeApp]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -3903,6 +3945,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
     if (activeApp === "weverse") {
       return <WeverseApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+    if (activeApp === "lysn") {
+      return <LysnApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
 
     if (activeApp === "characters") {
