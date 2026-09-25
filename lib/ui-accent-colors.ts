@@ -31,4 +31,5 @@ export const CONTENT_APP_ACCENTS: Record<ContentAppId, string> = {
     adventure: "#F97316",
     weverse: "#18CDB2",
     lysn: "#709BE5",
+    sms: "#34C759",
 };

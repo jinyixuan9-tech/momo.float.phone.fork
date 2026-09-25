@@ -1,5 +1,5 @@
 import { loadCharacters } from "./character-storage";
-import { loadChatContacts } from "./chat-storage";
+import { loadChatContacts, loadChatSessions } from "./chat-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 // lib/friend-request-storage.ts
 // Friend request storage — manages pending/accepted/rejected friend requests
@@ -66,11 +66,14 @@ export function getPendingFriendRequests(): FriendRequest[] {
 
     const characterIds = new Set(loadCharacters().map(c => c.id));
     const contactCharacterIds = new Set(loadChatContacts().map(c => c.characterId));
+    const blacklistedCharacterIds = new Set(loadChatSessions().filter(s => !s.isGroup && s.isBlacklisted).map(s => s.contactId));
     let changed = false;
 
     const activeRequests = all.filter(r => {
         if (r.status !== "pending") return true;
-        const stale = !characterIds.has(r.characterId) || contactCharacterIds.has(r.characterId);
+        // A blacklisted contact is still in the contact list, but reconnect requests are
+        // intentionally allowed to remain visible while that communication channel is blocked.
+        const stale = !characterIds.has(r.characterId) || (contactCharacterIds.has(r.characterId) && !blacklistedCharacterIds.has(r.characterId));
         if (stale) {
             changed = true;
             return false;

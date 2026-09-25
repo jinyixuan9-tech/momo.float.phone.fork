@@ -31,6 +31,7 @@ import { loadChatOfflineProjectionEntries } from "./chat-offline-storage";
 import { loadCheckPhoneProjectionEntries } from "./checkphone-storage";
 import { formatShoppingPaymentRequestHistory } from "./shopping-payment-request";
 import { loadCustomAppTimelineEntries } from "./custom-app-storage";
+import { loadSmsProjectionEntries } from "./sms-storage";
 import {
     canCharacterSeeMomentPost,
     getVisibleMomentCommentsForCharacter,
@@ -52,8 +53,8 @@ function formatPhotoDirectiveForPrompt(msg: ChatMessage): string {
 
 export type NativeTimelineEntry = {
     id: string;
-    sourceApp: "chat" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "weverse" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app";
-    sourceDetail?: "direct" | "group" | "system" | "story" | "chat_offline" | "game" | "diary_entry" | "notewall" | "xiaohongshu" | "weverse" | "black_market_theater" | "interview_issue" | "interview_shared_issue" | "cocreate_project" | "checkphone" | "custom_app_event"; // chat sub-type: 1:1 vs group chat vs system note
+    sourceApp: "chat" | "sms" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "weverse" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app";
+    sourceDetail?: "direct" | "sms" | "group" | "system" | "story" | "chat_offline" | "game" | "diary_entry" | "notewall" | "xiaohongshu" | "weverse" | "black_market_theater" | "interview_issue" | "interview_shared_issue" | "cocreate_project" | "checkphone" | "custom_app_event"; // chat sub-type: 1:1 vs group chat vs system note
     authorType?: "user" | "character" | "npc"; // who authored this entry
     postAuthorType?: "user" | "character"; // for moments: who owns the parent post
     sessionId?: string;
@@ -166,6 +167,7 @@ export function loadNativeTimeline(
         userName?: string;
         appId?: import("./settings-types").ContentAppId;
         excludeOfflineSessionId?: string;
+        excludeSmsThreadId?: string;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
     }
@@ -388,6 +390,26 @@ export function loadNativeTimeline(
                 content: `${msgLabel} ${sender}: ${content}`,
             });
         }
+    }
+
+    // ── SMS projections ──
+    // Full SMS messages stay in sms-storage; only a compact, role-knowledge-safe
+    // projection joins shared memory so Chat ↔ SMS can continue naturally without
+    // multiplying tokens for every short text / virtual number.
+    const smsEntries = loadSmsProjectionEntries(characterId, {
+        afterTimestamp: options?.afterTimestamp,
+        userName,
+        charName,
+        excludeThreadId: options?.excludeSmsThreadId,
+    });
+    for (const smsEntry of smsEntries) {
+        entries.push({
+            id: smsEntry.id,
+            sourceApp: "sms",
+            sourceDetail: "sms",
+            timestamp: smsEntry.timestamp,
+            content: smsEntry.content,
+        });
     }
 
     // ── Moments posts & comments (grouped by post) ──
@@ -813,10 +835,11 @@ export function loadNativeTimeline(
 }
 
 // Fixed order — lower = further from LLM output (appears higher in prompt)
-const FEATURE_ORDER: Record<string, number> = { map: 0, game: 0.5, moments: 1, xiaohongshu: 1.5, weverse: 1.6, checkphone: 1.7, story: 2, vn: 2, theater: 2.2, interview: 2.35, cocreate: 2.4, diary_entry: 2.45, notewall: 2.5, custom_app: 2.6, group_chat: 3, chat: 4 };
+const FEATURE_ORDER: Record<string, number> = { map: 0, game: 0.5, moments: 1, xiaohongshu: 1.5, weverse: 1.6, checkphone: 1.7, story: 2, vn: 2, theater: 2.2, interview: 2.35, cocreate: 2.4, diary_entry: 2.45, notewall: 2.5, custom_app: 2.6, group_chat: 3, sms: 3.7, chat: 4 };
 // Map appId → XML tag name for the "current feature" wrapper
 const FEATURE_TAG: Record<string, string> = {
     chat: "recent_chat",
+    sms: "recent_sms",
     group_chat: "recent_group_chat",
     moments: "recent_moments",
     story: "recent_events",
@@ -948,12 +971,15 @@ export function prepareShortTermContext(
         history?: ChatMessage[];
         excludeGroupSessionId?: string;
         excludeOfflineSessionId?: string;
+        excludeSmsThreadId?: string;
         includeNativeToolHistory?: boolean;
         includeDirectChatEntries?: boolean;
         /** 只读取该时间之后的跨应用最近事件；剧情分线用它隔离创建前的短期记忆。 */
         afterTimestamp?: string;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
+        /** Optional per-call cap. SMS uses this to keep short-message history lean even when global memory budgets are very large. */
+        tokenBudgetOverride?: number;
     },
 ): {
     recentBlocks: RecentBlock[];
@@ -966,6 +992,7 @@ export function prepareShortTermContext(
         userName: options?.userName,
         appId: appId as import("./settings-types").ContentAppId,
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
+        excludeSmsThreadId: options?.excludeSmsThreadId,
         afterTimestamp: options?.afterTimestamp,
         timeAware,
         promptTimestampOptions: options?.promptTimestampOptions,
@@ -976,11 +1003,11 @@ export function prepareShortTermContext(
 
     // Activation context: full timeline for keyword matching (not truncated)
     const wbActivationContext = timeline.slice(-10).map(e => e.content).join("\n");
-    const budget = memConfig.shortTermTokenBudget;
+    const budget = options?.tokenBudgetOverride ?? memConfig.shortTermTokenBudget;
     const currentTag = getFeatureTag(appId);
     const history = options?.history ?? [];
     const characterName = loadCharacters().find(c => c.id === characterId)?.name ?? "角色";
-    const wrapsCurrentHistory = appId === "chat" || appId === "group_chat" || appId === "story" || appId === "vn" || appId === "adventure";
+    const wrapsCurrentHistory = appId === "chat" || appId === "sms" || appId === "group_chat" || appId === "story" || appId === "vn" || appId === "adventure";
     const skipDirectChatEntries = appId === "chat" && !options?.includeDirectChatEntries;
 
     // ── Collect non-history entries per block ──
@@ -1066,6 +1093,14 @@ export function prepareShortTermContext(
     const customAppEntries = timeline.filter(e => e.sourceApp === "custom_app");
     if (customAppEntries.length > 0) {
         raw.push({ tag: "recent_custom_app", order: FEATURE_ORDER.custom_app, entries: customAppEntries });
+    }
+
+    // SMS projections join the shared recent timeline. SMS callers exclude the current
+    // thread so raw history is not duplicated; other recent SMS threads stay available
+    // as compact cross-thread context under the same token cap.
+    const smsTimelineEntries = timeline.filter(e => e.sourceApp === "sms");
+    if (smsTimelineEntries.length > 0) {
+        raw.push({ tag: "recent_sms", order: FEATURE_ORDER.sms, entries: smsTimelineEntries });
     }
 
     const groupChatEntries = timeline.filter(e =>
@@ -1331,6 +1366,11 @@ export function prepareGroupShortTermContext(
         raw.push({ tag: "recent_custom_app", order: FEATURE_ORDER.custom_app, entries: customAppEntries });
     }
 
+    const smsTimelineEntries = timeline.filter(e => e.sourceApp === "sms");
+    if (smsTimelineEntries.length > 0) {
+        raw.push({ tag: "recent_sms", order: FEATURE_ORDER.sms, entries: smsTimelineEntries });
+    }
+
     const groupChatEntries = timeline.filter(e => e.sourceApp === "chat" && e.sourceDetail === "group");
     if (groupChatEntries.length > 0) {
         raw.push({ tag: "recent_group_chat", order: FEATURE_ORDER.group_chat, entries: groupChatEntries });
@@ -1423,7 +1463,8 @@ export function prepareGroupShortTermContext(
                                 entry.sourceApp === "xiaohongshu" ? "recent_xiaohongshu" :
                                     entry.sourceApp === "weverse" ? "recent_weverse" :
                                     entry.sourceApp === "checkphone" ? "recent_checkphone" :
-                                        entry.sourceApp === "interview_magazine" ? "recent_interview" :
+                                        entry.sourceApp === "sms" ? "recent_sms" :
+                                            entry.sourceApp === "interview_magazine" ? "recent_interview" :
                                                 entry.sourceApp === "cocreate" ? "recent_cocreate" :
                                                     entry.sourceApp === "custom_app" ? "recent_custom_app" :
                                                         entry.sourceApp === "story" && entry.sourceDetail === "black_market_theater" ? "recent_theater" :

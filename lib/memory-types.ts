@@ -31,6 +31,7 @@ export type MemoryConfig = {
     vnSummaryPrompt: string;                // user-editable prompt for VN chapter summarization
     shortTermAllowedSources?: {
         chat?: boolean;
+        sms?: boolean;
         group_chat?: boolean;
         moments?: boolean;
         checkphone?: boolean;
@@ -119,6 +120,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     vnSummaryPrompt: "",
     shortTermAllowedSources: {
         chat: true,
+        sms: true,
         group_chat: true,
         moments: true,
         checkphone: true,

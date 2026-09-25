@@ -12,7 +12,9 @@ import { PhoneCharacterApp } from "@/components/phone-character-app";
 import { PhotosApp } from "@/components/photos/photos-app";
 import { WeverseApp } from "@/components/weverse/weverse-app";
 import { LysnApp } from "@/components/lysn/lysn-app";
+import { SmsApp } from "@/components/sms/sms-app";
 import { maybeGenerateLysnBackgroundMessage } from "@/lib/lysn-background";
+import { maybeGenerateSmsBackgroundMessage } from "@/lib/sms-background";
 import { PhoneSettingsApp } from "@/components/phone-settings-app";
 import { PhoneChatApp } from "@/components/chat/phone-chat-app";
 import { PhonePlaceholderApp } from "@/components/phone-placeholder-app";
@@ -119,6 +121,7 @@ import {
   type DesktopFolderMap,
   type DesktopIconLayout,
   type DesktopPageKey,
+  ensureNativeSmsIcon,
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
@@ -1059,7 +1062,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [notice, setNotice] = useState<string | null>(null);
   const [activeApp, setActiveApp] = useState<DesktopIconId | null>(null);
   useEffect(() => {
-    const timer = window.setInterval(() => { void maybeGenerateLysnBackgroundMessage(); }, 60_000);
+    const timer = window.setInterval(() => { void maybeGenerateLysnBackgroundMessage(); void maybeGenerateSmsBackgroundMessage(); }, 60_000);
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -1511,11 +1514,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         try {
           const normalized = normalizeLayout(JSON.parse(rawV2), hydratedWidgets, dockIds, hydratedFolders);
           const sane = sanitizeDesktopFolders(hydratedFolders, normalized, hydratedDock, hydratedWidgets);
+          const withSms = ensureNativeSmsIcon(sane.layout, hydratedWidgets, hydratedDock, sane.folders);
           setFolders(sane.folders);
-          setLayout(sane.layout);
-          if (sane.changed) {
+          setLayout(withSms.layout);
+          if (sane.changed || withSms.changed) {
             writeDesktopFolders(sane.folders);
-            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(sane.layout));
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withSms.layout));
           }
           setDesktopReady(true);
           return;
@@ -1527,10 +1531,13 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           const parsed = JSON.parse(rawV1) as Record<string, unknown>;
           const w1 = hydratedWidgets.filter(w => w.page === 1);
           const w2 = hydratedWidgets.filter(w => w.page === 2);
-          setLayout({
+          const migrated = {
             page1: migratePageV1(parsed.page1, PAGE_1_DEFAULT, w1).filter(ic => !dockIds.has(ic.id)),
             page2: migratePageV1(parsed.page2, PAGE_2_DEFAULT, w2).filter(ic => !dockIds.has(ic.id)),
-          } as DesktopLayout);
+          } as DesktopLayout;
+          const withSms = ensureNativeSmsIcon(migrated, hydratedWidgets, hydratedDock, hydratedFolders);
+          setLayout(withSms.layout);
+          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withSms.layout));
           kvRemove(ICON_LAYOUT_STORAGE_KEY_V1);
           setDesktopReady(true);
           return;
@@ -3948,6 +3955,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     }
     if (activeApp === "lysn") {
       return <LysnApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+    if (activeApp === "sms") {
+      return <SmsApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
 
     if (activeApp === "characters") {

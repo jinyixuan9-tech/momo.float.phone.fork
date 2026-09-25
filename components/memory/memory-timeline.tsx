@@ -10,13 +10,14 @@ import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
    标签筛选：顶部胶囊按来源收纳过滤
    ================================================================ */
 
-/** 固定展示顺序：私聊 / 群聊 / 查手机 / 朋友圈 / 剧情 / 其他APP */
-export const MEMORY_SOURCE_TAG_ORDER: readonly string[] = ["私聊", "群聊", "查手机", "朋友圈", "剧情", "其他APP"];
+/** 固定展示顺序：私聊 / 群聊 / 短信 / 查手机 / 朋友圈 / 剧情 / 其他APP */
+export const MEMORY_SOURCE_TAG_ORDER: readonly string[] = ["私聊", "群聊", "短信", "查手机", "朋友圈", "剧情", "其他APP"];
 
 /** 事件来源 → 筛选标签（其余来源一律归入「其他APP」收纳） */
 export function getMemoryEventSourceTag(evt: NativeTimelineEntry): string {
     const app = evt.sourceApp;
     if (app === "chat") return evt.sourceDetail === "group" ? "群聊" : "私聊";
+    if (app === "sms") return "短信";
     if (app === "checkphone") return "查手机";
     if (app === "moments") return "朋友圈";
     if (app === "story") return "剧情";
@@ -80,7 +81,7 @@ type ParsedProjection = {
     type: "projection";
     id: string;
     timestamp: string;
-    source: "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app" | "chat_offline";
+    source: "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "interview_magazine" | "cocreate" | "checkphone" | "sms" | "custom_app" | "chat_offline";
     label: string;
     message: string;
 };
@@ -160,6 +161,20 @@ function parseEntry(evt: NativeTimelineEntry, userName: string): ParsedEntry | n
                 message: m[3],
             };
         }
+    }
+
+
+    // SMS projection: role-aware compact thread snippets injected by the SMS memory bridge.
+    if (evt.sourceApp === "sms") {
+        const stripped = content.replace(/^\[短信(?: [^\]]+)?\]\s*/, "");
+        return {
+            type: "projection",
+            id: evt.id,
+            timestamp: evt.timestamp,
+            source: "sms",
+            label: "短信",
+            message: stripped || content,
+        };
     }
 
     // Custom app timeline events.

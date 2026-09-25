@@ -5,6 +5,7 @@ export type IconId =
   | "photos"
   | "weverse"
   | "lysn"
+  | "sms"
   | "diary"
   | "music"
   | "reading"
@@ -66,7 +67,7 @@ export const PAGE_2_DEFAULT: IconId[] = [
 ];
 
 // 第三页默认图标：右半边 2×2 排布（左半边留给日历组件），位置见 createDefaultDesktopIconLayout
-export const PAGE_3_DEFAULT: IconId[] = ["qa", "resource_hub"];
+export const PAGE_3_DEFAULT: IconId[] = ["qa", "resource_hub", "sms"];
 
 export const DOCK_DEFAULT: IconId[] = ["settings", "theme", "resources", "characters"];
 
@@ -75,6 +76,7 @@ export const ICONS: Record<IconId, IconMeta> = {
   photos: { id: "photos", label: "照片", tone: "var(--c-icon-rose)", placeholder: false },
   weverse: { id: "weverse", label: "Weverse", tone: "var(--c-icon-teal)", placeholder: false },
   lysn: { id: "lysn", label: "LYSN", tone: "#709be5", placeholder: false },
+  sms: { id: "sms", label: "信息", tone: "#34c759", placeholder: false },
   diary: { id: "diary", label: "手记", tone: "var(--c-icon-violet)", placeholder: false },
   music: { id: "music", label: "\u97F3\u4E50", tone: "var(--c-icon-coral)", placeholder: false },
   reading: { id: "reading", label: "\u9605\u8BFB", tone: "var(--c-icon-amber)", placeholder: false },

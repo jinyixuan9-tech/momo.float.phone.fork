@@ -16,6 +16,8 @@ import { clearPhoneSnapshot, loadPhoneSnapshot, savePhoneSnapshot } from "@/lib/
 import { formatChatUiTime } from "@/lib/chat-time";
 import { CheckPhoneDebugErrorCard } from "./checkphone-debug-error-card";
 import { normalizeBilingualTextInput, splitBilingualText } from "@/lib/bilingual-text";
+import { SMS_UPDATED_EVENT, getSmsSenderPhone, loadSmsState } from "@/lib/sms-storage";
+import { resolveUserIdentity } from "@/lib/settings-storage";
 
 type CheckPhoneMessagesPageProps = {
   character: Character;
@@ -42,6 +44,64 @@ function getMessagesListPlainText(text: string): string {
   return splitBilingualText(normalized)?.original ?? normalized;
 }
 
+
+function mergeNativeSmsIntoCheckPhone(character: Character, payload: CheckPhoneMessagesPayload | null): CheckPhoneMessagesPayload | null {
+  const sms = loadSmsState();
+  const related = sms.threads
+    .filter(thread => thread.characterId === character.id && sms.messages.some(message => message.threadId === thread.id))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!related.length) return payload;
+
+  const real = related.find(thread => thread.senderIdentityId === "real");
+  const virtuals = related
+    .filter(thread => thread.senderIdentityId !== "real")
+    .sort((a, b) => {
+      // Prefer a currently meaningful small-number thread without letting all aliases crowd the 10-row view.
+      const aWeight = (a.blockedByCharacter ? 3 : 0) + (a.recognition === "confirmed" ? 2 : a.recognition === "suspected" ? 1 : 0);
+      const bWeight = (b.blockedByCharacter ? 3 : 0) + (b.recognition === "confirmed" ? 2 : b.recognition === "suspected" ? 1 : 0);
+      return bWeight - aWeight || b.updatedAt - a.updatedAt;
+    })
+    .slice(0, real ? 2 : 3);
+  const selected = [...(real ? [real] : []), ...virtuals].slice(0, 3);
+  const identityName = resolveUserIdentity(character.id, "sms")?.name || "用户";
+  const nativeThreads: CheckPhoneMessageThread[] = selected.map(thread => {
+    const phone = getSmsSenderPhone(thread, sms);
+    const known = thread.senderIdentityId === "real" || thread.recognition === "confirmed";
+    const sender = known ? `${identityName}${phone && phone !== "我的号码" ? ` · ${phone}` : ""}` : phone;
+    const messages = sms.messages
+      .filter(message => message.threadId === thread.id)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(-10)
+      .map(message => ({
+        id: `native_${message.id}`,
+        text: message.original,
+        timeLabel: new Date(message.createdAt).toISOString(),
+        direction: message.sender === "character" ? "outgoing" as const : "incoming" as const,
+      }));
+    const last = messages[messages.length - 1];
+    return {
+      id: `native_sms_${thread.id}`,
+      sender,
+      preview: last?.text || "短信",
+      timeLabel: last?.timeLabel || new Date(thread.updatedAt).toISOString(),
+      kind: "personal",
+      unread: false,
+      messages,
+    };
+  });
+
+  const generated = (payload?.threads || []).filter(thread => !thread.id.startsWith("native_sms_"));
+  // The Check Phone Messages page remains a 10-thread *view*, not the character's entire inbox.
+  // User-linked real data gets 1–3 reserved slots; at least 7 remain available for the AI-generated phone world.
+  const merged = [...nativeThreads, ...generated].slice(0, 10);
+  return {
+    headerTitle: payload?.headerTitle || "MSG_LINK",
+    headerSubtitle: payload?.headerSubtitle || "通知与短信",
+    featuredThreadId: payload?.featuredThreadId,
+    threads: merged,
+  };
+}
+
 export function CheckPhoneMessagesPage({ character, onBack }: CheckPhoneMessagesPageProps) {
   const [snapshot, setSnapshot] = useState<CheckPhoneSnapshot<CheckPhoneMessagesPayload> | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
@@ -54,6 +114,13 @@ export function CheckPhoneMessagesPage({ character, onBack }: CheckPhoneMessages
   const [debugParseError, setDebugParseError] = useState<string | null>(null);
   const [debugNormalizeError, setDebugNormalizeError] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [smsRevision, setSmsRevision] = useState(0);
+
+  useEffect(() => {
+    const onSms = () => setSmsRevision(value => value + 1);
+    window.addEventListener(SMS_UPDATED_EVENT, onSms);
+    return () => window.removeEventListener(SMS_UPDATED_EVENT, onSms);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +205,10 @@ export function CheckPhoneMessagesPage({ character, onBack }: CheckPhoneMessages
 
   const [searchQuery, setSearchQuery] = useState("");
 
-  const payload = snapshot?.payload ?? null;
+  const payload = useMemo(
+    () => mergeNativeSmsIntoCheckPhone(character, snapshot?.payload ?? null),
+    [character, snapshot, smsRevision],
+  );
   const allThreads = payload?.threads ?? [];
   const threads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

@@ -46,6 +46,7 @@ const MDI_PATHS: Record<IconId, string> = {
   photos: mdiFlower,
   weverse: mdiAccountGroup,
   lysn: mdiMessageProcessing,
+  sms: mdiMessageProcessing,
   diary: mdiBookOpenPageVariant,
   music: mdiMusic,
   reading: mdiBookOpenVariant,
