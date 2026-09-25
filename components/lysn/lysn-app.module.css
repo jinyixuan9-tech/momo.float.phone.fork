@@ -62,13 +62,7 @@
 .quoteBubble span{font-size:11px;font-weight:650}.quoteBubble p{margin:7px 0 8px;color:#87848c;font-size:12px;white-space:pre-wrap}
 .quoteBubble small{display:block;border-top:1px dashed #ded8e5;padding-top:8px;color:#9663cf;font-size:12px;white-space:pre-wrap}
 .stackWrap{display:flex;align-items:center;gap:12px;margin:4px 0 8px}
-.photoStack{position:relative;width:116px;height:147px;border:0;background:transparent;padding:0;flex:none;cursor:pointer}
-.photoStack .stackBack,.photoStack .stackMiddle,.photoStack>img,.photoStack>.fallback{position:absolute;width:100px;height:136px;border-radius:9px;box-shadow:0 3px 8px #0002;object-fit:cover}
-.photoStack .stackBack{right:0;top:7px;background:#997ca8;transform:rotate(8deg)}
-.photoStack .stackMiddle{right:5px;top:4px;background:#dbcce9;transform:rotate(4deg)}
-.photoStack>img,.photoStack>.fallback{left:0;top:0;background:white}
-.stackToggle{border:0!important;background:#828e9f96!important;border-radius:15px;padding:4px 8px;color:white;font-size:11px!important;white-space:nowrap}
-.photoExpanded{display:flex;flex-direction:column;align-items:flex-start;gap:8px}.photoExpanded>button:not(.stackToggle){border:0;background:transparent;padding:0;max-width:100%}.photoExpanded img{max-width:200px;max-height:245px;border-radius:10px;object-fit:contain}
+.photoExpanded{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
 .detailsScroll,.libraryScroll{flex:1;min-height:0;overflow-y:auto;padding:19px 18px 36px;background:#f5f7fc;color:#211e27}
 .detailsScroll h3{margin:27px 4px 11px;font-size:13px;font-weight:600}
 .detailsCard{padding:18px 16px;border-radius:20px;background:#fff;box-shadow:0 2px 11px #34224908}
@@ -365,3 +359,24 @@
 .app .photoBubbleOnly .photoButton{line-height:0;border-radius:11px;overflow:hidden}
 .app .photoBubbleOnly .photo{display:block;margin:0;border-radius:11px}
 .app .legacyPhotoCaption{margin-top:7px}
+/* Image messages have rounded image corners, with no surrounding white bubble. */
+.app .photoBubbleOnly{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
+.app .photoBubbleOnly .photoButton{border-radius:12px;overflow:hidden}
+.app .photoBubbleOnly .photo{border-radius:12px}
+/* Keep the title centered in the screen, independently of the extra search control. */
+.app .chatHeader{border:0;border-bottom:1px solid #e8e5ed;border-radius:0 0 19px 19px;box-shadow:none;overflow:hidden}
+.chatHeader .chatTitle{position:absolute;top:var(--page-header-safe-top,48px);bottom:8px;left:50%;display:flex;justify-content:center;align-items:center;flex-direction:column;gap:2px;max-width:calc(100% - 170px);transform:translateX(-50%);pointer-events:none;white-space:nowrap}
+.chatTitle strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chatHeader .chatHeaderActions{margin-left:auto}
+/* Every layer of the deck renders its own photo; only the front card accepts a swipe. */
+.app .stackWrap{display:flex;align-items:center;gap:12px;margin:4px 0 8px}
+.photoDeck{position:relative;flex:none;width:132px;height:159px;touch-action:pan-y;user-select:none}
+.photoDeck .photoCard{position:absolute;top:0;left:0;display:block;width:110px;height:145px;padding:0;overflow:hidden;border:0;border-radius:11px;background:#f2edf8;box-shadow:0 3px 9px #33284427;transition:transform .23s ease,box-shadow .23s ease;touch-action:pan-y;cursor:grab}
+.photoDeck .photoCard:active{cursor:grabbing}
+.photoCard img,.photoCard .fallback{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.photoDeckControls{display:flex;align-items:flex-start;flex-direction:column;gap:7px;color:#8f879a;font-size:calc(10px*var(--app-text-scale,1))}
+.photoViewAll{padding:5px 8px;border:0;border-radius:12px;background:#ede7f5;color:#735890;font-size:calc(10px*var(--app-text-scale,1))}
+.photoExpandedGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-width:225px}
+.photoExpandedGrid button{width:100%;aspect-ratio:4/5;padding:0;overflow:hidden;border:0;border-radius:10px;background:#f1edf7}
+.photoExpandedGrid img,.photoExpandedGrid .fallback{display:block;width:100%;height:100%;object-fit:cover}
+.photoExpanded>.photoViewAll{margin-top:8px}
