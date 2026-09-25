@@ -1258,8 +1258,28 @@ function GeneratedImagePromptDialog({
 function ChatPhotoDeck({ messages, onUpdate, characterId }: { messages: ChatMessage[]; onUpdate?: (updated: ChatMessage) => void; characterId?: string }) {
     const [active, setActive] = useState(0);
     const [expanded, setExpanded] = useState(false);
+    const [dragX, setDragX] = useState(0);
+    const [direction, setDirection] = useState<1 | -1>(1);
+    const [flipping, setFlipping] = useState<1 | -1 | null>(null);
     const startX = useRef<number | null>(null);
+    const startY = useRef<number | null>(null);
+    const flipTimer = useRef<number | null>(null);
+    const suppressClick = useRef(false);
+    useEffect(() => () => { if (flipTimer.current !== null) window.clearTimeout(flipTimer.current); }, []);
     const current = Math.min(active, messages.length - 1);
+    const canFlip = (step: 1 | -1) => current + step >= 0 && current + step < messages.length;
+    const flip = (step: 1 | -1) => {
+        if (flipping || !canFlip(step)) { setDragX(0); return; }
+        setDirection(step);
+        setFlipping(step);
+        setDragX(step === 1 ? -220 : 220);
+        flipTimer.current = window.setTimeout(() => {
+            setActive(index => Math.max(0, Math.min(messages.length - 1, index + step)));
+            setDragX(0);
+            setFlipping(null);
+            flipTimer.current = null;
+        }, 230);
+    };
     if (expanded) return <div className="chat-photo-deck-expanded" onClick={event => event.stopPropagation()}>
         <div className="chat-photo-deck-grid">{messages.map((msg, i) => <div className="chat-photo-deck-item" key={msg.id}>
             <span className="chat-photo-deck-number">{i + 1}/{messages.length}</span>
@@ -1268,22 +1288,57 @@ function ChatPhotoDeck({ messages, onUpdate, characterId }: { messages: ChatMess
         <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(false)}>收起照片</button>
     </div>;
     return <div className="chat-photo-deck" role="group" aria-label={`${messages.length} 张照片，左右滑动翻页`} onClick={event => event.stopPropagation()}>
-        <div className="chat-photo-deck-stack" onTouchStart={event => { startX.current = event.touches[0]?.clientX ?? null; }} onTouchEnd={event => {
-            if (startX.current === null) return;
-            const delta = (event.changedTouches[0]?.clientX ?? startX.current) - startX.current;
-            if (Math.abs(delta) > 35) setActive(value => Math.max(0, Math.min(messages.length - 1, value + (delta < 0 ? 1 : -1))));
-            startX.current = null;
-        }}>
-            {current + 2 < messages.length && <div className="chat-photo-deck-back chat-photo-deck-back-two" aria-hidden="true" />}
-            {current + 1 < messages.length && <div className="chat-photo-deck-back" aria-hidden="true" />}
-            <div className="chat-photo-deck-front" key={messages[current].id}>
-                <ImageBubble msg={messages[current]} onUpdate={onUpdate} characterId={characterId} />
-            </div>
+        <div className="chat-photo-deck-stack">
+            {Array.from({ length: Math.min(3, messages.length) }, (_, depth) => {
+                const index = current + depth * direction;
+                if (index < 0 || index >= messages.length) return null;
+                const front = depth === 0;
+                const x = front ? dragX : flipping && depth === 1 ? 0 : depth * 6;
+                const y = front ? 0 : flipping && depth === 1 ? 0 : depth * 5;
+                const angle = front ? dragX / 15 : flipping && depth === 1 ? 0 : depth * 3;
+                return <div key={messages[index].id} className="chat-photo-deck-card"
+                    aria-hidden={!front} style={{ zIndex: messages.length - depth, transform: `translate(${x}px,${y}px) rotate(${angle}deg)`, transition: front && startX.current !== null && !flipping ? "none" : undefined, pointerEvents: front ? "auto" : "none" }}
+                    onClickCapture={front ? event => { if (suppressClick.current) { event.stopPropagation(); event.preventDefault(); suppressClick.current = false; } } : undefined}
+                    onPointerDown={front ? event => {
+                        if (flipping) return;
+                        startX.current = event.clientX; startY.current = event.clientY; suppressClick.current = false;
+                        // Leave text-only cards and the last picture's click on the inner preview.
+                        if (messages[index].mediaUrl && canFlip(1)) event.currentTarget.setPointerCapture(event.pointerId);
+                    } : undefined}
+                    onPointerMove={front ? event => {
+                        if (startX.current === null || flipping) return;
+                        const dx = Math.max(-150, Math.min(150, event.clientX - startX.current));
+                        const dy = Math.abs(event.clientY - (startY.current ?? event.clientY));
+                        if (dy > Math.abs(dx)) { setDragX(0); return; }
+                        const step = dx < 0 ? 1 : -1;
+                        setDragX(canFlip(step) ? dx : 0);
+                        if (Math.abs(dx) > 8 && canFlip(step)) setDirection(step);
+                    } : undefined}
+                    onPointerUp={front ? event => {
+                        if (startX.current === null) return;
+                        const dx = event.clientX - startX.current;
+                        const dy = Math.abs(event.clientY - (startY.current ?? event.clientY));
+                        startX.current = null; startY.current = null;
+                        if (Math.abs(dx) > 8 || dy > 8) suppressClick.current = true;
+                        if (dy > 8 && dy > Math.abs(dx)) { setDragX(0); return; }
+                        if (Math.abs(dx) > 28) { suppressClick.current = true; flip(dx < 0 ? 1 : -1); }
+                        else {
+                            setDragX(0);
+                            if (Math.abs(dx) < 8 && dy < 8 && messages[index].mediaUrl && canFlip(1) && event.currentTarget.hasPointerCapture(event.pointerId)) {
+                                suppressClick.current = true;
+                                flip(1);
+                            }
+                        }
+                    } : undefined}
+                    onPointerCancel={front ? () => { startX.current = null; startY.current = null; setDragX(0); } : undefined}>
+                    <ImageBubble msg={messages[index]} onUpdate={onUpdate} characterId={characterId} onDeckTap={front && canFlip(1) ? () => flip(1) : undefined} />
+                </div>;
+            })}
         </div>
         <div className="chat-photo-deck-controls">
-            <button type="button" disabled={current === 0} aria-label="上一张" onClick={() => setActive(current - 1)}>‹</button>
+            <button type="button" disabled={current === 0 || !!flipping} aria-label="上一张" onClick={() => flip(-1)}>‹</button>
             <span>{current + 1}/{messages.length}</span>
-            <button type="button" disabled={current === messages.length - 1} aria-label="下一张" onClick={() => setActive(current + 1)}>›</button>
+            <button type="button" disabled={current === messages.length - 1 || !!flipping} aria-label="下一张" onClick={() => flip(1)}>›</button>
             <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(true)}>展开全部</button>
         </div>
     </div>;
@@ -1293,10 +1348,12 @@ function ImageBubble({
     msg,
     onUpdate,
     characterId,
+    onDeckTap,
 }: {
     msg: ChatMessage;
     onUpdate?: (updated: ChatMessage) => void;
     characterId?: string;
+    onDeckTap?: () => void;
 }) {
     const d = msg.mediaData;
     const label = d?.label || "照片";
@@ -1412,7 +1469,7 @@ function ImageBubble({
                 <div
                     className="chat-photo-card chat-photo-card--image rounded-none"
                     style={{ cursor: "pointer" }}
-                    onClick={e => { e.stopPropagation(); setShowPreview(true); }}
+                    onClick={e => { e.stopPropagation(); if (onDeckTap) onDeckTap(); else setShowPreview(true); }}
                 >
                     <img
                         src={resolvedUrl}

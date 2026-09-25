@@ -2452,6 +2452,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return roundReasoning;
         };
         const imageReplacementTasks: Promise<unknown>[] = [];
+        let photoResolutionQueue: Promise<unknown> = Promise.resolve();
         const currentStateByCharacter = new Map<string, StateValue[]>();
         const getCurrentStateForCharacter = (characterId: string): StateValue[] => {
             const cached = currentStateByCharacter.get(characterId);
@@ -2469,7 +2470,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const responseBatchId = createResponseBatchId();
             const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
             const parts = stripInvalidStickerParts(rawParts, r.characterId);
-            const multiPhotoReply = parts.filter(part => part.mediaType === "image").length > 1;
             let attachedState = false;
             let savedAnyPart = false;
             for (const part of parts) {
@@ -2612,9 +2612,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     senderName: r.characterName,
                 }, guard);
                 throwIfGenerationStopped(guard);
-                if (multiPhotoReply && isPendingChatGeneratedImageMessage(draft)) draft.mediaData = { ...draft.mediaData, imageGenerationStatus: "text" };
                 const msg = pushChatMessage(draft);
-                if (!multiPhotoReply) imageReplacementTasks.push(scheduleGeneratedImageReplacement(msg, r.characterId, guard));
+                if (isPendingChatGeneratedImageMessage(msg)) {
+                    photoResolutionQueue = photoResolutionQueue.then(() => scheduleGeneratedImageReplacement(msg, r.characterId, guard));
+                    imageReplacementTasks.push(photoResolutionQueue);
+                }
                 if (attachHere) attachedState = true;
                 savedAnyPart = true;
                 msgsSetter(prev => [...prev, msg]);
@@ -2948,8 +2950,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         // Build rich-media drafts first, then publish them in the same order as the UI display.
         const messageDrafts: Array<{ draft: AssistantMessageDraft; afterPublish?: (message: ChatMessage) => Promise<unknown> | void }> = [];
-        const multiPhotoReply = filteredParts.filter(part => part.mediaType === "image").length > 1;
         const imageReplacementTasks: Promise<unknown>[] = [];
+        let photoResolutionQueue: Promise<unknown> = Promise.resolve();
         // 面板挂到第一条能显示它的消息上；全是拍一拍等系统样式时补空消息驮面板
         let metaIdx = filteredParts.findIndex(canCarryFoldedPanel);
         if (metaIdx === -1 && (statusPanel || innerMonologue || stateValues.length > 0)) {
@@ -2976,11 +2978,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 freshStateValues: idx === metaIdx ? freshStateValues : undefined,
             }, options);
             throwIfGenerationStopped(options);
-            if (multiPhotoReply && isPendingChatGeneratedImageMessage(draft)) draft.mediaData = { ...draft.mediaData, imageGenerationStatus: "text" };
             messageDrafts.push({
                 draft,
-                afterPublish: !multiPhotoReply && isPendingChatGeneratedImageMessage(draft)
-                    ? (message) => scheduleGeneratedImageReplacement(message, session.contactId, options)
+                afterPublish: isPendingChatGeneratedImageMessage(draft)
+                    ? (message) => {
+                        photoResolutionQueue = photoResolutionQueue.then(() => scheduleGeneratedImageReplacement(message, session.contactId, options));
+                        return photoResolutionQueue;
+                    }
                     : afterPublishEffects[idx],
             });
         }
@@ -3629,6 +3633,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const latestMessages = loadChatMessages(session.id);
             if (session.isGroup) {
                 const streamedImageReplacementTasks: Promise<unknown>[] = [];
+                let streamedPhotoQueue: Promise<unknown> = Promise.resolve();
                 // 每轮 LLM 调用的思维链：中间轮挂到该轮首条气泡，最终轮传给 processGroupParts
                 let pendingGroupReasoning: string | undefined;
                 const results = await generateGroupChatCompletion(session, latestMessages, {
@@ -3674,7 +3679,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const previousState = getLatestCharacterStateValues(senderInfo.characterId);
                         const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(text, previousState);
                         const parts = stripInvalidStickerParts(rawParts, senderInfo.characterId);
-                        const multiPhotoReply = parts.filter(part => part.mediaType === "image").length > 1;
                         let attachedState = false;
                         let savedAnyPart = false;
                         for (const part of parts) {
@@ -3700,9 +3704,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 senderName: senderInfo.characterName,
                             }, generationGuard);
                             throwIfGenerationStopped(generationGuard);
-                            if (multiPhotoReply && isPendingChatGeneratedImageMessage(draft)) draft.mediaData = { ...draft.mediaData, imageGenerationStatus: "text" };
                             const msg = pushChatMessage(draft);
-                            if (!multiPhotoReply) streamedImageReplacementTasks.push(scheduleGeneratedImageReplacement(msg, senderInfo.characterId, generationGuard));
+                            if (isPendingChatGeneratedImageMessage(msg)) {
+                                streamedPhotoQueue = streamedPhotoQueue.then(() => scheduleGeneratedImageReplacement(msg, senderInfo.characterId, generationGuard));
+                                streamedImageReplacementTasks.push(streamedPhotoQueue);
+                            }
                             attachedState = true;
                             savedAnyPart = true;
                             setMessages(prev => [...prev, msg]);
