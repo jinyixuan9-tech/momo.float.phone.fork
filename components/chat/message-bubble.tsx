@@ -1281,17 +1281,16 @@ function ChatPhotoDeck({ messages, onUpdate, characterId }: { messages: ChatMess
         }, 230);
     };
     if (expanded) return <div className="chat-photo-deck-expanded" onClick={event => event.stopPropagation()}>
-        <div className="chat-photo-deck-grid">{messages.map((msg, i) => <div className="chat-photo-deck-item" key={msg.id}>
-            <span className="chat-photo-deck-number">{i + 1}/{messages.length}</span>
+        <div className="chat-photo-deck-grid">{messages.map(msg => <div className="chat-photo-deck-item" key={msg.id}>
             <ImageBubble msg={msg} onUpdate={onUpdate} characterId={characterId} />
         </div>)}</div>
         <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(false)}>收起照片</button>
     </div>;
     return <div className="chat-photo-deck" role="group" aria-label={`${messages.length} 张照片，左右滑动翻页`} onClick={event => event.stopPropagation()}>
-        <div className="chat-photo-deck-stack">
-            {Array.from({ length: Math.min(3, messages.length) }, (_, depth) => {
-                const index = current + depth * direction;
-                if (index < 0 || index >= messages.length) return null;
+        <div className="chat-photo-deck-stack" style={{ width: Math.min(204, 184 + messages.length * 6) }}>
+            {messages.map((_, depth) => {
+                // Keep every remaining card visible, even at the end of the stack.
+                const index = (current + depth * direction + messages.length * (depth + 1)) % messages.length;
                 const front = depth === 0;
                 const x = front ? dragX : flipping && depth === 1 ? 0 : depth * 6;
                 const y = front ? 0 : flipping && depth === 1 ? 0 : depth * 5;
@@ -1336,10 +1335,7 @@ function ChatPhotoDeck({ messages, onUpdate, characterId }: { messages: ChatMess
             })}
         </div>
         <div className="chat-photo-deck-controls">
-            <button type="button" disabled={current === 0 || !!flipping} aria-label="上一张" onClick={() => flip(-1)}>‹</button>
-            <span>{current + 1}/{messages.length}</span>
-            <button type="button" disabled={current === messages.length - 1 || !!flipping} aria-label="下一张" onClick={() => flip(1)}>›</button>
-            <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(true)}>展开全部</button>
+            <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(true)}>展开全部 {messages.length}</button>
         </div>
     </div>;
 }

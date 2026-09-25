@@ -29,7 +29,6 @@ import { buildChatProfileAutonomyPrompt, isExplicitChatProfileRequestTurn } from
 import { buildWeverseProfileAutonomyPrompt, isExplicitWeverseProfileRequestTurn } from "./weverse-profile-autonomy";
 import { lysnProfilePrompt, explicitLysnProfileRequest } from "./lysn-profile-autonomy";
 import { lysnPrivateChatPrompt } from "./lysn-identity";
-import { smsChatContext } from "./sms-continuity";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -354,6 +353,8 @@ export type DebugPromptRequestOptions = {
 };
 
 type ChatPromptBuildOptions = {
+    /** Per-call output contract; appended only to this request, never persisted as conversation history. */
+    callFormatInstruction?: string;
     followUpCount?: number;
     followUpDelay?: number;
     timedWakeElapsedMinutes?: number;
@@ -1981,6 +1982,9 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
+    if (options?.callFormatInstruction) {
+        llmMessages.push({ role: "system", content: options.callFormatInstruction });
+    }
     const avatarChangeIntent = !session.isGroup
         ? findUserAvatarChangeIntent(historyForPrompt, session.id, character.id)
         : null;
@@ -2022,8 +2026,6 @@ export async function buildChatPromptMessages(
         if (lysnAutonomy) llmMessages.push({ role: "system", content: lysnAutonomy });
         const lysnIdentity = lysnPrivateChatPrompt(character.id);
         if (lysnIdentity) llmMessages.push({ role: "system", content: lysnIdentity });
-        const smsContinuity = smsChatContext(character.id);
-        if (smsContinuity) llmMessages.push({ role: "system", content: smsContinuity });
     }
     if (promptProfile?.output === "plain_text") {
         llmMessages.push({

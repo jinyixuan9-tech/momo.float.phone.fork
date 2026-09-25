@@ -5295,23 +5295,20 @@
 .call-subtitle-play:disabled { opacity: .55; }
 
 /* Like LYSN, every visible stack layer is an actual photo that follows the swipe. */
-.chat-photo-deck { width: 204px; padding: 1px 7px 5px 0; }
+.chat-photo-deck { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 1px 7px 5px 0; }
 .chat-photo-deck-stack { width: 204px; height: 255px; position: relative; touch-action: pan-y; user-select: none; }
 .chat-photo-deck-card { position: absolute; top: 0; left: 0; width: 180px; height: 240px; border-radius: 12px; overflow: hidden; background: #f2f1f7; box-shadow: 0 3px 9px #33284427; transition: transform .23s ease,box-shadow .23s ease; touch-action: pan-y; cursor: grab; }
 .chat-photo-deck-card:active { cursor: grabbing; }
 .chat-photo-deck-card .chat-photo-card, .chat-photo-deck-item .chat-photo-card { width: 100%; height: 100%; min-width: 0; aspect-ratio: auto; max-width: none; }
 .chat-photo-deck-card .chat-photo-card-image, .chat-photo-deck-item .chat-photo-card-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; pointer-events: none; }
 .chat-photo-deck-card .chat-generated-image-retry-stack { height: 100%; }
-.chat-photo-deck-controls { display: flex; gap: 5px; align-items: center; justify-content: space-between; font-size: calc(11px * var(--app-text-scale, 1)); padding: 3px 1px; }
-.chat-photo-deck-controls button { color: inherit; padding: 2px 5px; border-radius: 5px; }
-.chat-photo-deck-controls button:disabled { opacity: .35; }
-.chat-photo-deck-toggle { font-size: calc(10px * var(--app-text-scale, 1)); text-decoration: underline; }
-.chat-photo-deck-expanded { max-width: min(74vw, 280px); }
-.chat-photo-deck-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.chat-photo-deck-item { position: relative; height: 145px; overflow: hidden; background: #f2f1f7; border-radius: 9px; }
+.chat-photo-deck-controls { display: flex; align-items: center; flex-shrink: 0; }
+.chat-photo-deck-toggle { padding: 6px 10px; border: 0; border-radius: 999px; background: #eee8f6; color: #705985; font-size: calc(10px * var(--app-text-scale, 1)); white-space: nowrap; }
+.chat-photo-deck-expanded { width: min(74vw, 204px); }
+.chat-photo-deck-grid { display: flex; flex-direction: column; gap: 8px; }
+.chat-photo-deck-item { position: relative; width: 180px; height: 240px; overflow: hidden; background: #f2f1f7; border-radius: 12px; }
 .chat-photo-deck-item .chat-generated-image-retry-stack { height: 100%; }
-.chat-photo-deck-number { position: absolute; right: 3px; top: 3px; z-index: 2; padding: 2px 4px; border-radius: 5px; color: white; background: #0008; font-size: 10px; }
-.chat-photo-deck-expanded > .chat-photo-deck-toggle { margin-top: 7px; }
+.chat-photo-deck-expanded > .chat-photo-deck-toggle { margin-top: 8px; }
 
 /* ── 左上角返回键（缩小通话为悬浮窗） ── */
 .call-back-btn {
@@ -7397,4 +7394,75 @@
   border-radius: 1px;
   background: currentColor;
   animation: chat-stream-cursor-blink 1s steps(2, start) infinite;
+}
+
+/* Call preview design: spoken lines are separate from actions and audio stays opt-in. */
+.voicecall-dark.call-bg-default {
+  background: radial-gradient(ellipse 74% 38% at 50% 31%, #353938 0%, #232625 47%, #111413 100%);
+}
+.voicecall-dark .voicecall-portrait-wrap { position: relative; isolation: isolate; }
+.voicecall-dark .voicecall-portrait-wrap::before {
+  content: ""; position: absolute; z-index: -1; width: 230px; height: 230px;
+  border-radius: 50%; border: 1px solid #ffffff18;
+  box-shadow: 0 0 0 35px #ffffff05, 0 0 90px 13px #e8f4e61c;
+  pointer-events: none;
+}
+.voicecall-dark .voicecall-avatar { border-color: #ffffff55; box-shadow: 0 0 38px #f7fff025; }
+.voicecall-dark .call-subtitle[data-role="user"],
+.videocall-redesign .call-subtitle[data-role="user"] {
+  background: #e2ebe02b; border: 1px solid #ffffff32; border-radius: 17px 17px 5px 17px;
+  backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
+}
+.call-speech-row { display: flex; align-items: flex-start; align-self: flex-start; gap: 8px; width: fit-content; max-width: 96%; flex-shrink: 0; }
+.call-speech-audio {
+  flex: 0 0 29px; display: grid; place-items: center; width: 29px; height: 29px;
+  margin-top: 6px; padding: 0; border-radius: 50%; border: 1px solid #ffffff34;
+  background: #07090ab8; color: #fff; backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px); box-shadow: 0 3px 10px #0004;
+  touch-action: manipulation;
+}
+.call-speech-audio:disabled { opacity: .4; }
+.call-speech-bubble {
+  min-width: 0; padding: 10px 13px; border: 1px solid #ffffff20;
+  border-radius: 18px 18px 18px 5px; background: #111414ba;
+  color: #fff; box-shadow: 0 5px 19px #0002;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  font-size: calc(13px * var(--app-text-scale, 1)); line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.call-speech-translate { margin-left: 7px; padding: 2px 6px; border: 0; border-radius: 8px; background: #ffffff28; color: #fff; font-size: calc(10px * var(--app-text-scale, 1)); }
+.call-speech-translation { margin-top: 8px; padding-top: 8px; border-top: 1px solid #ffffff2c; color: #f0f2f0d9; font-size: calc(12px * var(--app-text-scale, 1)); }
+.call-reroll-btn {
+  flex: 0 0 30px; width: 30px; height: 30px; display: grid; place-items: center;
+  padding: 0; border: 0; border-radius: 50%; color: #fff; background: #ffffff2c;
+  touch-action: manipulation;
+}
+.call-reroll-btn:disabled { opacity: .35; }
+.call-voice-actions { position: relative; z-index: 15; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 4px 18px; }
+.call-voice-actions .call-voice-summon { display: grid; place-items: center; width: 34px; height: 34px; margin: 0; padding: 0; font-size: 21px; }
+.call-reply-error { z-index: 16; max-width: 85%; margin: 5px auto; padding: 6px 11px; border-radius: 12px; background: #16191bd9; color: #fff; font-size: calc(11px * var(--app-text-scale, 1)); }
+.videocall-redesign .videocall-bg-blur { filter: blur(18px) brightness(.57); }
+.videocall-redesign .videocall-main-frame-hidden { display: none; }
+.videocall-redesign .call-subtitles-log {
+  top: 30%; bottom: calc(max(30px, env(safe-area-inset-bottom, 0px)) + 192px);
+  max-height: none; background: transparent; border: 0; backdrop-filter: none;
+  -webkit-backdrop-filter: none; padding: 8px 16px; gap: 12px;
+}
+.videocall-redesign .call-speech-bubble { background: #1b1c1c78; border-color: #ffffff31; }
+.call-video-action {
+  align-self: center; max-width: 92%; flex-shrink: 0; padding: 5px 10px;
+  color: #ffffffe0; font-style: italic; font-size: calc(12px * var(--app-text-scale, 1));
+  line-height: 1.6; text-align: center; text-shadow: 0 2px 8px #000a;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.call-video-action[data-role="user"] { color: #ffffffbd; }
+.videocall-redesign .call-text-input-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.call-compose-modes { display: flex; align-items: center; gap: 5px; }
+.call-compose-modes button { border: 1px solid #ffffff2b; border-radius: 16px; background: #ffffff21; padding: 5px 10px; color: #fff; font-size: calc(11px * var(--app-text-scale, 1)); }
+.call-compose-modes button.selected { background: #ffffffdb; color: #242525; }
+.videocall-redesign .call-text-input-shell { background: #15171996; border-color: #ffffff40; }
+.videocall-redesign .videocall-controls-gradient { background: linear-gradient(to top, #0c1010e8, #0c10105b 85%, transparent); }
+.voicecall-dark .call-text-send-btn, .videocall-redesign .call-text-send-btn {
+  width: 32px; height: 32px; flex: 0 0 32px; background: #fff;
+  color: #192020; box-shadow: 0 2px 9px #0003;
 }

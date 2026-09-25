@@ -37,7 +37,8 @@ import {
 } from "@/lib/group-admin";
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { removeChatSessionCompletely } from "@/lib/chat-session-remove";
-import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
+import { triggerBlacklistReaction, triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
+import { clearRequestsForCharacter, dispatchFriendRequestUpdated } from "@/lib/friend-request-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { isAgentComputerConfigured } from "@/lib/agent-computer";
 import {
@@ -331,6 +332,7 @@ export function ChatSettingsPanel({
     const [backgroundImage, setBackgroundImage] = useState<string>(session.backgroundImage || "");
     const [alias, setAlias] = useState<string>(session.alias || "");
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
+    const [callAppearance, setCallAppearance] = useState<string>(session.callAppearance || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
     const [isPinned, setIsPinned] = useState(session.isPinned || false);
     // 仿真拉黑：拉黑期间用户发出的消息会被对方拒收（仿微信红色感叹号）
@@ -777,6 +779,15 @@ export function ChatSettingsPanel({
                 blacklistUserName: userLabel,
             },
         });
+
+        if (blocked) {
+            // Chat reconnect and SMS are parallel options: the AI may send a friend
+            // request, stay quiet, or later reach the user through native SMS.
+            triggerBlacklistReaction(session.contactId).catch(() => {});
+        } else {
+            clearRequestsForCharacter(session.contactId);
+            dispatchFriendRequestUpdated();
+        }
     };
 
     const handleClearHistory = () => {
@@ -1446,6 +1457,15 @@ export function ChatSettingsPanel({
                             <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVideoBackground, "videoBackground")} className="hidden" />
                         </label>
                     )}
+                    {!session.isGroup && <label className="menu-item">
+                        <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.voice} />
+                        <div className="menu-label-group"><span className="menu-label">我的通话形象</span><span className="menu-desc">关闭摄像头时显示在右上角；未设置则使用我的 Chat 头像</span></div>
+                        <div className="menu-right">
+                            {callAppearance && <><span className="menu-desc mr-1">已设置</span><button type="button" className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setCallAppearance(""); updateSession({ callAppearance: "" }); }}>清除</button></>}
+                            <ChevronRight size={16} />
+                        </div>
+                        <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setCallAppearance, "callAppearance")} className="hidden" />
+                    </label>}
                     <label className="menu-item">
                         <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
                         <div className="menu-label-group"><span className="menu-label">语音通话背景</span></div>

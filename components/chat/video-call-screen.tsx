@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ChatSession, ChatMessage, loadChatMessages, pushChatMessage, getLatestCharacterStateValues, resolveChatUserAvatar } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, loadChatMessages, pushChatMessage, deleteChatMessagesByIds, getLatestCharacterStateValues, resolveChatUserAvatar } from "@/lib/chat-storage";
 import { getStatusRegionConfig, isCustomStatusRegionActive } from "@/lib/chat-status-region";
-import type { StateValue } from "@/lib/chat-storage";
+import { RotateCcw } from "lucide-react";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
 import { parseAIResponse } from "@/lib/rich-message-parser";
 import { generateChatCompletion, flattenCompletionResult } from "@/lib/chat-engine";
@@ -14,8 +14,8 @@ import { resolveVoiceConfig, synthesizeSpeech, playAudioBlob, playAudioBlobViaMe
 import { isCallRecordingSupported, resolveCloudSttConfig } from "@/lib/stt-cloud";
 import { useHoldToTalk } from "./use-hold-to-talk";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
-import { BilingualTextBlock } from "./message-bubble";
-import { splitBilingualText } from "@/lib/bilingual-text";
+import { CallTranscriptBubble } from "./call-transcript-bubble";
+import { displayCallAction, originalCallSpeech, splitCallTranscript, VIDEO_CALL_FORMAT } from "@/lib/call-transcript";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
@@ -38,6 +38,7 @@ type SubtitleEntry = {
     id: string;
     role: "user" | "assistant";
     text: string;
+    kind: "speech" | "action";
 };
 
 type VideoCallScreenProps = {
@@ -53,13 +54,6 @@ type VideoCallScreenProps = {
     /** 点击悬浮窗：请求恢复为全屏通话界面 */
     onRestore?: () => void;
 };
-
-function stripBilingualForSpeech(text: string): string {
-    return text
-        .split("\n")
-        .map(line => splitBilingualText(line)?.original || line)
-        .join("\n");
-}
 
 // ── Component ───────────────────────────────────────
 
@@ -88,7 +82,9 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
     const [inputMode, setInputMode] = useState<"voice" | "text">(() => androidTextInputOnly ? "text" : "voice");
     const [typedText, setTypedText] = useState("");
+    const [composeKind, setComposeKind] = useState<"speech" | "action">("speech");
     const [bgImageResolved, setBgImageResolved] = useState<string | null>(null);
+    const [callAppearanceResolved, setCallAppearanceResolved] = useState<string | null>(null);
     const [cameraEnabled, setCameraEnabled] = useState(false);
     const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
     const [cameraError, setCameraError] = useState<string | null>(null);
@@ -107,6 +103,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     const interimTextRef = useRef<string>("");
     const sttWarningShownRef = useRef(false);
     const messagesRef = useRef<ChatMessage[]>([]);
+    const lastAssistantTurnIdsRef = useRef<string[]>([]);
     const cameraStreamRef = useRef<MediaStream | null>(null);
     const cameraEnabledRef = useRef<boolean>(false);
     const videoElRef = useRef<HTMLVideoElement | null>(null);
@@ -287,6 +284,16 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             });
         });
     }, [session.videoBackground]);
+    useEffect(() => {
+        const reference = session.callAppearance;
+        if (!reference) { setCallAppearanceResolved(null); return; }
+        if (/^(data:|https?:)/i.test(reference)) { setCallAppearanceResolved(reference); return; }
+        let cancelled = false;
+        import("@/lib/chat-asset-storage").then(({ getChatImageFromIndexedDB }) =>
+            getChatImageFromIndexedDB(reference).then(url => { if (!cancelled) setCallAppearanceResolved(url || null); })
+        );
+        return () => { cancelled = true; };
+    }, [session.callAppearance]);
 
     // ── Call timer ───────────────────────────────────
 
@@ -379,7 +386,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
 
     // ── AI response processing ──
 
-    const processAIResponse = useCallback((aiResponseText: string): { cleanParts: string[]; stateValues: StateValue[] } => {
+    const processAIResponse = useCallback((aiResponseText: string): SubtitleEntry[] => {
         const previousState = getLatestCharacterStateValues(session.contactId);
 
         const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(aiResponseText, previousState);
@@ -394,68 +401,79 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             !p.mediaType || !["voice_call", "video_call", "poke", "accept_red_packet", "decline_red_packet", "accept_transfer", "decline_transfer", "accept_payment_request", "decline_payment_request"].includes(p.mediaType)
         );
 
-        if (chatParts.length === 0 && (statusPanel || innerMonologue)) {
-            const aiMsg = pushChatMessage({
+        const displayParts = chatParts.flatMap(part => part.mediaType ? [{ ...part, callKind: "speech" as const }] :
+            splitCallTranscript(part.content, true).map(line => ({ ...part, content: line.kind === "action" ? `【动作】${line.text}` : line.text, callKind: line.kind })));
+        const saved: ChatMessage[] = [];
+        if (displayParts.length === 0 && (statusPanel || innerMonologue)) {
+            saved.push(pushChatMessage({
                 sessionId: session.id, role: "assistant", content: "",
                 statusPanel,
                 statusRegionMode,
                 innerMonologue, stateValues: stateValues.length > 0 ? stateValues : undefined,
                 freshStateValues,
-            });
-            messagesRef.current = [...messagesRef.current, aiMsg];
+            }));
         } else {
-            const newMsgs = chatParts.map((part, idx) =>
+            saved.push(...displayParts.map((part, idx) =>
                 pushChatMessage({
                     sessionId: session.id, role: "assistant", content: part.content,
                     mediaType: part.mediaType,
-                    mediaData: part.mediaData,
+                    mediaData: { ...part.mediaData, callLineKind: part.callKind },
                     statusPanel: idx === 0 && statusPanel ? statusPanel : undefined,
                     statusRegionMode: idx === 0 && statusPanel ? statusRegionMode : undefined,
                     innerMonologue: idx === 0 && innerMonologue ? innerMonologue : undefined,
                     stateValues: idx === 0 && stateValues.length > 0 ? stateValues : undefined,
                     freshStateValues: idx === 0 ? freshStateValues : undefined,
                 })
-            );
-            messagesRef.current = [...messagesRef.current, ...newMsgs];
+            ));
         }
-
-        const cleanParts = chatParts
-            .filter(p => !p.mediaType && p.content.trim())
-            .map(p => p.content);
-
-        return { cleanParts, stateValues };
+        messagesRef.current = [...messagesRef.current, ...saved];
+        lastAssistantTurnIdsRef.current = saved.map(message => message.id);
+        return saved.filter(message => !message.mediaType && message.content.trim()).map(message => ({
+            id: message.id, role: "assistant", kind: message.mediaData?.callLineKind || "speech",
+            text: message.mediaData?.callLineKind === "action" ? displayCallAction(message.content.replace(/^【动作】/, "")) : message.content,
+        }));
     }, [session.id, session.contactId]);
 
     // ── Full conversation turn ──────────────────────
 
-    const queueUserText = useCallback((text: string) => {
+    const queueUserText = useCallback((text: string, kind: "speech" | "action" = "speech") => {
         if (!text.trim() || stateRef.current === "ENDED") return;
-        const userMsg = pushChatMessage({ sessionId: session.id, role: "user", content: text.trim() });
+        const userMsg = pushChatMessage({ sessionId: session.id, role: "user", content: kind === "action" ? `【动作】${text.trim()}` : text.trim(), mediaData: { callLineKind: kind } });
         messagesRef.current = [...messagesRef.current, userMsg];
-        setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: text.trim() }]);
+        setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: text.trim(), kind }]);
         setQueuedTurns(count => count + 1);
         setInterimText("");
         setCallState("IDLE");
     }, [session.id]);
 
-    const runConversationTurn = useCallback(async () => {
+    const runConversationTurn = useCallback(async (reroll = false) => {
         setCallState("PROCESSING");
         setInterimText("");
         setReplyError(null);
+        const replacedIds = reroll ? [...lastAssistantTurnIdsRef.current] : [];
+        const discarded = new Set(replacedIds);
+        const history = reroll ? messagesRef.current.filter(message => !discarded.has(message.id)) : messagesRef.current;
 
         try {
             const frame = captureCameraFrame();
-            const aiResponseText = flattenCompletionResult(await generateChatCompletion(session, messagesRef.current, {
+            const aiResponseText = flattenCompletionResult(await generateChatCompletion(session, history, {
                 appTags: ["chat", "video"],
+                callFormatInstruction: VIDEO_CALL_FORMAT,
                 attachedImages: frame ? [frame] : undefined,
             }));
             if (stateRef.current === "ENDED") return;
 
-            const { cleanParts } = processAIResponse(aiResponseText);
-            const displayText = cleanParts.join("\n");
-            if (!displayText) { setCallState("IDLE"); return; }
-
-            setSubtitles(prev => [...prev, { id: `ai-${Date.now()}`, role: "assistant", text: displayText }]);
+            const newLines = processAIResponse(aiResponseText);
+            if (reroll && replacedIds.length) {
+                if (!lastAssistantTurnIdsRef.current.length) {
+                    lastAssistantTurnIdsRef.current = replacedIds;
+                    throw new Error("回复为空，请重试");
+                }
+                deleteChatMessagesByIds(session.id, replacedIds);
+                messagesRef.current = messagesRef.current.filter(message => !discarded.has(message.id));
+                replacedIds.forEach(id => subtitleAudioCacheRef.current.delete(id));
+            }
+            setSubtitles(prev => [...prev.filter(subtitle => !discarded.has(subtitle.id)), ...newLines]);
             setQueuedTurns(0);
             if (stateRef.current !== "ENDED") setCallState("IDLE");
         } catch (error: any) {
@@ -467,6 +485,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     }, [session, processAIResponse, captureCameraFrame]);
 
     const playSubtitle = useCallback(async (subtitle: SubtitleEntry) => {
+        if (playingSubtitleId === subtitle.id) { audioAbortRef.current?.(); return; }
         if (minimizedRef.current || stateRef.current !== "IDLE" || isSpeakerMutedRef.current) return;
         const voiceConfig = resolveVoiceConfig(session.contactId);
         if (!voiceConfig) return;
@@ -476,7 +495,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         try {
             let blob = subtitleAudioCacheRef.current.get(subtitle.id);
             if (!blob) {
-                blob = await synthesizeSpeech(stripBilingualForSpeech(subtitle.text), voiceConfig) || undefined;
+                blob = await synthesizeSpeech(originalCallSpeech(subtitle.text), voiceConfig) || undefined;
                 if (blob) subtitleAudioCacheRef.current.set(subtitle.id, blob);
             }
             if (!blob || stateRef.current === "ENDED" || minimizedRef.current || isSpeakerMutedRef.current) return;
@@ -489,7 +508,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             setPlayingSubtitleId(null);
             if (stateRef.current !== "ENDED") setCallState("IDLE");
         }
-    }, [session.contactId, playCallAudio]);
+    }, [session.contactId, playCallAudio, playingSubtitleId]);
 
     // ── Auto-listen ────────────────────────────────
 
@@ -580,8 +599,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         if (!text || callState !== "IDLE") return;
         if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
         setTypedText("");
-        queueUserText(text);
-    }, [typedText, callState, queueUserText]);
+        queueUserText(text, composeKind);
+    }, [typedText, callState, queueUserText, composeKind]);
 
     // 只有点召唤回复时才生成；没有待发文本也可以催对方主动说话。
     const handleRegenerate = useCallback(() => {
@@ -589,6 +608,11 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
         runConversationTurn();
     }, [callState, runConversationTurn]);
+    const handleReroll = useCallback(() => {
+        if (callState !== "IDLE" || queuedTurns || !lastAssistantTurnIdsRef.current.length) return;
+        if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
+        void runConversationTurn(true);
+    }, [callState, queuedTurns, runConversationTurn]);
 
     // 按住说话（非 iOS）：按下录音，松开转写后走对话轮
     const holdInput = useHoldToTalk({
@@ -684,8 +708,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 }}
             />
 
-            {/* Main center view (character avatar by default, swaps with self when clicked) */}
-            <div className="videocall-main-frame flex items-center justify-center z-[1]">
+            {/* A custom call background fills the whole screen. The camera remains in the corner. */}
+            <div className={`videocall-main-frame flex items-center justify-center z-[1]${pipSwapped ? "" : " videocall-main-frame-hidden"}`}>
                 {pipSwapped ? (
                     cameraEnabled ? (
                         <video
@@ -701,8 +725,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                             }}
                             className="w-full h-full object-cover"
                         />
-                    ) : userAvatarRef.current ? (
-                        <img src={userAvatarRef.current} alt={userNameRef.current} className="w-full h-full object-cover" style={{ opacity: 0.85 }} />
+                    ) : (callAppearanceResolved || userAvatarRef.current) ? (
+                        <img src={callAppearanceResolved || userAvatarRef.current || ""} alt={userNameRef.current} className="w-full h-full object-cover" style={{ opacity: 0.85 }} />
                     ) : (
                         <div className="w-[150px] h-[150px] rounded-full bg-[#333] flex items-center justify-center">
                             <span className="ts-60 text-[var(--c-icon)]">{userNameRef.current?.[0] || "?"}</span>
@@ -746,8 +770,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         ref={(el) => { if (el && el !== videoElRef.current) { videoElRef.current = el; if (cameraStreamRef.current) { el.srcObject = cameraStreamRef.current; el.play().catch(() => {}); } } }}
                         className="w-full h-full object-cover"
                     />
-                ) : userAvatarRef.current ? (
-                    <img src={userAvatarRef.current} alt={userNameRef.current} className="w-full h-full object-cover" />
+                ) : (callAppearanceResolved || userAvatarRef.current) ? (
+                    <img src={callAppearanceResolved || userAvatarRef.current || ""} alt={userNameRef.current} className="w-full h-full object-cover" />
                 ) : (
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -775,16 +799,10 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 ref={subtitlesScrollRef}
                 className="call-subtitles-log"
             >
-                {subtitles.map((sub) => (
-                    <div
-                        key={sub.id}
-                        className="call-subtitle"
-                        data-role={sub.role}
-                    >
-                        <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
-                        {sub.role === "assistant" && !sub.text.startsWith("⚠️") && <button type="button" className="call-subtitle-play" onClick={() => { void playSubtitle(sub); }} disabled={callState !== "IDLE" || isSpeakerMuted} aria-label="播放或重听这条语音">{playingSubtitleId === sub.id ? "播放中…" : "▶ 播放语音"}</button>}
-                    </div>
-                ))}
+                {subtitles.map(sub => sub.kind === "action" ? <div key={sub.id} className="call-video-action" data-role={sub.role}>{sub.text}</div> :
+                    sub.role === "assistant" ? <CallTranscriptBubble key={sub.id} text={sub.text} onPlay={() => { void playSubtitle(sub); }}
+                        playing={playingSubtitleId === sub.id} disabled={(callState !== "IDLE" && playingSubtitleId !== sub.id) || isSpeakerMuted} />
+                    : <div key={sub.id} className="call-subtitle" data-role="user">{sub.text}</div>)}
                 {interimText && callState === "USER_SPEAKING" && (
                     <div
                         className="call-subtitle"
@@ -812,14 +830,21 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         handleTextSubmit();
                     }}
                 >
+                    <div className="call-compose-modes" role="group" aria-label="输入内容类型">
+                        <button type="button" className={composeKind === "speech" ? "selected" : ""} onClick={() => setComposeKind("speech")} aria-pressed={composeKind === "speech"}>消息</button>
+                        <button type="button" className={composeKind === "action" ? "selected" : ""} onClick={() => setComposeKind("action")} aria-pressed={composeKind === "action"}>动作</button>
+                    </div>
                     <div className="call-text-input-shell">
                         <input
                             value={typedText}
                             onChange={e => setTypedText(e.target.value)}
                             className="call-text-input"
-                            placeholder={callState === "IDLE" ? "输入你想说的话..." : "稍等对方说完..."}
+                            placeholder={callState !== "IDLE" ? "稍等对方说完..." : composeKind === "action" ? "用中文描述动作..." : "输入你想说的话..."}
                             disabled={callState !== "IDLE"}
                         />
+                        <button type="button" className="call-reroll-btn" onClick={handleReroll}
+                            disabled={callState !== "IDLE" || queuedTurns > 0 || !lastAssistantTurnIdsRef.current.length}
+                            aria-label="重回上一轮回复" title="重回上一轮"><RotateCcw size={19} /></button>
                         <button
                             type="button"
                             className="call-text-send-btn"
@@ -837,7 +862,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 </form>
             )}
 
-            {inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && <button type="button" className="call-voice-summon" onClick={handleRegenerate} disabled={callState !== "IDLE"}>{queuedTurns ? `召唤回复 · ${queuedTurns}` : "召唤回复"}</button>}
+            {inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && <div className="call-voice-actions"><button type="button" className="call-reroll-btn" onClick={handleReroll} disabled={callState !== "IDLE" || queuedTurns > 0 || !lastAssistantTurnIdsRef.current.length} aria-label="重回上一轮回复" title="重回上一轮"><RotateCcw size={19} /></button><button type="button" className="call-voice-summon" onClick={handleRegenerate} disabled={callState !== "IDLE"} aria-label="召唤回复">↑</button></div>}
             {/* 按住说话提示/错误行 */}
             {holdToTalk && inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && (
                 <div className="text-center ts-12 opacity-80 px-5 relative z-[1]">

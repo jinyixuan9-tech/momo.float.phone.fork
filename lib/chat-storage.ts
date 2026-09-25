@@ -53,6 +53,8 @@ export type ChatSession = {
     autoReplied?: boolean; // Whether the initial greeting auto-reply has been triggered
     alias?: string;
     videoBackground?: string;
+    /** 此会话视频通话右上角的静态形象；未设置时沿用我的 Chat 头像。 */
+    callAppearance?: string;
     voiceBackground?: string;
     isBlacklisted?: boolean;
     customCSS?: string;
@@ -142,6 +144,7 @@ export type ChatMessage = {
         count?: number;           // 红包个数
         label?: string;           // 红包留言/转账备注/照片描述/位置名/表情名
         photoBatchId?: string;    // 一次选中的多张照片，独立消息共用此 id
+        callLineKind?: "speech" | "action"; // 通话台词和动作独立记录
         status?: "pending" | "opened" | "received" | "declined" | "paid" | "canceled";  // 红包/转账/代付状态
         quoteMessageId?: string;  // 引用消息 ID
         quotePreview?: string;    // 引用消息预览文本
