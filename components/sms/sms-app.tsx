@@ -310,7 +310,6 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
         {messages.map((m,i)=>{
           const following=messages[i+1];
           const tail=!following || following.direction!==m.direction || separated(following,m);
-          const delivered=m.direction==="outgoing" && i===messages.length-1;
           const hasTranslation=m.direction==="incoming" && !!m.translated && m.translated!==m.original;
           const expanded=translationExpanded[m.id] ?? state.autoExpandTranslation;
           return <div key={m.id}>
@@ -328,7 +327,6 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
                 {m.reactions?.length ? <div className={styles.reactions}>{m.reactions.map(r=><span key={r.id} className={styles.reactionSticker}><span className={styles.reaction}>{r.emoji}</span></span>)}</div> : null}
               </div>
               {hasTranslation && expanded && <div className={styles.translation}>{m.translated}</div>}
-              {delivered && <span className={styles.delivered}>Delivered</span>}
             </div>
           </div>;
         })}
