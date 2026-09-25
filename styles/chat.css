@@ -7498,4 +7498,6 @@
   opacity: .84; background: #f5f5f5; color: #192020;
 }
 .voicecall-dark .call-text-send-btn svg,
-.videocall-redesign .call-text-send-btn svg { opacity: 1; stroke: currentColor; }
+.videocall-redesign .call-text-send-btn svg { opacity: 1; stroke: #192020 !important; }
+.voicecall-dark .call-text-send-btn svg path,
+.videocall-redesign .call-text-send-btn svg path { stroke: #192020 !important; }

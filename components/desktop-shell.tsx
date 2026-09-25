@@ -13,6 +13,7 @@ import { PhotosApp } from "@/components/photos/photos-app";
 import { WeverseApp } from "@/components/weverse/weverse-app";
 import { LysnApp } from "@/components/lysn/lysn-app";
 import { SmsApp } from "@/components/sms/sms-app";
+import { TwitterApp } from "@/components/twitter/twitter-app";
 import { maybeGenerateLysnBackgroundMessage } from "@/lib/lysn-background";
 import { maybeGenerateSmsBackgroundMessage } from "@/lib/sms-background";
 import { PhoneSettingsApp } from "@/components/phone-settings-app";
@@ -121,6 +122,8 @@ import {
   type DesktopFolderMap,
   type DesktopIconLayout,
   type DesktopPageKey,
+  ensureNativeSmsIcon,
+  ensureNativeTwitterIcon,
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
@@ -1513,11 +1516,13 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         try {
           const normalized = normalizeLayout(JSON.parse(rawV2), hydratedWidgets, dockIds, hydratedFolders);
           const sane = sanitizeDesktopFolders(hydratedFolders, normalized, hydratedDock, hydratedWidgets);
+          const withSms = ensureNativeSmsIcon(sane.layout, hydratedWidgets, hydratedDock, sane.folders);
+          const withTwitter = ensureNativeTwitterIcon(withSms.layout, hydratedWidgets, hydratedDock, sane.folders);
           setFolders(sane.folders);
-          setLayout(sane.layout);
-          if (sane.changed) {
+          setLayout(withTwitter.layout);
+          if (sane.changed || withSms.changed || withTwitter.changed) {
             writeDesktopFolders(sane.folders);
-            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(sane.layout));
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withTwitter.layout));
           }
           setDesktopReady(true);
           return;
@@ -1529,10 +1534,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           const parsed = JSON.parse(rawV1) as Record<string, unknown>;
           const w1 = hydratedWidgets.filter(w => w.page === 1);
           const w2 = hydratedWidgets.filter(w => w.page === 2);
-          setLayout({
+          const migrated = {
             page1: migratePageV1(parsed.page1, PAGE_1_DEFAULT, w1).filter(ic => !dockIds.has(ic.id)),
             page2: migratePageV1(parsed.page2, PAGE_2_DEFAULT, w2).filter(ic => !dockIds.has(ic.id)),
-          } as DesktopLayout);
+          } as DesktopLayout;
+          const withSms = ensureNativeSmsIcon(migrated, hydratedWidgets, hydratedDock, hydratedFolders);
+          const withTwitter = ensureNativeTwitterIcon(withSms.layout, hydratedWidgets, hydratedDock, hydratedFolders);
+          setLayout(withTwitter.layout);
+          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withTwitter.layout));
           kvRemove(ICON_LAYOUT_STORAGE_KEY_V1);
           setDesktopReady(true);
           return;
@@ -3953,6 +3962,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     }
     if (activeApp === "sms") {
       return <SmsApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+    if (activeApp === "twitter") {
+      return <TwitterApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
 
     if (activeApp === "characters") {

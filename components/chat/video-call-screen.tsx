@@ -800,7 +800,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                             aria-label={queuedTurns ? `召唤回复，已发送 ${queuedTurns} 条` : "召唤回复"}
                             title="召唤回复"
                         >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#192020" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M12 19V5" />
                                 <path d="M5 12l7-7 7 7" />
                             </svg>

@@ -1,0 +1,83 @@
+import { loadCharacters } from "./character-storage";
+import { sendLLMRequest } from "./chat-engine";
+import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
+import { prepareShortTermContext } from "./short-term-assembler";
+import { loadMemoryConfig } from "./memory-storage";
+import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
+import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
+import { buildCharacterTimeContext } from "./character-time";
+import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, loadWorldBooks, resolveBinding, resolveUserIdentity } from "./settings-storage";
+import type { RegexConfig, WorldBookConfig } from "./settings-types";
+import type { TwitterMessage, TwitterPost, TwitterState } from "./twitter-storage";
+
+export type TwitterGeneratedLine = { original: string; translated: string };
+
+function parseLines(text: string): TwitterGeneratedLine[] {
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+  try {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    const row = JSON.parse(start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed) as { lines?: Array<{ original?: string; translated?: string }>; original?: string; translated?: string };
+    const lines = Array.isArray(row.lines) ? row.lines : [row];
+    return lines.map(line => ({ original: String(line.original || "").trim(), translated: String(line.translated || line.original || "").trim() }))
+      .filter(line => line.original).slice(0, 3);
+  } catch {
+    return trimmed ? [{ original: trimmed.slice(0, 650), translated: trimmed.slice(0, 650) }] : [];
+  }
+}
+
+export async function generateTwitterText(input: {
+  characterId: string;
+  state: TwitterState;
+  kind: "post" | "reply" | "dm";
+  targetPost?: TwitterPost;
+  conversation?: TwitterMessage[];
+  anonymous?: boolean;
+}): Promise<TwitterGeneratedLine[]> {
+  const character = loadCharacters().find(row => row.id === input.characterId);
+  if (!character) throw new Error("角色已不存在。");
+  const slot = resolveBinding(loadBindingConfig(), character.id, "twitter");
+  const apiConfig = loadApiConfigs().find(row => row.id === slot.apiConfigId) ?? loadApiConfigs()[0];
+  if (!apiConfig) throw new Error("先在设置中配置文字 API，才能生成角色内容。");
+  const presets = loadPresets();
+  const preset = presets.find(row => row.id === slot.presetId) ?? presets.find(row => row.builtIn) ?? null;
+  const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(row => row.id === id)).filter(Boolean) as WorldBookConfig[];
+  const regexes = (slot.regexIds || []).map(id => loadRegexes().find(row => row.id === id)).filter(Boolean) as RegexConfig[];
+  const anonymous = input.anonymous === true;
+  const context = anonymous ? null : prepareShortTermContext(character.id, "twitter", { history: [], tokenBudgetOverride: 2800 });
+  const memConfig = loadMemoryConfig();
+  const [longMemories, coreMemories] = anonymous ? [[], []] : await Promise.all([
+    retrieveMemoriesForPrompt(character.id, context!.wbActivationContext, memConfig).catch(() => []),
+    retrieveCoreMemoriesForPrompt(character.id, memConfig).catch(() => []),
+  ]);
+  const identity = anonymous ? null : resolveUserIdentity(character.id, "twitter");
+  const prompt = assemblePromptPayload({
+    character, history: [], preset, worldBooks, regexes,
+    userIdentity: identity, appId: "twitter", appTags: ["twitter", input.kind],
+    longTermMemories: formatLongTermMemories(longMemories),
+    coreMemories: formatCoreMemories(coreMemories),
+    worldBookActivationContext: context?.wbActivationContext ?? "",
+    recentBlocks: context?.recentBlocks ?? [],
+    unifiedRecentItems: context?.unifiedRecentItems ?? [],
+    timeContext: buildCharacterTimeContext(character.timeZone),
+  });
+  const publicRule = "推特的帖子和回复是公开的。你可以有私下记忆，但不得随意公开地下关系、私人聊天内容、昵称或未公开身份。";
+  const stateRule = input.state.worldRules.trim() ? `补充世界观：${input.state.worldRules.slice(0, 2500)}` : "";
+  const shared = "以角色平常使用的语言写 original；如果不是中文，translated 给准确自然的简体中文译文，中文原文则两字段相同。只输出 JSON，不要解释。";
+  let instruction: string;
+  if (input.kind === "post") {
+    const recent = input.state.posts.filter(p => !p.replyToId).slice(-10).map(p => `${p.authorId === "user" ? input.state.profile.name : p.authorId === character.id ? character.name : "其他角色"}：${p.original}`).join("\n");
+    instruction = `${publicRule}\n${stateRule}\n近期公开帖子：\n${recent || "暂无"}\n根据本人设定、记忆与时间，自然发布一条适合当前情境的新帖子，可以回应近期公开话题，但不要机械模仿。${shared}\nJSON 格式：{"original":"帖子原文","translated":"中文译文"}`;
+  } else if (input.kind === "reply") {
+    if (!input.targetPost) throw new Error("找不到要回复的帖子。");
+    instruction = `${publicRule}\n${stateRule}\n你正在回复一条推特帖子，内容：“${input.targetPost.original.slice(0, 900)}”。直接回应具体内容，自然简短，不要离题。${shared}\nJSON 格式：{"original":"回复原文","translated":"中文译文"}`;
+  } else {
+    const history = (input.conversation || []).slice(-20).map(m => `${m.role === "user" ? anonymous ? "匿名用户" : input.state.profile.name : character.name}：${m.original}`).join("\n");
+    instruction = `${stateRule}\n你正在推特私信中回复。${anonymous ? "发送者是陌生的匿名用户；不可根据其他 App 的用户身份或共同历史揭穿身份，除非本次匿名对话明确提供证据。保持角色本人的边界与性格。" : "与公开发帖不同，这里是一对一私信，可以参考真实关系。"}\n本次会话：\n${history || "暂无消息"}\n自然回应最近的消息；可拆成 1 至 3 条独立短信。${shared}\nJSON 格式：{"lines":[{"original":"第一条原文","translated":"第一条中文译文"}]}`;
+  }
+  const messages: LLMMessage[] = [...prompt, { role: "system", content: instruction }, { role: "user", content: "现在自然地回复。" }];
+  const raw = await sendLLMRequest(apiConfig, preset, messages, regexes, { characterName: character.name, userName: anonymous ? "匿名用户" : identity?.name || input.state.profile.name }, { appId: "twitter", appTags: ["twitter", input.kind], skipOutputRegex: true });
+  const lines = parseLines(raw);
+  if (!lines.length) throw new Error("这次没有生成有效内容，请重试。");
+  return input.kind === "dm" ? lines : lines.slice(0, 1);
+}

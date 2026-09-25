@@ -47,6 +47,7 @@ const MDI_PATHS: Record<IconId, string> = {
   weverse: mdiAccountGroup,
   lysn: mdiMessageProcessing,
   sms: mdiMessageProcessing,
+  twitter: "M18.9 2H22l-6.78 7.75L23.2 22h-6.25l-4.9-7.42L5.56 22H2.4l8.13-9.29L2 2h6.4l4.43 6.76L18.9 2Zm-1.1 18h1.73L7.4 3.9H5.55L17.8 20Z",
   diary: mdiBookOpenPageVariant,
   music: mdiMusic,
   reading: mdiBookOpenVariant,
