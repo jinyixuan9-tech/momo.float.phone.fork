@@ -348,6 +348,15 @@
 .customEmoji button{width:100%;aspect-ratio:1;padding:3px;overflow:hidden;border:0;border-radius:9px;background:#f8f6fa}
 .customEmoji img,.customEmoji .fallback{width:100%;height:100%;object-fit:contain}
 .emojiManage{display:block;margin:8px 0 0 auto;padding:4px;border:0;background:none;color:#9559cf;font-size:calc(11px*var(--app-text-scale,1))}
+/* Sticker picker stays below the composer, with the user's groups across the top. */
+.app .emojiPanel{min-height:132px;max-height:min(245px,35vh);margin-top:7px;padding:0 9px 8px;border:0;border-top:1px solid #f0edf3;border-radius:0;box-shadow:none}
+.app .emojiCategories{display:flex;gap:5px;overflow-x:auto;padding:8px 0 10px;scrollbar-width:none}
+.emojiCategories::-webkit-scrollbar{display:none}
+.app .emojiCategories button{flex:none;width:auto;height:30px;min-width:40px;padding:0 11px;border:0;border-radius:16px;background:transparent;color:#827b88;font-size:calc(11px*var(--app-text-scale,1));white-space:nowrap}
+.app .emojiCategories .emojiCategoryActive{background:#f4ecfa;color:#6e419f;font-weight:650}
+.app .quickEmoji{grid-template-columns:repeat(auto-fill,minmax(41px,1fr));gap:8px;align-content:start}
+.app .quickEmoji button{display:grid;place-items:center;width:100%;height:42px;padding:3px;overflow:hidden;border:0;border-radius:9px;background:transparent;color:#29232e}
+.app .quickEmoji button img,.app .quickEmoji button .fallback{width:100%;height:100%;object-fit:contain}
 .myStickerSettings{padding:7px 0 12px}
 .myStickerSettings h3{margin:6px 0;font-size:calc(13px*var(--app-text-scale,1))}
 .myStickerSettings p{margin:0 0 9px;color:#87828b;font-size:calc(11px*var(--app-text-scale,1));line-height:1.5}

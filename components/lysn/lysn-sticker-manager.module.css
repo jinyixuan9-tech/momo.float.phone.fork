@@ -1,0 +1,33 @@
+.manager{min-height:100%;padding:16px;background:#f8f9fd;color:#24202b;font-size:calc(13px*var(--app-text-scale,1))}
+.manager button{font:inherit;cursor:pointer}
+.intro{margin:2px 2px 18px;color:#8e8796;font-size:12px}
+.packGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.packCard,.newPack{display:flex;align-items:flex-start;justify-content:center;flex-direction:column;gap:9px;min-height:133px;padding:17px;border:0;border-radius:18px;background:#fff;color:#6f48a5;text-align:left;box-shadow:0 2px 10px #4032500a}
+.packCard b{max-width:100%;overflow:hidden;color:#28232e;font-size:15px;text-overflow:ellipsis;white-space:nowrap}
+.packCard small{max-width:100%;overflow:hidden;color:#99919e;font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+.newPack{align-items:center;border:1.5px dashed #d9d0e3;background:transparent;color:#80639c;font-size:13px}
+.packBack{padding:3px 0 14px;border:0;background:none;color:#3a3440;font-size:17px!important;font-weight:700!important}
+.toolbar{display:flex;align-items:center;justify-content:space-between;margin:8px 0 15px}
+.toolbar b{font-size:15px}.toolbar b span{color:#a69caf;font-weight:400}
+.toolbar button{padding:8px 12px;border:0;border-radius:18px;background:#f0e6fa;color:#8250ba;font-size:12px}
+.stickerGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+.stickerCard{position:relative;min-width:0;padding:8px;border-radius:14px;background:white}
+.stickerCard>div{display:grid;place-items:center;width:100%;aspect-ratio:1;overflow:hidden;border-radius:10px;background:#f7f4f8}
+.stickerCard img,.batchRows img{width:100%;height:100%;object-fit:contain}
+.stickerCard input{width:100%;min-width:0;margin-top:7px;padding:4px 0;border:0;outline:0;background:transparent;color:#28232e;font-size:11px;text-align:center}
+.stickerCard>button{position:absolute;top:1px;right:1px;display:grid;place-items:center;width:22px;height:22px;border:0;border-radius:50%;background:#ffffffed;color:#9e7bb4}
+.addTile{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;min-height:120px;border:1.5px dashed #dacfe3;border-radius:14px;background:transparent;color:#7954a0;font-size:12px}
+.deletePack{display:block;margin:26px auto;padding:8px;border:0;background:none;color:#c57389;font-size:12px}
+.overlay{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:14px;background:#211b2b80}
+.dialog{display:flex;flex-direction:column;gap:13px;width:min(100%,390px);max-height:min(84%,640px);overflow:auto;padding:20px;border-radius:20px;background:#fff;box-shadow:0 14px 35px #140b2233}
+.dialog header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.dialog header b{font-size:17px}.dialog header button,.batchRows button{display:grid;place-items:center;width:30px;height:30px;border:0;background:none;color:#62566c}
+.dialog label{display:flex;flex-direction:column;gap:7px;color:#766e7d;font-size:12px}
+.dialog input,.dialog textarea{width:100%;min-width:0;padding:10px 11px;border:1px solid #e9e3ee;border-radius:10px;outline-color:#a277d5;background:#faf8fc;color:#25202b;font:inherit;font-size:13px}
+.dialog label small{font-size:11px;color:#a49aa9}
+.chooseFile{display:flex;align-items:center;justify-content:center;gap:8px;min-height:41px;padding:8px;border:1px solid #e5d7f1;border-radius:11px;background:#fbf7ff;color:#7951a3;font-size:12px}
+.confirm{min-height:44px;margin-top:5px;border:0;border-radius:11px;background:#a454e1;color:white;font-size:13px;font-weight:650}
+.dialog button:disabled{opacity:.45;cursor:default}
+.batchRows{display:flex;flex-direction:column;gap:7px;max-height:175px;overflow-y:auto}
+.batchRows>div{display:flex;align-items:center;gap:8px}
+.batchRows>div>span{display:grid;place-items:center;flex:none;width:40px;height:40px;overflow:hidden;border-radius:7px;background:#f5f1f8}
