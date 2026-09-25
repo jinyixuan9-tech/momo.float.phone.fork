@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, Ban, Check, ChevronRight, ImagePlus, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldOff, Video, AudioLines, X, Trash2, RotateCcw } from "lucide-react";
+import { ArrowLeft, Ban, Check, ChevronRight, Copy, ImagePlus, MoreHorizontal, Pencil, Phone, Plus, Search, Settings2, ShieldOff, Video, AudioLines, X, Trash2, RotateCcw } from "lucide-react";
 import { loadCharacters } from "@/lib/character-storage";
 import { addSmsMessage, createVirtualIdentity, ensureSmsThread, loadSms, saveSms, phoneFromPersona, smsId, SMS_EVENT, SMS_REGIONS, DEFAULT_SMS_EMOJI, type SmsMessage, type SmsState, type SmsThread } from "@/lib/sms-storage";
 import { generateSmsReply } from "@/lib/sms-engine";
@@ -42,6 +42,13 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
   const [contextId, setContextId] = useState<string | null>(null);
   const [contextAnchor, setContextAnchor] = useState({ top: 0, left: 0 });
   const [editor, setEditor] = useState<{original:string;translated:string} | null>(null);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactAnchor, setContactAnchor] = useState({top:0,left:0});
+  const [contactEdit, setContactEdit] = useState<"alias" | "phone" | null>(null);
+  const [contactDraft, setContactDraft] = useState("");
+  const [selectingMessages, setSelectingMessages] = useState(false);
+  const [selectedMessages, setSelectedMessages] = useState<string[]>([]);
+  const backgroundInput = useRef<HTMLInputElement>(null);
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerOrigin = useRef<{x:number;y:number} | null>(null);
   const skipClick = useRef(false);
@@ -67,7 +74,7 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
   useEffect(() => () => { if (longPress.current) clearTimeout(longPress.current); }, []);
   function persist(next: SmsState) { saveSms(next); setState({ ...next }); }
   function openSettings(from: "list" | "compose" | "chat" | "detail") { setSettingsReturn(from); setRoute("settings"); }
-  function back() { setError(""); setMenu(false); setTray(false); if (route === "detail") setRoute("chat"); else if (route === "chat" || route === "compose" || route === "settings") setRoute("list"); else onClose(); }
+  function back() { setError(""); setMenu(false); setTray(false); setContactOpen(false); setSelectingMessages(false); setSelectedMessages([]); if (route === "detail") setRoute("chat"); else if (route === "chat" || route === "compose" || route === "settings") setRoute("list"); else onClose(); }
   function start() {
     if (!characterId) return setError("先选择收件人");
     const character = characters.find(c => c.id === characterId);
@@ -117,14 +124,32 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
     if (thread) thread.updatedAt = next.messages.filter(m => m.threadId === thread.id).at(-1)?.createdAt ?? Date.now();
     persist(next); setContextId(null);
   }
+  function deleteSelectedMessages() {
+    if (!selectedMessages.length || !selected) return;
+    if (!window.confirm(`删除选中的 ${selectedMessages.length} 条短信？`)) return;
+    const ids = new Set(selectedMessages), next = loadSms();
+    next.messages = next.messages.filter(m => m.threadId !== selected || !ids.has(m.id));
+    const thread = next.threads.find(t => t.id === selected);
+    if (thread) thread.updatedAt = next.messages.filter(m => m.threadId === selected).at(-1)?.createdAt ?? Date.now();
+    persist(next); setSelectedMessages([]); setSelectingMessages(false);
+  }
+  async function copyMessage() {
+    if (!contextual) return;
+    try { await navigator.clipboard.writeText(contextual.original); setContextId(null); }
+    catch { setError("复制失败，请检查浏览器剪贴板权限"); setContextId(null); }
+  }
   async function regenerate(scope: "single" | "batch") {
-    if (!contextual || contextual.direction !== "incoming" || busy) return;
+    if (!contextual || busy) return;
     const snapshot = loadSms(), thread = snapshot.threads.find(t => t.id === contextual.threadId);
     if (!thread) return;
     const all = snapshot.messages.filter(m => m.threadId === thread.id);
-    const index = all.findIndex(m => m.id === contextual.id);
+    const selectedIndex = all.findIndex(m => m.id === contextual.id);
+    if (selectedIndex < 0) return;
+    const target = contextual.direction === "incoming" ? contextual : all[selectedIndex+1]?.direction === "incoming" ? all[selectedIndex+1] : null;
+    if (!target) { setContextId(null);setError("这条短信后还没有角色回复，可以用输入框旁的召唤回复");return; }
+    const index = all.findIndex(m => m.id === target.id);
     if (index < 0) return;
-    const batchId = contextual.batchId;
+    const batchId = target.batchId;
     let start = index, end = index;
     if (scope === "batch") {
       if (batchId) { while (start > 0 && all[start-1].batchId === batchId && all[start-1].direction === "incoming") start--; while (end+1 < all.length && all[end+1].batchId === batchId && all[end+1].direction === "incoming") end++; }
@@ -180,13 +205,40 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
     if (!container) return;
     const rect = element.getBoundingClientRect(), parent = container.getBoundingClientRect();
     const incoming = loadSms().messages.find(m => m.id === id)?.direction === "incoming";
-    const width = Math.min(254, parent.width - 24), height = incoming ? 204 : 110;
+    const width = Math.min(260, parent.width - 24), height = incoming ? 330 : 228;
     const above = rect.top - parent.top - height - 9;
     const below = rect.bottom - parent.top + 9;
     const top = above >= 12 ? above : Math.min(Math.max(12, below), Math.max(12, parent.height - height - 12));
     const rawLeft = incoming ? rect.left - parent.left : rect.right - parent.left - width;
     setContextAnchor({ top, left: Math.max(12, Math.min(rawLeft, parent.width - width - 12)) });
-    setContextId(id); setEditor(null); setPickedEmoji("");
+    setContactOpen(false); setContextId(id); setEditor(null); setPickedEmoji("");
+  }
+  function showContactContext(element: HTMLElement) {
+    const container = conversationRef.current;
+    if (!container) return;
+    const rect = element.getBoundingClientRect(), parent = container.getBoundingClientRect();
+    const width = Math.min(280,parent.width-24);
+    setContactAnchor({top:Math.min(Math.max(12,rect.bottom-parent.top+10),Math.max(12,parent.height-340)),left:Math.max(12,Math.min(rect.left-parent.left+rect.width/2-width/2,parent.width-width-12))});
+    setContextId(null);setContactEdit(null);setContactOpen(true);
+  }
+  function startContactPress(event: ReactPointerEvent) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    pointerOrigin.current={x:event.clientX,y:event.clientY};
+    if (longPress.current) clearTimeout(longPress.current);
+    const element=event.currentTarget as HTMLElement;
+    longPress.current=setTimeout(()=>{skipClick.current=true;showContactContext(element);longPress.current=null;},500);
+  }
+  function saveContactEdit() {
+    if (!selectedThread || !contactEdit) return;
+    if (contactEdit === "alias") updateAlias(contactDraft);
+    else updateCharacterPhone(selectedThread.characterId,contactDraft);
+    setContactEdit(null);setContactOpen(false);
+  }
+  function clearThreadMessages() {
+    if (!selected || !window.confirm("清空此联系人当前会话的所有短信？")) return;
+    const next=loadSms();next.messages=next.messages.filter(m=>m.threadId!==selected);
+    const thread=next.threads.find(t=>t.id===selected);if(thread)thread.updatedAt=Date.now();
+    persist(next);setContactOpen(false);
   }
   function startPress(event: ReactPointerEvent, id: string) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -250,7 +302,7 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
     {route === "chat" && selectedThread && <div ref={conversationRef} className={styles.conversation} style={background ? {backgroundImage:`url(${background})`} : undefined}>
       <header className={styles.chatHeader}>
         <button className={styles.glass} aria-label="返回" onClick={back}><ArrowLeft size={22}/></button>
-        <button className={styles.person} onClick={()=>setRoute("detail")}>{avatar(selectedThread.characterId)}<span className={styles.personName}>{name(selectedThread)} <ChevronRight size={12}/></span></button>
+        <button className={styles.person} aria-label="长按联系人名称打开设置" onPointerDown={startContactPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={endPress} onContextMenu={e=>{e.preventDefault();endPress();showContactContext(e.currentTarget);}} onClick={()=>{skipClick.current=false;}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();showContactContext(e.currentTarget);}}}>{avatar(selectedThread.characterId)}<span className={styles.personName}>{name(selectedThread)} <ChevronRight size={12}/></span></button>
         <button className={styles.glass} aria-label="视频暂不可用" title="视频暂不可用" disabled><Video size={21}/></button>
       </header>
       <div className={styles.bubbles} ref={listRef}>
@@ -263,15 +315,16 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
           const expanded=translationExpanded[m.id] ?? state.autoExpandTranslation;
           return <div key={m.id}>
             {timeMarkers.has(m.id) && <div className={styles.timestamp}>{stamp(m.createdAt)}</div>}
-            <div className={`${styles.message} ${m.direction==="outgoing"?styles.mine:styles.theirs} ${tail?styles.tail:""}`} data-sms-message-id={m.id}
-              onPointerDown={e=>startPress(e,m.id)} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={endPress}
-              onContextMenu={e=>{e.preventDefault();endPress();skipClick.current=true;showContext(m.id,e.currentTarget);}}
+            <div className={`${styles.message} ${m.direction==="outgoing"?styles.mine:styles.theirs} ${tail?styles.tail:""} ${selectingMessages?styles.selectableMessage:""}`} data-sms-message-id={m.id}
+              onPointerDown={e=>{if(!selectingMessages)startPress(e,m.id);}} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={endPress}
+              onContextMenu={e=>{e.preventDefault();endPress();if(!selectingMessages){skipClick.current=true;showContext(m.id,e.currentTarget);}}}
               onDragOver={e=>{if(dragEmoji.current && m.direction==="incoming") e.preventDefault();}}
               onDrop={e=>{e.preventDefault();if(dragEmoji.current)react(m.id,dragEmoji.current);dragEmoji.current="";}}>
+              {selectingMessages && <button type="button" className={`${styles.messageCheck} ${selectedMessages.includes(m.id)?styles.messageChecked:""}`} aria-label={`选择短信：${m.original.slice(0,20)}`} aria-pressed={selectedMessages.includes(m.id)} onClick={()=>setSelectedMessages(ids=>ids.includes(m.id)?ids.filter(id=>id!==m.id):[...ids,m.id])}>{selectedMessages.includes(m.id) && <Check size={14}/>}</button>}
               <div className={styles.bubbleWrap}>
                 <div className={styles.bubble} role={hasTranslation?"button":undefined} tabIndex={hasTranslation?0:undefined} aria-expanded={hasTranslation?expanded:undefined}
                   onKeyDown={e=>{if(hasTranslation && (e.key==="Enter" || e.key===" ")){e.preventDefault();setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}}
-                  onClick={()=>{if(skipClick.current || contextId){skipClick.current=false;return;}if(pickedEmoji && m.direction==="incoming"){react(m.id,pickedEmoji);return;}if(hasTranslation)setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}>{m.original}</div>
+                  onClick={()=>{if(skipClick.current || contextId){skipClick.current=false;return;}if(selectingMessages){setSelectedMessages(ids=>ids.includes(m.id)?ids.filter(id=>id!==m.id):[...ids,m.id]);return;}if(pickedEmoji && m.direction==="incoming"){react(m.id,pickedEmoji);return;}if(hasTranslation)setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}>{m.original}</div>
                 {m.reactions?.length ? <div className={styles.reactions}>{m.reactions.map(r=><span key={r.id} className={styles.reaction}>{r.emoji}</span>)}</div> : null}
               </div>
               {hasTranslation && expanded && <div className={styles.translation}>{m.translated}</div>}
@@ -296,21 +349,36 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
         {manageEmoji && <button type="button" className={styles.emojiReset} onClick={()=>{const next=loadSms();next.emojiChoices=[...DEFAULT_SMS_EMOJI];persist(next);}}>恢复默认表情</button>}
       </div>}
       {error && <p className={styles.error}>{error} {!busy && <button type="button" onClick={()=>void summon(selectedThread.id)}>重试</button>}</p>}
-      <form className={styles.composer} onSubmit={e=>{e.preventDefault();send();}}>
+      {selectingMessages ? <div className={styles.messageSelectionBar}><button type="button" onClick={()=>{setSelectingMessages(false);setSelectedMessages([]);}}>取消</button><span>已选 {selectedMessages.length} 条</span><button type="button" className={styles.redOption} disabled={!selectedMessages.length} onClick={deleteSelectedMessages}><Trash2 size={16}/> 删除</button></div> : <form className={styles.composer} onSubmit={e=>{e.preventDefault();send();}}>
         <button type="button" className={styles.round} aria-label="表情贴纸" aria-expanded={tray} onClick={()=>{setTray(value=>!value);setPickedEmoji("");}}><Plus size={25}/></button>
         <input aria-label="短信内容" enterKeyHint="send" placeholder="iMessage" value={draft} onChange={e=>setDraft(e.target.value)} />
         <button type="button" className={styles.round} aria-label="召唤回复" title="召唤回复" disabled={busy} onClick={()=>void summon(selectedThread.id)}><AudioLines size={21}/></button>
-      </form>
+      </form>}
+      <input ref={backgroundInput} type="file" hidden accept="image/*" onChange={e=>{uploadBackground(e.target.files?.[0]);e.target.value="";}}/>
       {contextual && <div className={styles.contextShade} onPointerDown={e=>{if(e.target===e.currentTarget){setContextId(null);setEditor(null);skipClick.current=false;}}}>
         <div className={`${styles.contextPanel} ${editor?styles.contextEditor:""}`} style={editor?undefined:contextAnchor}>{editor ? <>
           <h3>编辑短信</h3><label>原文<textarea autoFocus value={editor.original} onChange={e=>setEditor({...editor,original:e.target.value})}/></label>
           {contextual.direction==="incoming" && <label>中文翻译<textarea value={editor.translated} onChange={e=>setEditor({...editor,translated:e.target.value})}/></label>}
           <div className={styles.contextActions}><button onClick={()=>setEditor(null)}>取消</button><button onClick={editMessage} disabled={!editor.original.trim()}>保存</button></div>
         </> : <>
-          <button onClick={()=>setEditor({original:contextual.original,translated:contextual.translated??""})}><Pencil size={16}/> 编辑{contextual.direction==="incoming"?"原文和翻译":""}</button>
-          {contextual.direction==="incoming" && <><button onClick={()=>void regenerate("single")} disabled={busy}><RotateCcw size={16}/> 重回本条</button><button onClick={()=>void regenerate("batch")} disabled={busy}><RotateCcw size={16}/> 重回本轮</button></>}
-          <button className={styles.redOption} onClick={deleteMessage}><Trash2 size={16}/> 删除</button>
+          <button onClick={()=>void copyMessage()}><span>复制</span><Copy size={17}/></button>
+          <button onClick={()=>setEditor({original:contextual.original,translated:contextual.translated??""})}><span>编辑{contextual.direction==="incoming"?"（正文+译文）":""}</span><Pencil size={17}/></button>
+          <button onClick={()=>void regenerate("single")} disabled={busy}><span>重回本条</span><RotateCcw size={17}/></button><button onClick={()=>void regenerate("batch")} disabled={busy}><span>重回本轮全部</span><RotateCcw size={17}/></button>
+          <button onClick={()=>{setSelectedMessages([contextual.id]);setSelectingMessages(true);setTray(false);setContextId(null);}}><span>多选</span><Check size={17}/></button>
+          <button className={styles.redOption} onClick={deleteMessage}><span>删除</span><Trash2 size={17}/></button>
         </>}</div>
+      </div>}
+      {contactOpen && <div className={styles.contextShade} onPointerDown={e=>{if(e.target===e.currentTarget){setContactOpen(false);setContactEdit(null);skipClick.current=false;}}}>
+        <div className={`${styles.contextPanel} ${styles.contactPanel}`} style={contactAnchor}>
+          {contactEdit ? <><h3>{contactEdit==="alias"?"修改备注":"角色手机号"}</h3><label>{contactEdit==="alias"?"备注名称":"角色手机号"}<input autoFocus value={contactDraft} onChange={e=>setContactDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveContactEdit();}}/></label><div className={styles.contextActions}><button onClick={()=>setContactEdit(null)}>取消</button><button onClick={saveContactEdit}>保存</button></div></> : <>
+            <button onClick={()=>{setContactDraft(selectedThread.alias??"");setContactEdit("alias");}}><span>修改备注</span><Pencil size={17}/></button>
+            <button onClick={()=>{setContactDraft(selectedThread.characterNumber);setContactEdit("phone");}}><span>设定角色手机号</span><Phone size={17}/></button>
+            <button onClick={()=>{toggleBlock();setContactOpen(false);}}><span>{selectedThread.blockedByMe?"解除拉黑":"拉黑此人"}</span>{selectedThread.blockedByMe?<ShieldOff size={17}/>:<Ban size={17}/>}</button>
+            <button onClick={()=>{setContactOpen(false);backgroundInput.current?.click();}}><span>设置聊天背景</span><ImagePlus size={17}/></button>
+            {selectedThread.backgroundUrl && <button onClick={()=>{const next=loadSms(),thread=next.threads.find(t=>t.id===selected);if(thread){thread.backgroundUrl="";persist(next);}setContactOpen(false);}}><span>恢复默认背景</span><ImagePlus size={17}/></button>}
+            <button className={styles.redOption} onClick={clearThreadMessages}><span>清空所有消息</span><Trash2 size={17}/></button>
+          </>}
+        </div>
       </div>}
     </div>}
     {route === "detail" && selectedThread && <><header className={styles.subHeader}><button className={styles.glass} onClick={back}><ArrowLeft size={20}/></button><strong>联系人设置</strong><span/></header><div className={styles.details}>{avatar(selectedThread.characterId)}<h2>{name(selectedThread)}</h2><label>修改备注<input placeholder="输入备注，保存后显示在头像下" value={selectedThread.alias ?? ""} onChange={e=>updateAlias(e.target.value)}/></label><label>角色手机号<input placeholder="输入手机号" value={selectedThread.characterNumber} onChange={e=>updateCharacterPhone(selectedThread.characterId,e.target.value)}/></label><div className={styles.card}><span>发件身份</span><b>{selectedThread.identityId==="real" ? `真实号码 ${state.realNumber||"未设置"}` : selectedThread.number}</b></div><div className={styles.card}><span>拉黑此人</span><button onClick={toggleBlock}>{selectedThread.blockedByMe ? <><ShieldOff size={17}/>解除拉黑</> : <><Ban size={17}/>拉黑此人</>}</button></div>{selectedThread.identityId!=="real" && <div className={styles.card}><span>对方对身份的判断</span><b>{selectedThread.awareness==="unknown"?"未知":selectedThread.awareness==="suspected"?"怀疑中":"已确认"}</b></div>}<label className={styles.upload}>设置聊天背景 <ImagePlus size={16}/><input type="file" hidden accept="image/*" onChange={e=>uploadBackground(e.target.files?.[0])}/></label>{background && <button className={styles.secondary} onClick={()=>{const next=loadSms(),thread=next.threads.find(t=>t.id===selected);if(thread){thread.backgroundUrl="";persist(next);}}}>清除本联系人背景</button>}<button className={styles.danger} onClick={()=>deleteThread(selectedThread.id)}>删除会话</button></div></>}
