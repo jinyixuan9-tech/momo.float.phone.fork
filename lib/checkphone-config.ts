@@ -65,6 +65,8 @@ export type CheckPhoneNotesPayload = {
 export type CheckPhoneMessageBubble = {
   id: string;
   text: string;
+  /** Real SMS keeps original and translation separate; generated snapshots can still use bilingual text. */
+  translated?: string;
   timeLabel: string;
   direction: "incoming" | "outgoing";
 };

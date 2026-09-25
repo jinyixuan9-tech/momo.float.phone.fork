@@ -38,6 +38,7 @@ export type CheckPhoneBilingualTone =
 
 type CheckPhoneBilingualTextProps = {
   text: string;
+  translated?: string;
   className?: string;
   tone?: CheckPhoneBilingualTone;
   variant?: "block" | "inline";
@@ -50,13 +51,16 @@ export function normalizeCheckPhoneText(value: string): string {
 
 export function CheckPhoneBilingualText({
   text,
+  translated,
   className = "",
   tone = "default",
   variant = "block",
   collapseBilingualTranslation: collapseBilingualTranslationOverride,
 }: CheckPhoneBilingualTextProps) {
   const normalized = normalizeCheckPhoneText(text);
-  const bilingual = splitBilingualText(normalized);
+  const bilingual = translated?.trim() && translated.trim() !== normalized
+    ? { original: normalized, translated: translated.trim() }
+    : splitBilingualText(normalized);
   const [settingsCollapseBilingualTranslation, setSettingsCollapseBilingualTranslation] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const collapseBilingualTranslation = collapseBilingualTranslationOverride ?? settingsCollapseBilingualTranslation;
@@ -78,7 +82,7 @@ export function CheckPhoneBilingualText({
 
   useEffect(() => {
     setExpanded(!collapseBilingualTranslation);
-  }, [normalized, collapseBilingualTranslation]);
+  }, [normalized, translated, collapseBilingualTranslation]);
 
   if (!bilingual) {
     return <span className={className}>{normalized}</span>;

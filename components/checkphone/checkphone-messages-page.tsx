@@ -304,7 +304,7 @@ export function CheckPhoneMessagesPage({ character, onBack }: CheckPhoneMessages
                 >
                   <div className={`cp-message-bubble cp-message-bubble--${message.direction}`}>
                     <div className="cp-message-snowflake">❄</div>
-                    <p><CheckPhoneBilingualText text={message.text} tone="messages" variant="inline" /></p>
+                    <p><CheckPhoneBilingualText text={message.text} translated={message.translated} tone="messages" variant="inline" /></p>
                   </div>
                   <span className={`cp-message-time cp-message-time--${message.direction}`}>
                     {formatChatUiTime(message.timeLabel) || message.timeLabel}

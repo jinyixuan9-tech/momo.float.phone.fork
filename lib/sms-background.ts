@@ -3,7 +3,7 @@ import { addFriendRequest, dispatchFriendRequestUpdated, loadFriendRequests } fr
 import { loadChatSessions, pushChatMessage } from "./chat-storage";
 import { chatStatus } from "./sms-continuity";
 import { generateSmsReply } from "./sms-engine";
-import { addSmsMessage, ensureSmsThread, loadSms, saveSms, phoneFromPersona } from "./sms-storage";
+import { addSmsMessage, ensureSmsThread, loadSms, saveSms, phoneFromPersona, smsId } from "./sms-storage";
 
 let running = false;
 /** Shared contact budget includes recent friend requests so the two channels do not pile up. */
@@ -43,7 +43,9 @@ export async function maybeGenerateSmsBackgroundMessage(): Promise<void> {
     const fresh = loadSms(); const live = ensureSmsThread(fresh, character.id, "real", fresh.characterNumbers[character.id] || phoneFromPersona(character.persona) || "");
     if (live.blockedByMe) return;
     if (response.summary) live.summary = response.summary;
-    response.messages.forEach(m=>addSmsMessage(fresh,live,"incoming",m.original,m.translated));
+    const batchId = smsId();
+    response.messages.forEach(m=>addSmsMessage(fresh,live,"incoming",m.original,m.translated,batchId));
+    response.reactions?.forEach(reaction => { const target = fresh.messages.find(m => m.id === reaction.messageId && m.threadId === live.id && m.direction === "outgoing"); if (target) target.reactions = [...(target.reactions ?? []), { id: smsId(), emoji: reaction.emoji, by: "character" }]; });
     fresh.contactAttempts[character.id] = Date.now();saveSms(fresh);
   } catch { /* A failed background generation can be retried after the interval. */ }
   finally { running = false; }

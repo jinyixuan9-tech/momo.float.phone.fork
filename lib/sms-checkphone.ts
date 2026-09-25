@@ -14,7 +14,7 @@ export function mergeSmsIntoCheckPhone(characterId: string, payload: CheckPhoneM
     const records = state.messages.filter(m => m.threadId === t.id && m.delivered).slice(-32);
     const last = records.at(-1)!;
     const label = t.identityId === "real" ? resolveUserIdentity(characterId, "chat")?.name || state.realNumber || "用户" : t.number || "陌生号码";
-    return { id: `sms:${t.id}`, sender: label, preview: last.original, timeLabel: new Date(last.createdAt).toLocaleString("zh-CN", {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}), kind: "personal", messages: records.map(m => ({ id:m.id, text:m.translated && m.direction==="incoming" && m.translated!==m.original ? `${m.original}\n${m.translated}` : m.original, timeLabel:new Date(m.createdAt).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"}), direction: m.direction === "outgoing" ? "incoming" : "outgoing" })) };
+    return { id: `sms:${t.id}`, sender: label, preview: last.original, timeLabel: new Date(last.createdAt).toLocaleString("zh-CN", {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}), kind: "personal", messages: records.map(m => ({ id:m.id, text:m.original, translated:m.direction==="incoming" && m.translated!==m.original ? m.translated : undefined, timeLabel:new Date(m.createdAt).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"}), direction: m.direction === "outgoing" ? "incoming" : "outgoing" })) };
   });
   const generated = payload.threads.filter(t => !t.id.startsWith("sms:"));
   const limit = 10;

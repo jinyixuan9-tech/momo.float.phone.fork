@@ -5,8 +5,9 @@ export const SMS_EVENT = "sms-updated";
 registerKvMigration(SMS_KEY);
 
 export type SmsIdentity = { id: string; number: string; region: string; createdAt: number };
-export type SmsMessage = { id: string; threadId: string; direction: "outgoing" | "incoming"; original: string; translated?: string; createdAt: number; delivered: boolean };
-export type SmsThread = { id: string; characterId: string; identityId: string; number: string; characterNumber: string; blockedByMe: boolean; blockedByCharacter: boolean; awareness: "unknown" | "suspected" | "confirmed"; suspicion?: string; summary?: string; updatedAt: number; readAt: number };
+export type SmsReaction = { id: string; emoji: string; by: "user" | "character" };
+export type SmsMessage = { id: string; threadId: string; direction: "outgoing" | "incoming"; original: string; translated?: string; createdAt: number; delivered: boolean; batchId?: string; awarenessAt?: SmsThread["awareness"]; reactions?: SmsReaction[] };
+export type SmsThread = { id: string; characterId: string; identityId: string; number: string; characterNumber: string; alias?: string; backgroundUrl?: string; blockedByMe: boolean; blockedByCharacter: boolean; awareness: "unknown" | "suspected" | "confirmed"; suspicion?: string; summary?: string; updatedAt: number; readAt: number };
 export type SmsState = { version: 1; realNumber: string; characterNumbers: Record<string,string>; identities: SmsIdentity[]; threads: SmsThread[]; messages: SmsMessage[]; background: string; proactive: "off" | "rare" | "normal" | "often"; lastAutoAt: Record<string,number>; contactAttempts: Record<string,number> };
 const empty = (): SmsState => ({ version: 1, realNumber: "", characterNumbers: {}, identities: [], threads: [], messages: [], background: "", proactive: "normal", lastAutoAt: {}, contactAttempts: {} });
 export function loadSms(): SmsState {
@@ -31,9 +32,9 @@ export function ensureSmsThread(state: SmsState, characterId: string, identityId
   }
   return thread;
 }
-export function addSmsMessage(state: SmsState, thread: SmsThread, direction: SmsMessage["direction"], original: string, translated?: string): SmsMessage {
+export function addSmsMessage(state: SmsState, thread: SmsThread, direction: SmsMessage["direction"], original: string, translated?: string, batchId?: string): SmsMessage {
   const now = Date.now();
-  const message = { id: smsId(), threadId: thread.id, direction, original: original.trim(), translated: translated?.trim(), createdAt: now, delivered: direction === "outgoing" ? !thread.blockedByCharacter : !thread.blockedByMe };
+  const message: SmsMessage = { id: smsId(), threadId: thread.id, direction, original: original.trim(), translated: translated?.trim(), createdAt: now, delivered: direction === "outgoing" ? !thread.blockedByCharacter : !thread.blockedByMe, batchId, awarenessAt: thread.awareness };
   state.messages.push(message);
   thread.updatedAt = now;
   return message;
