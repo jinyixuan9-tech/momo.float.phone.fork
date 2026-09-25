@@ -42,7 +42,8 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   const prompt = assemblePromptPayload({ character, history: [], preset, worldBooks, regexes,
     appId: "lysn", appTags: ["lysn", "bubble"], timeContext: buildCharacterTimeContext(character.timeZone) });
   const timeline = history.slice(-18).map(m => `${m.sender === "fan" ? "匿名粉丝" : m.sender === "artist" ? m.opener ? "频道开场白" : "艺人" : "系统"}: ${m.original}`).join("\n");
-  const photoRequest = mode === "reply" && /(?:照片|自拍|图片|发图|发张图|photo|picture|사진|셀카)/i.test(fanMessage || "");
+  const photoRequest = mode === "reply" && /(?:照片|自拍|图片|发图|张图|几张|多张|photo|picture|pics|사진|셀카)/i.test(fanMessage || "");
+  const multiplePhotosRequested = photoRequest && /(?:几张|多张|两张|三张|连发|一组|一堆|几[张幅]|多[张幅]|[2-9][张幅]|multiple|several|photos|pictures|여러\s*장|두\s*장|세\s*장)/i.test(fanMessage || "");
   const quoteTest = mode === "reply" && /(?:引用|测试引用|quote|인용|引用して)/i.test(fanMessage || "");
   const mayQuote = (mode === "new" || mode === "reply") && (quoteTest || Math.random() < ({ rare: .1, normal: .32, often: .7 }[room?.quoteStyle || "normal"]));
   const quotedFan = quoteTest ? [...history].reverse().find(m => m.sender === "fan" && m.kind === "text" && m.original.trim()) : undefined;
@@ -59,10 +60,11 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
     quoteTest && quotedFan ? `这轮粉丝明确要求测试引用。请引用这条已存在的匿名留言并自然回复，不要编造另一条替代：${quotedFan.original.slice(0, 300)}。只引用文字，不暴露发言者身份；本轮 publish=true，至少一条消息。` : mayQuote ? "如果自然合适，可以先模拟一条匿名粉丝留言并引用它，然后再作公开回复。quote 必须有 original 和 translated，两者分别是模拟留言原文和中文翻译。引用只存在于艺人消息里，不要把模拟留言当作用户发言。" : "这轮不要引用粉丝留言，也不要输出 quote。",
     profilePrompt || "这次不修改资料；即使对话提到了昵称或头像，也不要输出 profileUpdate。你可以自然问问大家的意见。",
     stickers.length ? `本聊天室可发送表情包的名称：${stickers.map(s => s.name).join("、")}。发送时 kind=sticker 且 stickerName 严格使用列表中某个名称，original 填该名称。` : "没有配置表情包，不要发送表情包。",
-    photoChoices.length ? `这是已关联到你且可用的相册候选（只允许从中选择）：${photoChoices.map(p => `${p.id}：${[p.subject, p.visionSummary, ...(p.visionTags || [])].filter(Boolean).join("、").slice(0, 95) || "未填写内容"}`).join("；")}。如果你决定现在发一张已有关联照片，输出 kind=photo 并填写准确的 photoId；正文仍按你的语言说，不要因为照片描述是中文就改说中文。不要声称已经发图却只输出文字。` : "当前没有已关联、允许使用且完成识图的角色照片；不要说照片已发出。如果这轮想发图，先按人设解释暂时发不了。",
+    photoChoices.length ? `这是已关联到你且可用的相册候选（只允许从中选择）：${photoChoices.map(p => `${p.id}：${[p.subject, p.visionSummary, ...(p.visionTags || [])].filter(Boolean).join("、").slice(0, 95) || "未填写内容"}`).join("；")}。发照片时每张各输出一条 kind=photo，并填写准确的 photoId；想发多张时选择不同 photoId，连续排列所有 photo 消息，最后再写文字消息。photo 的 original 可以是一句照片发出后要说的话，它会显示成下一条独立气泡；不要声称已经发图却只输出文字。` : "当前没有已关联、允许使用且完成识图的角色照片；不要说照片已发出。如果这轮想发图，先按人设解释暂时发不了。",
     photoRequest ? "匿名粉丝正在请求照片。你可以按人设决定发或不发；若你说‘发了、给你看这张’等已经发送的措辞，这一条必须输出 kind=photo，并填写相册中的 photoId。只用文字形容照片不算发送照片。" : "",
+    multiplePhotosRequested && photoChoices.length > 1 ? "粉丝想看好几张图。若你愿意发，选 2 至 4 张不同的已关联照片，每张各一个 kind=photo，连续排在 messages 开头；等所有照片发完，再单独说话。不要重复发送同一张。" : "",
     "只输出 JSON：{\"publish\":true/false,\"messages\":[{\"kind\":\"text/photo/voice/sticker\",\"original\":\"...\",\"translated\":\"...\",\"quote\":{\"original\":\"...\",\"translated\":\"...\"},\"stickerName\":\"...\",\"photoId\":\"已关联相册照片ID\",\"photoDescription\":\"...\",\"mediaIntent\":\"selfie/portrait/group/food/scenery/object/pet/other\"}]}。无需 quote 时省略该字段。",
-    mode === "opening" || mode === "birthday" || quoteTest && quotedFan ? "publish 必须为 true，写至少一条消息。" : "可以决定 publish=false 且 messages=[]，这表示艺人暂时没有公开消息。publish=true 时自然发一至三条。",
+    mode === "opening" || mode === "birthday" || quoteTest && quotedFan ? "publish 必须为 true，写至少一条消息。" : multiplePhotosRequested ? "可以决定 publish=false 且 messages=[]；如果发图，最多四张照片加一条文字，总共至多五条。" : "可以决定 publish=false 且 messages=[]，这表示艺人暂时没有公开消息。publish=true 时自然发一至三条。",
     "photo 必须填写照片描述，voice 的 original 是逐字稿。",
     `频道最近消息：\n${timeline || "暂无消息"}`,
     fanMessage ? `最近收到的匿名粉丝来信：${fanMessage}` : "",
@@ -75,25 +77,39 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   let data = parseJson(raw);
   const initialRows = Array.isArray(data.messages) ? data.messages as Record<string, unknown>[] : [];
   const promisedPhotoOnly = photoRequest && photoChoices.length > 0 && initialRows.some(row => claimsPhotoSent(asText(row.original)) && !["photo", "image", "picture", "照片", "图片", "사진"].includes(asText(row.kind).toLowerCase()));
-  if (promisedPhotoOnly || quoteTest && quotedFan && (data.publish === false || !initialRows.length)) {
-    const correction = promisedPhotoOnly ? "你刚才说照片已经发出，却只输出文字。请重新输出 JSON：若确实要发，必须有 kind=photo 和候选列表中的 photoId；否则明确说暂时不能发，不要假装已经发出。" : "粉丝明确要求测试引用，但你刚才没有发消息。请写一条自然回复，并引用最近这条已有的匿名粉丝留言。";
+  const initialPhotoIds = initialRows.filter(row => ["photo", "image", "picture", "照片", "图片", "사진"].includes(asText(row.kind).toLowerCase())).map(row => asText(row.photoId));
+  const tooFewPhotos = multiplePhotosRequested && photoChoices.length > 1 && initialPhotoIds.length > 0 && new Set(initialPhotoIds).size < 2;
+  if (promisedPhotoOnly || tooFewPhotos || quoteTest && quotedFan && (data.publish === false || !initialRows.length)) {
+    const correction = promisedPhotoOnly ? "你刚才说照片已经发出，却只输出文字。请重新输出 JSON：若确实要发，必须有 kind=photo 和候选列表中的 photoId；否则明确说暂时不能发，不要假装已经发出。" : tooFewPhotos ? "粉丝请求多张照片且相册有多张候选。若你决定发图，请重新输出 2 至 4 条连续的 kind=photo，各用不同 photoId；说话单独放在最后的 text 消息。" : "粉丝明确要求测试引用，但你刚才没有发消息。请写一条自然回复，并引用最近这条已有的匿名粉丝留言。";
     raw = await sendLLMRequest(api, preset, [...messages, { role: "assistant", content: raw }, { role: "user", content: correction }], regexes, requestMeta, requestOptions);
     data = parseJson(raw);
   }
   if (data.publish === false && mode !== "opening" && mode !== "birthday" && !(quoteTest && quotedFan)) return [];
-  const rows: GeneratedLysn[] = (Array.isArray(data.messages) ? data.messages : [data]).slice(0, 3).map((item, index) => {
+  const rows: GeneratedLysn[] = (Array.isArray(data.messages) ? data.messages : [data]).slice(0, multiplePhotosRequested ? 5 : 3).map((item, index) => {
     const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
     const rawKind = asText(row.kind);
     let kind: GeneratedLysn["kind"] = ["photo", "image", "picture", "照片", "图片", "사진"].includes(rawKind.toLowerCase()) ? "photo" : rawKind === "voice" || rawKind === "sticker" ? rawKind : "text";
     const sticker = kind === "sticker" ? stickers.find(s => s.name === asText(row.stickerName) || s.name === asText(row.original)) : undefined;
     if (kind === "sticker" && !sticker) kind = "text";
-    const original = kind === "sticker" && sticker ? sticker.name : asText(row.original);
+    const original = kind === "sticker" && sticker ? sticker.name : asText(row.original) || (kind === "photo" ? "照片" : "");
     const quoteData = mayQuote && row.quote && typeof row.quote === "object" ? row.quote as Record<string, unknown> : null;
     const quote = quoteTest && quotedFan ? index === 0 ? { original: quotedFan.original, translated: quotedFan.translated || quotedFan.original } : undefined : quoteData && asText(quoteData.original) ? { original: asText(quoteData.original), translated: asText(quoteData.translated) || asText(quoteData.original) } : undefined;
     const chosenPhotoId = photoChoices.some(p => p.id === asText(row.photoId)) ? asText(row.photoId) : undefined;
     if (kind === "text" && photoRequest && chosenPhotoId && claimsPhotoSent(original)) kind = "photo";
     return { kind, original, translated: asText(row.translated) || original, quote, stickerName: sticker?.name, photoId: chosenPhotoId, photoDescription: asText(row.photoDescription), mediaIntent: ["selfie", "portrait", "group", "food", "scenery", "object", "pet", "other"].includes(asText(row.mediaIntent)) ? asText(row.mediaIntent) as GeneratedLysn["mediaIntent"] : "other" } satisfies GeneratedLysn;
   }).filter(row => row.original);
+  if (photoRequest && rows.some(row => row.kind === "photo")) {
+    const used = new Set<string>();
+    const distinctPhotos = rows.filter(row => {
+      if (row.kind !== "photo") return false;
+      if (!row.photoId) return true;
+      if (used.has(row.photoId)) return false;
+      used.add(row.photoId);
+      return true;
+    });
+    const others = rows.filter(row => row.kind !== "photo");
+    rows.splice(0, rows.length, ...distinctPhotos, ...others);
+  }
   if (photoRequest && photoChoices.length && rows.some(row => row.kind === "text" && claimsPhotoSent(row.original)) && !rows.some(row => row.kind === "photo")) throw new Error("艺人只描述了照片，没有真正发出图片；这次未发送虚假的照片消息，请重试。");
   if (quoteTest && quotedFan && rows.length && !rows.some(row => row.quote)) rows[0].quote = { original: quotedFan.original, translated: quotedFan.translated || quotedFan.original };
   if (!rows.length && (data.publish !== false || quoteTest && quotedFan)) throw new Error("LYSN 没有返回有效正文，请重试。");

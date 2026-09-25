@@ -614,7 +614,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
     const previous = messageItems.at(-1);
     if (!chatSearchOpen && room.foldPhotos !== false && message.sender === "artist" && message.kind === "photo" && message.imageUrl && previous) {
       const last = Array.isArray(previous) ? previous.at(-1) : previous;
-      if (last?.sender === "artist" && last.kind === "photo" && last.imageUrl && !last.quote && !message.quote && message.createdAt - last.createdAt < 120000) {
+      if (last?.sender === "artist" && last.kind === "photo" && last.imageUrl && !last.quote && !message.quote && (last.photoCaptionDetached || !last.original || /^(?:照片|图片|photo|picture|사진)$/i.test(last.original)) && (message.photoCaptionDetached || !message.original || /^(?:照片|图片|photo|picture|사진)$/i.test(message.original)) && message.createdAt - last.createdAt < 120000) {
         if (Array.isArray(previous)) previous.push(message);
         else messageItems[messageItems.length - 1] = [previous, message];
         continue;
@@ -672,14 +672,15 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
         <div className={styles.messageBody}>
           {m.sender === "artist" && <div className={styles.senderLine}><ArtistBadge/><b>{displayName}</b></div>}
           {m.quote && <div className={styles.quoteBubble}><span>ARTIST 的回复：</span><p>{showName(m.quote.original)}</p><small>{showName(m.quote.translated)}</small></div>}
-          <div className={`${styles.bubble} ${m.kind === "voice" ? styles.voiceBubbleShell : ""}`} onClick={bubbleClick}>
+          <div className={`${styles.bubble} ${m.kind === "voice" ? styles.voiceBubbleShell : ""} ${m.kind === "photo" ? styles.photoBubbleOnly : ""}`} onClick={bubbleClick}>
             {m.kind === "photo" && m.imageUrl && <button type="button" className={styles.photoButton} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl} className={styles.photo}/></button>}
             {m.kind === "sticker" && m.imageUrl && <AssetImage src={m.imageUrl} className={styles.stickerBubble}/>}
             {m.kind === "voice" && <VoicePlayer message={m} onNotice={onNotice} />}
-            {m.kind !== "sticker" && m.kind !== "voice" && <p>{showName(displayText)}</p>}
+            {m.kind !== "sticker" && m.kind !== "voice" && m.kind !== "photo" && <p>{showName(displayText)}</p>}
             {m.sender === "fan" && m.sourceText && <small className={styles.fanSourceText}>{m.sourceText}</small>}
             {hasTranslation && showTranslation && state.settings.translationMode === "fold" && m.kind !== "voice" && <small className={styles.translation}>{translationText}</small>}
           </div>
+          {m.kind === "photo" && !m.photoCaptionDetached && m.original && !/^(?:照片|图片|photo|picture|사진)$/i.test(m.original) && <div className={`${styles.bubble} ${styles.legacyPhotoCaption}`}><p>{showName(m.original)}</p></div>}
           {m.kind === "voice" && <button type="button" className={styles.voiceTranscript} onClick={bubbleClick} aria-label={hasTranslation ? showTranslation ? "收起语音翻译" : "查看语音翻译" : "语音原文"}><span>{hasTranslation && showTranslation && state.settings.translationMode === "replace" ? translationText : showName(m.original)}</span>{hasTranslation && showTranslation && state.settings.translationMode === "fold" && <small>{translationText}</small>}</button>}
         </div>
         <div className={styles.messageMeta}>{m.sender === "fan" && <span className={`${styles.readReceipt} ${m.seenAt || messages.some(next => next.sender === "artist" && !next.opener && next.createdAt > m.createdAt) ? styles.readReceiptSeen : ""}`} aria-label={m.seenAt || messages.some(next => next.sender === "artist" && !next.opener && next.createdAt > m.createdAt) ? "已读" : "未读"}>{(m.seenAt || messages.some(next => next.sender === "artist" && !next.opener && next.createdAt > m.createdAt)) && <Check size={10} strokeWidth={3}/>}</span>}<time>{formatClock(m.createdAt)}</time></div>

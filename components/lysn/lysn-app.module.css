@@ -360,3 +360,8 @@
 .myStickerGrid img,.myStickerGrid .fallback{display:block;width:100%;aspect-ratio:1;object-fit:contain}
 .myStickerGrid input{width:100%;min-width:0;padding:3px;border:0;outline:0;text-align:center;font-size:calc(10px*var(--app-text-scale,1))}
 .myStickerGrid button{position:absolute;top:2px;right:2px;display:grid;place-items:center;width:20px;height:20px;border:0;border-radius:50%;background:#fff;color:#715e7e}
+/* Photos are image-only messages; any caption is rendered as its own later text bubble. */
+.app .photoBubbleOnly{padding:5px;border-radius:16px 16px 16px 5px}
+.app .photoBubbleOnly .photoButton{line-height:0;border-radius:11px;overflow:hidden}
+.app .photoBubbleOnly .photo{display:block;margin:0;border-radius:11px}
+.app .legacyPhotoCaption{margin-top:7px}

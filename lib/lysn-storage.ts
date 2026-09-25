@@ -11,6 +11,7 @@ export type LysnMessage = {
   original: string; translated?: string; imageUrl?: string; photoId?: string;
   quote?: LysnQuote; opener?: boolean; createdAt: number;
   sourceText?: string; seenAt?: number;
+  photoCaptionDetached?: boolean;
 };
 export type LysnProfile = { name: string; avatar: string; cover?: string; bio?: string; group?: string; updatedAt: number };
 export type LysnUserProfile = { name: string; avatar: string; cover: string; birthday: string; gender: string; stickers?: LysnSticker[] };

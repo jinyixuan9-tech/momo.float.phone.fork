@@ -9,6 +9,8 @@ export async function prepareLysnMessages(id: string, generated: GeneratedLysn[]
   const room = loadLysn().rooms[id];
   const stickers = (room?.stickerPacks || []).flatMap(pack => pack.stickers);
   const rows: Omit<LysnMessage, "id" | "characterId" | "createdAt">[] = [];
+  const photoCaptions: Omit<LysnMessage, "id" | "characterId" | "createdAt">[] = [];
+  const flushPhotoCaptions = () => { rows.push(...photoCaptions); photoCaptions.length = 0; };
   for (const item of generated) {
     let kind: LysnMessage["kind"] = item.kind;
     let imageUrl: string | undefined;
@@ -35,7 +37,15 @@ export async function prepareLysnMessages(id: string, generated: GeneratedLysn[]
         // A failed photo must not turn into text falsely claiming the photo was sent.
         continue;
       }
+      const caption = item.original.trim();
+      const hasCaption = caption && !/^(?:照片|图片|photo|picture|사진)[!！.。]?$/.test(caption);
+      rows.push({ sender: "artist", kind: "photo", original: item.photoDescription || "照片", translated: item.photoDescription || "照片", imageUrl, photoId, quote: item.quote && !hasCaption ? item.quote : undefined, photoCaptionDetached: true });
+      if (hasCaption) {
+        photoCaptions.push({ sender: "artist", kind: "text", original: caption, translated: item.translated || caption, quote: item.quote });
+      }
+      continue;
     }
+    flushPhotoCaptions();
     if (kind === "sticker") {
       const sticker = stickers.find(s => s.name === item.stickerName || s.name === item.original);
       if (sticker?.imageUrl) imageUrl = sticker.imageUrl;
@@ -43,5 +53,6 @@ export async function prepareLysnMessages(id: string, generated: GeneratedLysn[]
     }
     rows.push({ sender: "artist", kind, original: item.original, translated: item.translated, imageUrl, photoId, quote: item.quote });
   }
+  flushPhotoCaptions();
   return rows;
 }
