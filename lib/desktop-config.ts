@@ -76,7 +76,7 @@ export const ICONS: Record<IconId, IconMeta> = {
   photos: { id: "photos", label: "照片", tone: "var(--c-icon-rose)", placeholder: false },
   weverse: { id: "weverse", label: "Weverse", tone: "var(--c-icon-teal)", placeholder: false },
   lysn: { id: "lysn", label: "LYSN", tone: "#709be5", placeholder: false },
-  sms: { id: "sms", label: "信息", tone: "#34c759", placeholder: false },
+  sms: { id: "sms", label: "信息", tone: "#43bb71", placeholder: false },
   diary: { id: "diary", label: "手记", tone: "var(--c-icon-violet)", placeholder: false },
   music: { id: "music", label: "\u97F3\u4E50", tone: "var(--c-icon-coral)", placeholder: false },
   reading: { id: "reading", label: "\u9605\u8BFB", tone: "var(--c-icon-amber)", placeholder: false },

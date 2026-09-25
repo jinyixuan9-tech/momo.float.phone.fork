@@ -37,8 +37,7 @@ import {
 } from "@/lib/group-admin";
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { removeChatSessionCompletely } from "@/lib/chat-session-remove";
-import { triggerBlacklistReaction, triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
-import { clearRequestsForCharacter, dispatchFriendRequestUpdated } from "@/lib/friend-request-storage";
+import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
 import { isAgentComputerConfigured } from "@/lib/agent-computer";
 import {
@@ -778,15 +777,6 @@ export function ChatSettingsPanel({
                 blacklistUserName: userLabel,
             },
         });
-
-        if (blocked) {
-            // Chat reconnect and SMS are parallel options: the AI may send a friend
-            // request, stay quiet, or later reach the user through native SMS.
-            triggerBlacklistReaction(session.contactId).catch(() => {});
-        } else {
-            clearRequestsForCharacter(session.contactId);
-            dispatchFriendRequestUpdated();
-        }
     };
 
     const handleClearHistory = () => {

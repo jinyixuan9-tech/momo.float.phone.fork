@@ -32,22 +32,6 @@ const MAX_ROUNDS = 3;
  * Trigger AI reaction after user deletes a friend.
  * Fire-and-forget — call from settings panel, results appear in "新的朋友" UI.
  */
-/**
- * Trigger an autonomous reconnect attempt after the user blacklists the character in Chat.
- * Unlike delete-friend, the contact still exists; pending requests are allowed to remain
- * visible until the user unblocks/accepts/rejects them. The AI may also choose to give up.
- */
-export async function triggerBlacklistReaction(characterId: string): Promise<void> {
-    const chars = loadCharacters();
-    if (!chars.some(c => c.id === characterId)) return;
-    const sessions = loadChatSessions();
-    const session = sessions.find(s => !s.isGroup && s.contactId === characterId);
-    if (!session?.isBlacklisted) return;
-    const latest = getLatestRequestForCharacter(characterId);
-    if (latest?.status === "pending") return;
-    await generateAndStoreFriendRequest(session, characterId, 1);
-}
-
 export async function triggerDeleteFriendReaction(characterId: string): Promise<void> {
     const chars = loadCharacters();
     const char = chars.find(c => c.id === characterId);
@@ -135,7 +119,7 @@ export async function handleAcceptFriendRequest(
     const sessIdx = sessions.findIndex(s => s.id === session.id);
     if (sessIdx !== -1) {
         sessions[sessIdx].autoReplied = true; // Mark as handled
-        sessions[sessIdx].isBlacklisted = false;
+        sessions[sessIdx].isBlacklisted = false; // A blocked Chat request is accepted only when the user restores contact.
         saveChatSessions(sessions);
     }
 

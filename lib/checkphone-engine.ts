@@ -1,3 +1,4 @@
+import { mergeSmsIntoCheckPhone } from "./sms-checkphone";
 import { loadCharacters } from "./character-storage";
 import { normalizeBilingualTextInput, splitBilingualText } from "./bilingual-text";
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
@@ -4535,7 +4536,7 @@ export async function generateCheckPhoneMessages(
       };
     }
     return {
-      payload,
+      payload: mergeSmsIntoCheckPhone(characterId, payload),
       summary: formatSnapshotSummary(payload),
     };
   } catch (error) {

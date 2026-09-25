@@ -78,7 +78,6 @@ type MemorySourceKey = keyof NonNullable<MemoryConfig["shortTermAllowedSources"]
 /** 记忆来源开关：同时作用于短期上下文与长期总结 */
 const MEMORY_SOURCE_OPTIONS: Array<{ key: MemorySourceKey; label: string }> = [
     { key: "chat", label: "私聊上下文" },
-    { key: "sms", label: "短信" },
     { key: "group_chat", label: "群聊上下文" },
     { key: "moments", label: "朋友圈" },
     { key: "checkphone", label: "查手机" },

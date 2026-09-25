@@ -121,7 +121,6 @@ import {
   type DesktopFolderMap,
   type DesktopIconLayout,
   type DesktopPageKey,
-  ensureNativeSmsIcon,
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
@@ -1514,12 +1513,11 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         try {
           const normalized = normalizeLayout(JSON.parse(rawV2), hydratedWidgets, dockIds, hydratedFolders);
           const sane = sanitizeDesktopFolders(hydratedFolders, normalized, hydratedDock, hydratedWidgets);
-          const withSms = ensureNativeSmsIcon(sane.layout, hydratedWidgets, hydratedDock, sane.folders);
           setFolders(sane.folders);
-          setLayout(withSms.layout);
-          if (sane.changed || withSms.changed) {
+          setLayout(sane.layout);
+          if (sane.changed) {
             writeDesktopFolders(sane.folders);
-            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withSms.layout));
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(sane.layout));
           }
           setDesktopReady(true);
           return;
@@ -1531,13 +1529,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           const parsed = JSON.parse(rawV1) as Record<string, unknown>;
           const w1 = hydratedWidgets.filter(w => w.page === 1);
           const w2 = hydratedWidgets.filter(w => w.page === 2);
-          const migrated = {
+          setLayout({
             page1: migratePageV1(parsed.page1, PAGE_1_DEFAULT, w1).filter(ic => !dockIds.has(ic.id)),
             page2: migratePageV1(parsed.page2, PAGE_2_DEFAULT, w2).filter(ic => !dockIds.has(ic.id)),
-          } as DesktopLayout;
-          const withSms = ensureNativeSmsIcon(migrated, hydratedWidgets, hydratedDock, hydratedFolders);
-          setLayout(withSms.layout);
-          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withSms.layout));
+          } as DesktopLayout);
           kvRemove(ICON_LAYOUT_STORAGE_KEY_V1);
           setDesktopReady(true);
           return;

@@ -66,14 +66,12 @@ export function getPendingFriendRequests(): FriendRequest[] {
 
     const characterIds = new Set(loadCharacters().map(c => c.id));
     const contactCharacterIds = new Set(loadChatContacts().map(c => c.characterId));
-    const blacklistedCharacterIds = new Set(loadChatSessions().filter(s => !s.isGroup && s.isBlacklisted).map(s => s.contactId));
+    const blockedCharacterIds = new Set(loadChatSessions().filter(s => !s.isGroup && s.isBlacklisted).map(s => s.contactId));
     let changed = false;
 
     const activeRequests = all.filter(r => {
         if (r.status !== "pending") return true;
-        // A blacklisted contact is still in the contact list, but reconnect requests are
-        // intentionally allowed to remain visible while that communication channel is blocked.
-        const stale = !characterIds.has(r.characterId) || (contactCharacterIds.has(r.characterId) && !blacklistedCharacterIds.has(r.characterId));
+        const stale = !characterIds.has(r.characterId) || (contactCharacterIds.has(r.characterId) && !blockedCharacterIds.has(r.characterId));
         if (stale) {
             changed = true;
             return false;

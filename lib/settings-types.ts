@@ -297,7 +297,7 @@ export const CONTENT_APP_LABELS: Record<ContentAppId, string> = {
     adventure: "冒险",
     weverse: "Weverse",
     lysn: "LYSN",
-    sms: "信息",
+    sms: "短信",
 };
 
 // Binding slot — config selections for a given scope
