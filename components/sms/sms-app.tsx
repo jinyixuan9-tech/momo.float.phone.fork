@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, Ban, Check, ChevronRight, ImagePlus, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldOff, Video, AudioLines, X } from "lucide-react";
+import { ArrowLeft, Ban, Check, ChevronRight, ImagePlus, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldOff, Video, AudioLines, X, Trash2, RotateCcw } from "lucide-react";
 import { loadCharacters } from "@/lib/character-storage";
-import { addSmsMessage, createVirtualIdentity, ensureSmsThread, loadSms, saveSms, phoneFromPersona, smsId, SMS_EVENT, SMS_REGIONS, type SmsMessage, type SmsState, type SmsThread } from "@/lib/sms-storage";
+import { addSmsMessage, createVirtualIdentity, ensureSmsThread, loadSms, saveSms, phoneFromPersona, smsId, SMS_EVENT, SMS_REGIONS, DEFAULT_SMS_EMOJI, type SmsMessage, type SmsState, type SmsThread } from "@/lib/sms-storage";
 import { generateSmsReply } from "@/lib/sms-engine";
-import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
 import styles from "./sms-app.module.css";
 
-const EMOJI = ["❤️", "👍", "😂", "😮", "😢", "👀", "🔥", "🫶", "🐰", "🥺", "😍", "✨", "💀", "👏", "😡", "💕"];
+const isEmoji = (value: string) => /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(value) && Array.from(value).length <= 16;
 const date = (n: number) => new Date(n).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 const clock = (n: number) => new Date(n).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 const stamp = (n: number) => {
@@ -36,12 +35,19 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [tray, setTray] = useState(false);
   const [pickedEmoji, setPickedEmoji] = useState("");
+  const [emojiDraft, setEmojiDraft] = useState("");
+  const [manageEmoji, setManageEmoji] = useState(false);
+  const [emojiError, setEmojiError] = useState("");
+  const [translationExpanded, setTranslationExpanded] = useState<Record<string, boolean>>({});
   const [contextId, setContextId] = useState<string | null>(null);
+  const [contextAnchor, setContextAnchor] = useState({ top: 0, left: 0 });
   const [editor, setEditor] = useState<{original:string;translated:string} | null>(null);
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerOrigin = useRef<{x:number;y:number} | null>(null);
+  const skipClick = useRef(false);
   const dragEmoji = useRef("");
   const listRef = useRef<HTMLDivElement>(null);
+  const conversationRef = useRef<HTMLDivElement>(null);
   const characters = useMemo(() => loadCharacters(), [route]);
   const selectedThread = state.threads.find(t => t.id === selected) ?? null;
   const messages = state.messages.filter(m => m.threadId === selected);
@@ -57,6 +63,7 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
   }), [state, search, characters]);
   useEffect(() => { const handler = () => setState(loadSms()); window.addEventListener(SMS_EVENT, handler); return () => window.removeEventListener(SMS_EVENT, handler); }, []);
   useEffect(() => { if (route === "chat" && !contextId) listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages.length, selected, route, contextId]);
+  useEffect(() => { setTranslationExpanded({}); }, [state.autoExpandTranslation]);
   useEffect(() => () => { if (longPress.current) clearTimeout(longPress.current); }, []);
   function persist(next: SmsState) { saveSms(next); setState({ ...next }); }
   function openSettings(from: "list" | "compose" | "chat" | "detail") { setSettingsReturn(from); setRoute("settings"); }
@@ -157,11 +164,36 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
     target.reactions = [...(target.reactions ?? []).filter(r => r.by !== "user"), { id: smsId(), emoji, by: "user" }];
     persist(next); setPickedEmoji(""); setTray(false);
   }
+  function addEmoji() {
+    const emoji = emojiDraft.trim(), next = loadSms();
+    if (!isEmoji(emoji)) return setEmojiError("请输入一个表情（可含肤色或组合）");
+    if (next.emojiChoices.includes(emoji)) return setEmojiError("这个表情已经在备选里了");
+    if (next.emojiChoices.length >= 80) return setEmojiError("备选最多保存 80 个表情");
+    next.emojiChoices.push(emoji); persist(next); setEmojiDraft(""); setEmojiError("");
+  }
+  function removeEmoji(emoji: string) {
+    const next = loadSms(); next.emojiChoices = next.emojiChoices.filter(item => item !== emoji);
+    persist(next); if (pickedEmoji === emoji) setPickedEmoji("");
+  }
+  function showContext(id: string, element: HTMLElement) {
+    const container = conversationRef.current;
+    if (!container) return;
+    const rect = element.getBoundingClientRect(), parent = container.getBoundingClientRect();
+    const incoming = loadSms().messages.find(m => m.id === id)?.direction === "incoming";
+    const width = Math.min(254, parent.width - 24), height = incoming ? 204 : 110;
+    const above = rect.top - parent.top - height - 9;
+    const below = rect.bottom - parent.top + 9;
+    const top = above >= 12 ? above : Math.min(Math.max(12, below), Math.max(12, parent.height - height - 12));
+    const rawLeft = incoming ? rect.left - parent.left : rect.right - parent.left - width;
+    setContextAnchor({ top, left: Math.max(12, Math.min(rawLeft, parent.width - width - 12)) });
+    setContextId(id); setEditor(null); setPickedEmoji("");
+  }
   function startPress(event: ReactPointerEvent, id: string) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     pointerOrigin.current = {x:event.clientX,y:event.clientY};
     if (longPress.current) clearTimeout(longPress.current);
-    longPress.current = setTimeout(() => { setContextId(id); setEditor(null); setPickedEmoji(""); longPress.current = null; }, 500);
+    const element = event.currentTarget as HTMLElement;
+    longPress.current = setTimeout(() => { skipClick.current = true; showContext(id, element); longPress.current = null; }, 500);
   }
   function movePress(event: ReactPointerEvent) {
     if (pointerOrigin.current && Math.hypot(event.clientX-pointerOrigin.current.x,event.clientY-pointerOrigin.current.y)>12) endPress();
@@ -215,16 +247,74 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
       {editing ? <div className={styles.deleteDock}><span>已选择 {selectedRows.length} 项</span><button disabled={!selectedRows.length} onClick={deleteThreads}>删除</button></div> : <div className={styles.listDock}><label className={styles.search}><Search size={20}/><input placeholder="搜索" value={search} onChange={e=>setSearch(e.target.value)} /></label><button className={styles.composeButton} aria-label="新建短信" onClick={()=>{setRoute("compose");setError("");}}><Pencil size={22}/></button></div>}
     </>}
     {route === "compose" && <><header className={styles.subHeader}><button className={styles.glass} onClick={back}><ArrowLeft size={20}/></button><strong>新建信息</strong><button className={styles.glass} onClick={()=>openSettings("compose")}><Settings2 size={20}/></button></header><div className={styles.form}><label>收件人<select value={characterId} onChange={e=>setCharacterId(e.target.value)}><option value="">选择角色</option>{characters.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>发件号码<select value={identityId} onChange={e=>setIdentityId(e.target.value)}><option value="real">真实号码 {state.realNumber || "（设置中填写）"}</option>{state.identities.map(i=><option key={i.id} value={i.id}>{i.number}</option>)}</select></label><button className={styles.primary} onClick={start}>进入会话</button><button className={styles.secondary} onClick={()=>openSettings("compose")}>管理我的号码 / 生成小号</button></div></>}
-    {route === "chat" && selectedThread && <div className={styles.conversation} style={background ? {backgroundImage:`linear-gradient(#ffffff16,#ffffff16),url(${background})`} : undefined}>
-      <header className={styles.chatHeader}><button className={styles.glass} aria-label="返回" onClick={back}><ArrowLeft size={22}/></button><button className={styles.person} onClick={()=>setRoute("detail")}>{avatar(selectedThread.characterId)}<span className={styles.personName}>{name(selectedThread)} <ChevronRight size={12}/></span></button><button className={styles.glass} aria-label="视频暂不可用" title="视频暂不可用" disabled><Video size={21}/></button></header>
-      <div className={styles.bubbles} ref={listRef}>{messages.length===0 && <div className={styles.chatEmpty}>发送第一条短信，或召唤角色主动说话</div>}{messages.map((m,i)=>{const following=messages[i+1], tail=!following || following.direction!==m.direction || separated(following,m);const delivered=m.direction==="outgoing" && i===messages.length-1;return <div key={m.id}>{timeMarkers.has(m.id) && <div className={styles.timestamp}>{stamp(m.createdAt)}</div>}<div className={`${styles.message} ${m.direction==="outgoing"?styles.mine:styles.theirs} ${tail?styles.tail:""}`} data-sms-message-id={m.id} onPointerDown={e=>startPress(e,m.id)} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={endPress} onContextMenu={e=>{e.preventDefault();endPress();setContextId(m.id);setEditor(null);}} onClick={()=>{if(pickedEmoji && m.direction==="incoming") react(m.id,pickedEmoji);}} onDragOver={e=>{if(dragEmoji.current && m.direction==="incoming") e.preventDefault();}} onDrop={e=>{e.preventDefault();if(dragEmoji.current)react(m.id,dragEmoji.current);dragEmoji.current="";}}><div className={styles.bubble}>{m.direction==="incoming" ? <CheckPhoneBilingualText text={m.original} translated={m.translated} tone="messages" variant="inline" /> : m.original}</div>{m.reactions?.length ? <div className={styles.reactions}>{m.reactions.map(r=><span key={r.id} className={styles.reaction}>{r.emoji}</span>)}</div> : null}{delivered && <span className={styles.delivered}>Delivered</span>}</div></div>})}{busy && <div className={styles.typing}>···</div>}</div>
-      {tray && <div className={styles.emojiTray}><span>点选或拖到对方短信上</span><div>{EMOJI.map(emoji=><button type="button" key={emoji} className={pickedEmoji===emoji?styles.emojiSelected:""} draggable onDragStart={e=>{dragEmoji.current=emoji;e.dataTransfer.setData("text/plain",emoji);}} onDragEnd={()=>{dragEmoji.current="";}} onPointerDown={e=>{pointerOrigin.current={x:e.clientX,y:e.clientY};dragEmoji.current=emoji;}} onPointerUp={e=>{const el=document.elementFromPoint(e.clientX,e.clientY)?.closest("[data-sms-message-id]");if(el)react(el.getAttribute("data-sms-message-id")||"",emoji);dragEmoji.current="";}} onClick={()=>setPickedEmoji(emoji)}>{emoji}</button>)}</div></div>}
+    {route === "chat" && selectedThread && <div ref={conversationRef} className={styles.conversation} style={background ? {backgroundImage:`url(${background})`} : undefined}>
+      <header className={styles.chatHeader}>
+        <button className={styles.glass} aria-label="返回" onClick={back}><ArrowLeft size={22}/></button>
+        <button className={styles.person} onClick={()=>setRoute("detail")}>{avatar(selectedThread.characterId)}<span className={styles.personName}>{name(selectedThread)} <ChevronRight size={12}/></span></button>
+        <button className={styles.glass} aria-label="视频暂不可用" title="视频暂不可用" disabled><Video size={21}/></button>
+      </header>
+      <div className={styles.bubbles} ref={listRef}>
+        {messages.length===0 && <div className={styles.chatEmpty}>发送第一条短信，或召唤角色主动说话</div>}
+        {messages.map((m,i)=>{
+          const following=messages[i+1];
+          const tail=!following || following.direction!==m.direction || separated(following,m);
+          const delivered=m.direction==="outgoing" && i===messages.length-1;
+          const hasTranslation=m.direction==="incoming" && !!m.translated && m.translated!==m.original;
+          const expanded=translationExpanded[m.id] ?? state.autoExpandTranslation;
+          return <div key={m.id}>
+            {timeMarkers.has(m.id) && <div className={styles.timestamp}>{stamp(m.createdAt)}</div>}
+            <div className={`${styles.message} ${m.direction==="outgoing"?styles.mine:styles.theirs} ${tail?styles.tail:""}`} data-sms-message-id={m.id}
+              onPointerDown={e=>startPress(e,m.id)} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={endPress}
+              onContextMenu={e=>{e.preventDefault();endPress();skipClick.current=true;showContext(m.id,e.currentTarget);}}
+              onDragOver={e=>{if(dragEmoji.current && m.direction==="incoming") e.preventDefault();}}
+              onDrop={e=>{e.preventDefault();if(dragEmoji.current)react(m.id,dragEmoji.current);dragEmoji.current="";}}>
+              <div className={styles.bubbleWrap}>
+                <div className={styles.bubble} role={hasTranslation?"button":undefined} tabIndex={hasTranslation?0:undefined} aria-expanded={hasTranslation?expanded:undefined}
+                  onKeyDown={e=>{if(hasTranslation && (e.key==="Enter" || e.key===" ")){e.preventDefault();setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}}
+                  onClick={()=>{if(skipClick.current || contextId){skipClick.current=false;return;}if(pickedEmoji && m.direction==="incoming"){react(m.id,pickedEmoji);return;}if(hasTranslation)setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}>{m.original}</div>
+                {m.reactions?.length ? <div className={styles.reactions}>{m.reactions.map(r=><span key={r.id} className={styles.reaction}>{r.emoji}</span>)}</div> : null}
+              </div>
+              {hasTranslation && expanded && <div className={styles.translation}>{m.translated}</div>}
+              {delivered && <span className={styles.delivered}>Delivered</span>}
+            </div>
+          </div>;
+        })}
+        {busy && <div className={styles.typing}>···</div>}
+      </div>
+      {tray && <div className={styles.emojiTray}>
+        <div className={styles.emojiHeading}><span>{manageEmoji?"管理常用表情":"点选或拖到对方短信上"}</span><button type="button" onClick={()=>{setManageEmoji(value=>!value);setPickedEmoji("");}}>{manageEmoji?"完成":"管理"}</button></div>
+        <div className={styles.emojiGrid}>{state.emojiChoices.map(emoji=><span className={styles.emojiItem} key={emoji}>
+          <button type="button" aria-label={emoji} className={pickedEmoji===emoji?styles.emojiSelected:""} draggable={!manageEmoji}
+            onDragStart={e=>{dragEmoji.current=emoji;e.dataTransfer.setData("text/plain",emoji);}} onDragEnd={()=>{dragEmoji.current="";}}
+            onPointerDown={()=>{dragEmoji.current=emoji;}}
+            onPointerUp={e=>{if(!manageEmoji){const el=document.elementFromPoint(e.clientX,e.clientY)?.closest("[data-sms-message-id]");if(el)react(el.getAttribute("data-sms-message-id")||"",emoji);}dragEmoji.current="";}}
+            onClick={()=>{if(!manageEmoji)setPickedEmoji(emoji);}}>{emoji}</button>
+          {manageEmoji && <button type="button" className={styles.emojiRemove} aria-label={`移除 ${emoji}`} onClick={()=>removeEmoji(emoji)}>×</button>}
+        </span>)}</div>
+        <form className={styles.emojiAdd} onSubmit={e=>{e.preventDefault();addEmoji();}}><input aria-label="添加常用表情" placeholder="粘贴或输入自己的 emoji" value={emojiDraft} maxLength={32} onChange={e=>{setEmojiDraft(e.target.value);setEmojiError("");}}/><button type="submit">添加</button></form>
+        {emojiError && <span className={styles.emojiError}>{emojiError}</span>}
+        {manageEmoji && <button type="button" className={styles.emojiReset} onClick={()=>{const next=loadSms();next.emojiChoices=[...DEFAULT_SMS_EMOJI];persist(next);}}>恢复默认表情</button>}
+      </div>}
       {error && <p className={styles.error}>{error} {!busy && <button type="button" onClick={()=>void summon(selectedThread.id)}>重试</button>}</p>}
-      <form className={styles.composer} onSubmit={e=>{e.preventDefault();send();}}><button type="button" className={styles.round} aria-label="表情贴纸" aria-expanded={tray} onClick={()=>{setTray(v=>!v);setPickedEmoji("");}}><Plus size={25}/></button><input aria-label="短信内容" enterKeyHint="send" placeholder="iMessage" value={draft} onChange={e=>setDraft(e.target.value)} /><button type="button" className={styles.round} aria-label="召唤回复" title="召唤回复" disabled={busy} onClick={()=>void summon(selectedThread.id)}><AudioLines size={21}/></button></form>
-      {contextual && <div className={styles.contextShade} onPointerDown={e=>{if(e.target===e.currentTarget){setContextId(null);setEditor(null);}}}><div className={styles.contextPanel}>{editor ? <><h3>编辑短信</h3><label>原文<textarea autoFocus value={editor.original} onChange={e=>setEditor({...editor,original:e.target.value})}/></label>{contextual.direction==="incoming" && <label>中文翻译<textarea value={editor.translated} onChange={e=>setEditor({...editor,translated:e.target.value})}/></label>}<div className={styles.contextActions}><button onClick={()=>setEditor(null)}>取消</button><button onClick={editMessage} disabled={!editor.original.trim()}>保存</button></div></> : <><h3>短信操作</h3><button onClick={()=>setEditor({original:contextual.original,translated:contextual.translated??""})}>编辑{contextual.direction==="incoming"?"原文和翻译":""}</button>{contextual.direction==="incoming" && <><button onClick={()=>void regenerate("single")} disabled={busy}>重回本条</button><button onClick={()=>void regenerate("batch")} disabled={busy}>重回本轮</button></>}<button className={styles.redOption} onClick={deleteMessage}>删除</button><button className={styles.cancelOption} onClick={()=>setContextId(null)}>取消</button></>}</div></div>}
+      <form className={styles.composer} onSubmit={e=>{e.preventDefault();send();}}>
+        <button type="button" className={styles.round} aria-label="表情贴纸" aria-expanded={tray} onClick={()=>{setTray(value=>!value);setPickedEmoji("");}}><Plus size={25}/></button>
+        <input aria-label="短信内容" enterKeyHint="send" placeholder="iMessage" value={draft} onChange={e=>setDraft(e.target.value)} />
+        <button type="button" className={styles.round} aria-label="召唤回复" title="召唤回复" disabled={busy} onClick={()=>void summon(selectedThread.id)}><AudioLines size={21}/></button>
+      </form>
+      {contextual && <div className={styles.contextShade} onPointerDown={e=>{if(e.target===e.currentTarget){setContextId(null);setEditor(null);skipClick.current=false;}}}>
+        <div className={`${styles.contextPanel} ${editor?styles.contextEditor:""}`} style={editor?undefined:contextAnchor}>{editor ? <>
+          <h3>编辑短信</h3><label>原文<textarea autoFocus value={editor.original} onChange={e=>setEditor({...editor,original:e.target.value})}/></label>
+          {contextual.direction==="incoming" && <label>中文翻译<textarea value={editor.translated} onChange={e=>setEditor({...editor,translated:e.target.value})}/></label>}
+          <div className={styles.contextActions}><button onClick={()=>setEditor(null)}>取消</button><button onClick={editMessage} disabled={!editor.original.trim()}>保存</button></div>
+        </> : <>
+          <button onClick={()=>setEditor({original:contextual.original,translated:contextual.translated??""})}><Pencil size={16}/> 编辑{contextual.direction==="incoming"?"原文和翻译":""}</button>
+          {contextual.direction==="incoming" && <><button onClick={()=>void regenerate("single")} disabled={busy}><RotateCcw size={16}/> 重回本条</button><button onClick={()=>void regenerate("batch")} disabled={busy}><RotateCcw size={16}/> 重回本轮</button></>}
+          <button className={styles.redOption} onClick={deleteMessage}><Trash2 size={16}/> 删除</button>
+        </>}</div>
+      </div>}
     </div>}
     {route === "detail" && selectedThread && <><header className={styles.subHeader}><button className={styles.glass} onClick={back}><ArrowLeft size={20}/></button><strong>联系人设置</strong><span/></header><div className={styles.details}>{avatar(selectedThread.characterId)}<h2>{name(selectedThread)}</h2><label>修改备注<input placeholder="输入备注，保存后显示在头像下" value={selectedThread.alias ?? ""} onChange={e=>updateAlias(e.target.value)}/></label><label>角色手机号<input placeholder="输入手机号" value={selectedThread.characterNumber} onChange={e=>updateCharacterPhone(selectedThread.characterId,e.target.value)}/></label><div className={styles.card}><span>发件身份</span><b>{selectedThread.identityId==="real" ? `真实号码 ${state.realNumber||"未设置"}` : selectedThread.number}</b></div><div className={styles.card}><span>拉黑此人</span><button onClick={toggleBlock}>{selectedThread.blockedByMe ? <><ShieldOff size={17}/>解除拉黑</> : <><Ban size={17}/>拉黑此人</>}</button></div>{selectedThread.identityId!=="real" && <div className={styles.card}><span>对方对身份的判断</span><b>{selectedThread.awareness==="unknown"?"未知":selectedThread.awareness==="suspected"?"怀疑中":"已确认"}</b></div>}<label className={styles.upload}>设置聊天背景 <ImagePlus size={16}/><input type="file" hidden accept="image/*" onChange={e=>uploadBackground(e.target.files?.[0])}/></label>{background && <button className={styles.secondary} onClick={()=>{const next=loadSms(),thread=next.threads.find(t=>t.id===selected);if(thread){thread.backgroundUrl="";persist(next);}}}>清除本联系人背景</button>}<button className={styles.danger} onClick={()=>deleteThread(selectedThread.id)}>删除会话</button></div></>}
-    {route === "settings" && <><header className={styles.subHeader}><button className={styles.glass} onClick={()=>setRoute(settingsReturn)}><ArrowLeft size={20}/></button><strong>短信设置</strong><button className={styles.glass} onClick={()=>setRoute("list")}><X size={20}/></button></header><div className={styles.settings}><h3>我的号码</h3><label>真实号码<input placeholder="例如 +82 10 1234 5678" value={state.realNumber} onChange={e=>updateReal(e.target.value)} /></label><p>号码只用于虚构手机内的短信。发件身份按号码独立保存。</p><h3>虚拟号码</h3><div className={styles.inline}><select value={region} onChange={e=>setRegion(e.target.value)}>{SMS_REGIONS.map(r=><option value={r.code} key={r.code}>{r.name}</option>)}</select><button onClick={addVirtual}>随机生成</button></div>{state.identities.map(i=><div className={styles.number} key={i.id}>{i.number}<Check size={16}/></div>)}<h3>角色号码</h3>{characters.map(c=><label key={c.id}>{c.name}<input placeholder={phoneFromPersona(c.persona) || "输入手机号"} value={state.characterNumbers[c.id] ?? ""} onChange={e=>updateCharacterPhone(c.id,e.target.value)} /></label>)}<h3>角色主动短信</h3><select value={state.proactive} onChange={e=>{const next=loadSms();next.proactive=e.target.value as SmsState["proactive"];persist(next);}}><option value="off">关闭</option><option value="rare">较少</option><option value="normal">普通</option><option value="often">较多</option></select></div></>}
+    {route === "settings" && <><header className={styles.subHeader}><button className={styles.glass} onClick={()=>setRoute(settingsReturn)}><ArrowLeft size={20}/></button><strong>短信设置</strong><button className={styles.glass} onClick={()=>setRoute("list")}><X size={20}/></button></header><div className={styles.settings}><h3>显示</h3><label className={styles.toggleRow}><span>自动展开角色短信翻译</span><input type="checkbox" checked={state.autoExpandTranslation} onChange={e=>{const next=loadSms();next.autoExpandTranslation=e.target.checked;persist(next);}}/></label><p>仅影响短信 App；点击对方气泡仍可单独展开或收起。查手机的翻译设置不受影响。</p><h3>我的号码</h3><label>真实号码<input placeholder="例如 +82 10 1234 5678" value={state.realNumber} onChange={e=>updateReal(e.target.value)} /></label><p>号码只用于虚构手机内的短信。发件身份按号码独立保存。</p><h3>虚拟号码</h3><div className={styles.inline}><select value={region} onChange={e=>setRegion(e.target.value)}>{SMS_REGIONS.map(r=><option value={r.code} key={r.code}>{r.name}</option>)}</select><button onClick={addVirtual}>随机生成</button></div>{state.identities.map(i=><div className={styles.number} key={i.id}>{i.number}<Check size={16}/></div>)}<h3>角色号码</h3>{characters.map(c=><label key={c.id}>{c.name}<input placeholder={phoneFromPersona(c.persona) || "输入手机号"} value={state.characterNumbers[c.id] ?? ""} onChange={e=>updateCharacterPhone(c.id,e.target.value)} /></label>)}<h3>角色主动短信</h3><select value={state.proactive} onChange={e=>{const next=loadSms();next.proactive=e.target.value as SmsState["proactive"];persist(next);}}><option value="off">关闭</option><option value="rare">较少</option><option value="normal">普通</option><option value="often">较多</option></select></div></>}
     {error && route!=="chat" && <p className={styles.error}>{error}</p>}
   </div>;
 }

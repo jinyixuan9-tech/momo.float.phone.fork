@@ -8,14 +8,15 @@ export type SmsIdentity = { id: string; number: string; region: string; createdA
 export type SmsReaction = { id: string; emoji: string; by: "user" | "character" };
 export type SmsMessage = { id: string; threadId: string; direction: "outgoing" | "incoming"; original: string; translated?: string; createdAt: number; delivered: boolean; batchId?: string; awarenessAt?: SmsThread["awareness"]; reactions?: SmsReaction[] };
 export type SmsThread = { id: string; characterId: string; identityId: string; number: string; characterNumber: string; alias?: string; backgroundUrl?: string; blockedByMe: boolean; blockedByCharacter: boolean; awareness: "unknown" | "suspected" | "confirmed"; suspicion?: string; summary?: string; updatedAt: number; readAt: number };
-export type SmsState = { version: 1; realNumber: string; characterNumbers: Record<string,string>; identities: SmsIdentity[]; threads: SmsThread[]; messages: SmsMessage[]; background: string; proactive: "off" | "rare" | "normal" | "often"; lastAutoAt: Record<string,number>; contactAttempts: Record<string,number> };
-const empty = (): SmsState => ({ version: 1, realNumber: "", characterNumbers: {}, identities: [], threads: [], messages: [], background: "", proactive: "normal", lastAutoAt: {}, contactAttempts: {} });
+export const DEFAULT_SMS_EMOJI = ["❤️", "👍", "😂", "😮", "😢", "👀", "🔥", "🫶", "🐰", "🥺", "😍", "✨", "💀", "👏", "😡", "💕"];
+export type SmsState = { version: 1; realNumber: string; characterNumbers: Record<string,string>; identities: SmsIdentity[]; threads: SmsThread[]; messages: SmsMessage[]; background: string; proactive: "off" | "rare" | "normal" | "often"; autoExpandTranslation: boolean; emojiChoices: string[]; lastAutoAt: Record<string,number>; contactAttempts: Record<string,number> };
+const empty = (): SmsState => ({ version: 1, realNumber: "", characterNumbers: {}, identities: [], threads: [], messages: [], background: "", proactive: "normal", autoExpandTranslation: false, emojiChoices: [...DEFAULT_SMS_EMOJI], lastAutoAt: {}, contactAttempts: {} });
 export function loadSms(): SmsState {
   try {
     const raw = kvGet(SMS_KEY);
     if (!raw) return empty();
     const parsed = JSON.parse(raw) as Partial<SmsState>;
-    return { ...empty(), ...parsed, characterNumbers: parsed.characterNumbers ?? {}, identities: Array.isArray(parsed.identities) ? parsed.identities : [], threads: Array.isArray(parsed.threads) ? parsed.threads : [], messages: Array.isArray(parsed.messages) ? parsed.messages : [], lastAutoAt: parsed.lastAutoAt ?? {}, contactAttempts: parsed.contactAttempts ?? {} };
+    return { ...empty(), ...parsed, autoExpandTranslation: parsed.autoExpandTranslation === true, emojiChoices: Array.isArray(parsed.emojiChoices) ? parsed.emojiChoices.filter((value): value is string => typeof value === "string" && value.length <= 32).slice(0, 80) : [...DEFAULT_SMS_EMOJI], characterNumbers: parsed.characterNumbers ?? {}, identities: Array.isArray(parsed.identities) ? parsed.identities : [], threads: Array.isArray(parsed.threads) ? parsed.threads : [], messages: Array.isArray(parsed.messages) ? parsed.messages : [], lastAutoAt: parsed.lastAutoAt ?? {}, contactAttempts: parsed.contactAttempts ?? {} };
   } catch { return empty(); }
 }
 export function saveSms(state: SmsState): void {
