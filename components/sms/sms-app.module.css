@@ -67,8 +67,8 @@
 .personName{position:relative;z-index:1;margin-top:-4px;padding:7px 12px 5px;font-size:12px}
 .mine.tail .bubble::after,.theirs.tail .bubble::after{display:none}
 .mine.tail .bubble::before,.theirs.tail .bubble::before{content:"";position:absolute;bottom:-8px;width:22px;height:13px;pointer-events:none;transform:none;box-shadow:none;-webkit-mask-size:100% 100%;mask-size:100% 100%;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat}
-.mine.tail .bubble::before{right:-12px;background:var(--sms-user);-webkit-mask-image:url("/sms/tail-outgoing-blue.png");mask-image:url("/sms/tail-outgoing-blue.png")}
-.theirs.tail .bubble::before{left:-12px;background:#fff;-webkit-mask-image:url("/sms/tail-incoming-white.png");mask-image:url("/sms/tail-incoming-white.png")}
+.mine.tail .bubble::before{right:-4px;background:var(--sms-user);-webkit-mask-image:url("/sms/tail-outgoing-blue.png");mask-image:url("/sms/tail-outgoing-blue.png")}
+.theirs.tail .bubble::before{left:-4px;background:#fff;-webkit-mask-image:url("/sms/tail-incoming-white.png");mask-image:url("/sms/tail-incoming-white.png")}
 .mine.tail,.theirs.tail{margin-bottom:9px}
 .reactions{position:absolute;top:-12px;bottom:auto;z-index:3;display:flex;align-items:flex-start;gap:2px;width:max-content;min-height:0;margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;pointer-events:none}
 .mine .reactions{left:-8px;right:auto}
