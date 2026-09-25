@@ -270,3 +270,13 @@
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
+
+.interview-bilingual-answer { white-space: pre-wrap; }
+.interview-bilingual-toggle {
+  display: inline-block; margin-left: 8px; padding: 0 4px; border: 0; background: none;
+  color: #9ecfff; font: inherit; font-size: .78em; cursor: pointer;
+}
+.interview-bilingual-translation {
+  display: block; margin-top: 6px; color: rgba(255,255,255,.64); font-size: .92em;
+  line-height: 1.6; white-space: pre-wrap;
+}

@@ -5180,6 +5180,47 @@
   box-shadow: 0 4px 12px color-mix(in srgb, var(--c-overlay) 60%, transparent);
   border: 2px solid color-mix(in srgb, var(--c-card-border) 25%, transparent);
 }
+.videocall-redesign .videocall-bg-blur { filter: blur(32px) brightness(.27); }
+.videocall-main-frame {
+  position: absolute;
+  top: calc(max(20px, env(safe-area-inset-top)) + 115px);
+  left: 14px;
+  right: 14px;
+  bottom: calc(max(30px, env(safe-area-inset-bottom, 0px)) + 250px);
+  min-height: 160px;
+  border: 1px solid #ffffff55;
+  border-radius: 24px;
+  background: #171920;
+  overflow: hidden;
+  box-shadow: 0 14px 40px #0006;
+}
+.videocall-main-frame img, .videocall-main-frame video { width: 100%; height: 100%; object-fit: cover; }
+.videocall-redesign .videocall-self-cam {
+  top: calc(max(20px, env(safe-area-inset-top)) + 132px);
+  right: 27px;
+  width: 78px;
+  height: 100px;
+  border: 1px solid #ffffffad;
+  border-radius: 15px;
+  box-shadow: 0 8px 25px #0007;
+}
+.videocall-redesign .gcall-topbar-video { padding-top: calc(max(20px, env(safe-area-inset-top)) + 18px); }
+.videocall-redesign .gcall-topbar-title { font-size: calc(18px * var(--app-text-scale, 1)); }
+.videocall-redesign .videocall-controls-gradient { background: linear-gradient(to top, #0c1020ee 0%, #0c102080 85%, transparent); }
+.videocall-redesign .call-subtitles-log {
+  left: 10px;
+  right: 10px;
+  bottom: calc(max(30px, env(safe-area-inset-bottom, 0px)) + 170px);
+  max-height: min(27dvh, 215px);
+  padding: 10px;
+  border-radius: 16px;
+  background: #11192478;
+  backdrop-filter: blur(14px);
+}
+@media (max-height: 650px) {
+  .videocall-main-frame { bottom: calc(max(30px, env(safe-area-inset-bottom, 0px)) + 215px); }
+  .videocall-redesign .call-subtitles-log { max-height: 110px; }
+}
 .call-subtitle {
   padding: 6px 14px;
   border-radius: 8px;
@@ -5250,6 +5291,59 @@
   opacity: 0.36;
   cursor: default;
 }
+
+.call-text-input-row .call-regenerate-btn {
+  width: auto;
+  min-width: 82px;
+  padding: 0 10px;
+  font-size: calc(11px * var(--app-text-scale, 1));
+  white-space: nowrap;
+}
+.call-voice-summon {
+  display: block;
+  position: relative;
+  z-index: 15;
+  margin: 8px auto;
+  padding: 8px 15px;
+  border: 1px solid #ffffff75;
+  border-radius: 999px;
+  background: #2229;
+  color: white;
+  backdrop-filter: blur(12px);
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+.call-voice-summon:disabled { opacity: .5; }
+.call-subtitle-play {
+  display: block;
+  margin: 5px 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: inherit;
+  background: #ffffff26;
+  font-size: calc(11px * var(--app-text-scale, 1));
+}
+.call-subtitle-play:disabled { opacity: .55; }
+
+/* Folded multi-photo cards use the existing image viewer and per-image retry flow. */
+.chat-photo-deck { width: 184px; padding: 1px 7px 5px 0; }
+.chat-photo-deck-stack { width: 174px; height: 205px; position: relative; touch-action: pan-y; }
+.chat-photo-deck-back, .chat-photo-deck-front { position: absolute; width: 164px; height: 194px; border-radius: 12px; overflow: hidden; }
+.chat-photo-deck-back { top: 6px; left: 6px; transform: rotate(3deg); background: #eee9f4; box-shadow: 0 3px 9px #0003; }
+.chat-photo-deck-back-two { top: 10px; left: 10px; transform: rotate(6deg); background: #d5d2e1; }
+.chat-photo-deck-front { top: 0; left: 0; background: #f2f1f7; box-shadow: 0 3px 10px #0003; }
+.chat-photo-deck-front .chat-photo-card, .chat-photo-deck-item .chat-photo-card { width: 100%; height: 100%; min-width: 0; aspect-ratio: auto; max-width: none; }
+.chat-photo-deck-front .chat-photo-card-image, .chat-photo-deck-item .chat-photo-card-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; }
+.chat-photo-deck-front .chat-generated-image-retry-stack { height: 100%; }
+.chat-photo-deck-controls { display: flex; gap: 5px; align-items: center; justify-content: space-between; font-size: calc(11px * var(--app-text-scale, 1)); padding: 3px 1px; }
+.chat-photo-deck-controls button { color: inherit; padding: 2px 5px; border-radius: 5px; }
+.chat-photo-deck-controls button:disabled { opacity: .35; }
+.chat-photo-deck-toggle { font-size: calc(10px * var(--app-text-scale, 1)); text-decoration: underline; }
+.chat-photo-deck-expanded { max-width: min(74vw, 280px); }
+.chat-photo-deck-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.chat-photo-deck-item { position: relative; height: 145px; overflow: hidden; background: #f2f1f7; border-radius: 9px; }
+.chat-photo-deck-item .chat-generated-image-retry-stack { height: 100%; }
+.chat-photo-deck-number { position: absolute; right: 3px; top: 3px; z-index: 2; padding: 2px 4px; border-radius: 5px; color: white; background: #0008; font-size: 10px; }
+.chat-photo-deck-expanded > .chat-photo-deck-toggle { margin-top: 7px; }
 
 /* ── 左上角返回键（缩小通话为悬浮窗） ── */
 .call-back-btn {

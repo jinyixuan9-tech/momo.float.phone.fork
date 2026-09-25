@@ -81,6 +81,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const hasConnectedRef = useRef(false);
     const [callDuration, setCallDuration] = useState(0);
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
+    const [queuedTurns, setQueuedTurns] = useState(0);
+    const [playingSubtitleId, setPlayingSubtitleId] = useState<string | null>(null);
     const [interimText, setInterimText] = useState("");
     const [isMuted, setIsMuted] = useState(false);
     const [inputMode, setInputMode] = useState<"voice" | "text">(() => androidTextInputOnly ? "text" : "voice");
@@ -90,6 +92,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     const sttRef = useRef<STTSession | null>(null);
     const audioAbortRef = useRef<(() => void) | null>(null);
+    const subtitleAudioCacheRef = useRef(new Map<string, Blob>());
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const callStartRef = useRef<number>(0);
     const pausedAtRef = useRef<number | null>(null);
@@ -346,21 +349,19 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     // ── Full conversation turn ──────────────────────
 
-    const runConversationTurn = useCallback(async (userText?: string) => {
-        // 1. Save user message (skip for initial greeting)
-        if (userText) {
-            const userMsg = pushChatMessage({
-                sessionId: session.id,
-                role: "user",
-                content: userText,
-            });
-            messagesRef.current = [...messagesRef.current, userMsg];
+    const queueUserText = useCallback((userText: string) => {
+        const text = userText.trim();
+        if (!text || stateRef.current === "ENDED") return;
+        const userMsg = pushChatMessage({ sessionId: session.id, role: "user", content: text });
+        messagesRef.current = [...messagesRef.current, userMsg];
+        setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text }]);
+        setQueuedTurns(count => count + 1);
+        setInterimText("");
+        setCallState("IDLE");
+    }, [session.id]);
 
-            // Add user subtitle
-            setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: userText }]);
-        }
-
-        // 2. Switch to PROCESSING
+    const runConversationTurn = useCallback(async () => {
+        // The user may send several lines before explicitly requesting a reply.
         setCallState("PROCESSING");
         setInterimText("");
 
@@ -376,8 +377,6 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             // 4. Process response
             const { cleanParts } = processAIResponse(aiResponseText);
             const displayText = cleanParts.join("\n");
-            const speechText = stripBilingualForSpeech(displayText);
-
             if (!displayText) {
                 setCallState("IDLE");
                 return;
@@ -386,33 +385,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             // 5. Add AI subtitle
             const subtitleId = `ai-${Date.now()}`;
             setSubtitles(prev => [...prev, { id: subtitleId, role: "assistant", text: displayText }]);
-
-            // 缩小为悬浮窗期间收到的回复：只静默记录文字，不播放语音
-            if (minimizedRef.current) {
-                setCallState("IDLE");
-                return;
-            }
-
-            // 6. TTS
-            setCallState("AI_SPEAKING");
-
-            const voiceConfig = resolveVoiceConfig(session.contactId);
-            if (voiceConfig) {
-                try {
-                    const audioBlob = await synthesizeSpeech(speechText, voiceConfig);
-                    if (stateRef.current === "ENDED") return;
-
-                    if (audioBlob) {
-                        const { promise, abort } = playCallAudio(audioBlob);
-                        audioAbortRef.current = abort;
-                        await promise;
-                        audioAbortRef.current = null;
-                    }
-                } catch (e) {
-                    console.warn("[VoiceCall] TTS failed:", e);
-                }
-            }
-
+            setQueuedTurns(0);
             if (stateRef.current !== "ENDED") {
                 setCallState("IDLE");
             }
@@ -427,7 +400,33 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 setCallState("IDLE");
             }
         }
-    }, [session, processAIResponse, playCallAudio]);
+    }, [session, processAIResponse]);
+
+    const playSubtitle = useCallback(async (subtitle: SubtitleEntry) => {
+        if (stateRef.current !== "IDLE" || minimizedRef.current) return;
+        const voiceConfig = resolveVoiceConfig(session.contactId);
+        if (!voiceConfig) return;
+        if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
+        setPlayingSubtitleId(subtitle.id);
+        setCallState("AI_SPEAKING");
+        try {
+            let blob = subtitleAudioCacheRef.current.get(subtitle.id);
+            if (!blob) {
+                blob = await synthesizeSpeech(stripBilingualForSpeech(subtitle.text), voiceConfig) || undefined;
+                if (blob) subtitleAudioCacheRef.current.set(subtitle.id, blob);
+            }
+            if (!blob || stateRef.current === "ENDED") return;
+            const { promise, abort } = playCallAudio(blob);
+            audioAbortRef.current = abort;
+            await promise;
+        } catch (error) {
+            console.warn("[VoiceCall] manual TTS failed:", error);
+        } finally {
+            audioAbortRef.current = null;
+            setPlayingSubtitleId(null);
+            if (stateRef.current !== "ENDED") setCallState("IDLE");
+        }
+    }, [session.contactId, playCallAudio]);
 
     // ── Auto-listen: 进入 IDLE 自动开始监听 ────────
 
@@ -455,8 +454,9 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             },
             onFinal: (text) => {
                 sttRef.current = null;
+                interimTextRef.current = "";
                 if (text.trim()) {
-                    runConversationTurn(text.trim());
+                    queueUserText(text.trim());
                 } else {
                     setInterimText("");
                     setCallState("IDLE");
@@ -491,7 +491,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 if (stateRef.current === "USER_SPEAKING" || stateRef.current === "IDLE") {
                     const fallback = interimTextRef.current;
                     if (fallback.trim()) {
-                        runConversationTurn(fallback.trim());
+                        queueUserText(fallback.trim());
                     } else {
                         setInterimText("");
                         setCallState("IDLE");
@@ -508,7 +508,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             sttRef.current = null;
             showSttCompatibilityWarning();
         }
-    }, [androidTextInputOnly, holdToTalk, runConversationTurn, session.contactId, showSttCompatibilityWarning]);
+    }, [androidTextInputOnly, holdToTalk, queueUserText, session.contactId, showSttCompatibilityWarning]);
 
     // IDLE 时自动开启监听（按住说话模式无自动监听，识别只在按住期间发生）
     useEffect(() => {
@@ -566,8 +566,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             sttRef.current = null;
         }
         setTypedText("");
-        runConversationTurn(text);
-    }, [typedText, callState, runConversationTurn]);
+        queueUserText(text);
+    }, [typedText, callState, queueUserText]);
 
     // 输入框左侧的"重回"键：不发送新内容，直接让对方基于当前上下文重新回复一次
     const handleRegenerate = useCallback(() => {
@@ -576,7 +576,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             sttRef.current.abort();
             sttRef.current = null;
         }
-        runConversationTurn();
+        void runConversationTurn();
     }, [callState, runConversationTurn]);
 
     // 按住说话（非 iOS）：按下录音，松开转写后走对话轮
@@ -588,9 +588,9 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             if (stateRef.current === "IDLE") setCallState("USER_SPEAKING");
         },
         onTranscribeStart: () => {
-            if (stateRef.current === "USER_SPEAKING") setCallState("PROCESSING");
+            if (stateRef.current === "USER_SPEAKING") setCallState("USER_SPEAKING");
         },
-        onTranscript: (text) => { void runConversationTurn(text); },
+        onTranscript: (text) => { queueUserText(text); },
         onError: () => {
             if (stateRef.current === "USER_SPEAKING" || stateRef.current === "PROCESSING") {
                 setCallState("IDLE");
@@ -750,6 +750,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             data-role={sub.role}
                         >
                             <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                            {sub.role === "assistant" && !sub.text.startsWith("⚠️") && <button type="button" className="call-subtitle-play" onClick={() => { void playSubtitle(sub); }} aria-label={playingSubtitleId === sub.id ? "正在播放" : "播放或重听这条语音"} disabled={callState !== "IDLE"}>{playingSubtitleId === sub.id ? "播放中…" : "▶ 播放语音"}</button>}
                         </div>
                     ))}
 
@@ -774,14 +775,10 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             onClick={handleRegenerate}
                             className="call-regenerate-btn"
                             disabled={callState !== "IDLE"}
-                            aria-label="让对方重新回复"
-                            title="让对方重新回复"
+                            aria-label="召唤回复"
+                            title="召唤回复"
                         >
-                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M23 4v6h-6" />
-                                <path d="M1 20v-6h6" />
-                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                            </svg>
+                            {queuedTurns ? `召唤回复 · ${queuedTurns}` : "召唤回复"}
                         </button>
                         <div className="call-text-input-shell">
                             <input
@@ -806,6 +803,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                     </form>
                 )}
 
+                {inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && <button type="button" className="call-voice-summon" onClick={handleRegenerate} disabled={callState !== "IDLE"}>{queuedTurns ? `召唤回复 · ${queuedTurns}` : "召唤回复"}</button>}
                 {/* 按住说话提示/错误行 */}
                 {holdToTalk && inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && (
                     <div className="text-center ts-12 opacity-80 px-5">

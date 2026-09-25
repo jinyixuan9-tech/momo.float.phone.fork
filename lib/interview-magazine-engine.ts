@@ -1,4 +1,5 @@
 import { jsonrepair } from "jsonrepair";
+import { splitBilingualText } from "./bilingual-text";
 
 import { loadCharacters } from "./character-storage";
 import type { Character } from "./character-types";
@@ -151,7 +152,8 @@ export function formatInterviewTranscript(
         const speakerName = message.speakerName
           || (message.speakerCharacterId ? characterNameById?.[message.speakerCharacterId] : undefined)
           || characterName;
-        return `${speakerName}：${message.content}`;
+        const bilingual = splitBilingualText(message.content);
+        return `${speakerName}：${bilingual ? `${bilingual.original}\n中文：${bilingual.translated}` : message.content}`;
       }
       return `${userName}：${message.content}`;
     })
@@ -576,6 +578,12 @@ export async function generateCharacterInterviewAnswer(params: {
     interviewCharacterAnswerHistory: characterAnswerHistory,
   });
 
+  llmMessages.push({ role: "system", content: [
+    "在场采访双语要求：请以嘉宾本人自然会使用的语言回答，保留嘉宾原话。",
+    "如果原话是韩语、日语、英语等非中文，整段输出必须是“原文 | 准确中文译文”，只使用一个竖线分隔，不要附加标签、动作或主持人的话。",
+    "嘉宾自然使用中文时只输出中文原话，不重复翻译。问题、系统说明和记忆摘要不需要双语。",
+  ].join("\n") });
+
   const raw = await sendLLMRequest(
     guest.apiConfig,
     guest.preset,
@@ -585,7 +593,7 @@ export async function generateCharacterInterviewAnswer(params: {
     { appId: INTERVIEW_MAGAZINE_APP_ID, appTags: ["interview_magazine", "answer"] },
   );
 
-  return cleanText(raw, 1000) || "（沉默了一会儿）这个问题，我需要从一个很小的地方说起。";
+  return cleanText(raw, 2000) || "（沉默了一会儿）这个问题，我需要从一个很小的地方说起。";
 }
 
 export async function previewInterviewMagazinePromptPayload(params: {

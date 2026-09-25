@@ -34,6 +34,7 @@ import { CHAT_PLUGIN_SLOTS_CHANGED_EVENT, getChatPluginRuntime } from "@/lib/cha
 
 interface MessageBubbleProps {
     msg: ChatMessage;
+    photoGroup?: ChatMessage[];
     onUpdate?: (updated: ChatMessage) => void;
     charName?: string;
     userName?: string;
@@ -88,7 +89,8 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+    if (photoGroup && photoGroup.length > 1) return <ChatPhotoDeck messages={photoGroup} onUpdate={onUpdate} characterId={characterId} />;
     switch (msg.mediaType) {
         case "red_packet":
             return <RedPacketBubble msg={msg} charName={charName} userName={userName} groupSize={groupSize} onShowDetail={onShowDetail} />;
@@ -1250,6 +1252,41 @@ function GeneratedImagePromptDialog({
             </div>
         </div>
     );
+}
+
+/** Each card owns its own image preview and generation action, including text-only photos. */
+function ChatPhotoDeck({ messages, onUpdate, characterId }: { messages: ChatMessage[]; onUpdate?: (updated: ChatMessage) => void; characterId?: string }) {
+    const [active, setActive] = useState(0);
+    const [expanded, setExpanded] = useState(false);
+    const startX = useRef<number | null>(null);
+    const current = Math.min(active, messages.length - 1);
+    if (expanded) return <div className="chat-photo-deck-expanded" onClick={event => event.stopPropagation()}>
+        <div className="chat-photo-deck-grid">{messages.map((msg, i) => <div className="chat-photo-deck-item" key={msg.id}>
+            <span className="chat-photo-deck-number">{i + 1}/{messages.length}</span>
+            <ImageBubble msg={msg} onUpdate={onUpdate} characterId={characterId} />
+        </div>)}</div>
+        <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(false)}>收起照片</button>
+    </div>;
+    return <div className="chat-photo-deck" role="group" aria-label={`${messages.length} 张照片，左右滑动翻页`} onClick={event => event.stopPropagation()}>
+        <div className="chat-photo-deck-stack" onTouchStart={event => { startX.current = event.touches[0]?.clientX ?? null; }} onTouchEnd={event => {
+            if (startX.current === null) return;
+            const delta = (event.changedTouches[0]?.clientX ?? startX.current) - startX.current;
+            if (Math.abs(delta) > 35) setActive(value => Math.max(0, Math.min(messages.length - 1, value + (delta < 0 ? 1 : -1))));
+            startX.current = null;
+        }}>
+            {current + 2 < messages.length && <div className="chat-photo-deck-back chat-photo-deck-back-two" aria-hidden="true" />}
+            {current + 1 < messages.length && <div className="chat-photo-deck-back" aria-hidden="true" />}
+            <div className="chat-photo-deck-front" key={messages[current].id}>
+                <ImageBubble msg={messages[current]} onUpdate={onUpdate} characterId={characterId} />
+            </div>
+        </div>
+        <div className="chat-photo-deck-controls">
+            <button type="button" disabled={current === 0} aria-label="上一张" onClick={() => setActive(current - 1)}>‹</button>
+            <span>{current + 1}/{messages.length}</span>
+            <button type="button" disabled={current === messages.length - 1} aria-label="下一张" onClick={() => setActive(current + 1)}>›</button>
+            <button type="button" className="chat-photo-deck-toggle" onClick={() => setExpanded(true)}>展开全部</button>
+        </div>
+    </div>;
 }
 
 function ImageBubble({

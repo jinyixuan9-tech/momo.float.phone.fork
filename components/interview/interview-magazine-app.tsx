@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { loadCharacters } from "@/lib/character-storage";
+import { splitBilingualText } from "@/lib/bilingual-text";
 import type { Character } from "@/lib/character-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import {
@@ -159,6 +160,17 @@ function getIssueCharacterNameMap(issue: InterviewIssue): Record<string, string>
     return Object.fromEntries(issue.guestSnapshots.map((guest) => [guest.characterId, guest.characterName]));
   }
   return issue.characterId ? { [issue.characterId]: issue.characterName } : {};
+}
+
+function InterviewBilingualAnswer({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const bilingual = splitBilingualText(text);
+  if (!bilingual || bilingual.original === bilingual.translated) return <>{text}</>;
+  return <span className="interview-bilingual-answer">
+    <span>{bilingual.original}</span>
+    <button type="button" className="interview-bilingual-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>{open ? "收起中文" : "中文"}</button>
+    {open ? <span className="interview-bilingual-translation">{bilingual.translated}</span> : null}
+  </span>;
 }
 
 function SmallCaps({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -1322,7 +1334,7 @@ function InterviewScreen({
                     {isUser ? 'YOU // 共同受访' : `[ ${speakerName.toUpperCase()} ]`}
                   </SmallCaps>
                   <p className="text-[calc(15px*var(--app-text-scale,1))] leading-relaxed text-white/90 whitespace-pre-wrap">
-                    {message.content}
+                    {isUser ? message.content : <InterviewBilingualAnswer text={message.content} />}
                   </p>
                 </div>
               </div>
@@ -1496,7 +1508,7 @@ function ArticleScreen({
             <div className="my-14 py-8 border-y border-white/10 text-center relative">
               <span className="absolute -top-4 left-1/2 -translate-x-1/2 bg-[#0a0a0a] px-4 text-white/20 text-2xl font-serif">"</span>
               <p className="font-serif italic text-white/90 text-xl leading-relaxed">
-                {issue.article.pullQuote}
+                <InterviewBilingualAnswer text={issue.article.pullQuote} />
               </p>
               <SmallCaps className="text-white/40 mt-6 block">— {issue.characterName}</SmallCaps>
             </div>
@@ -1518,7 +1530,7 @@ function ArticleScreen({
                     </div>
                     <div className="flex gap-4">
                       <span className="font-display italic text-white/40">A.</span>
-                      <p className="text-white/70 leading-relaxed">{qa.a}</p>
+                      <p className="text-white/70 leading-relaxed"><InterviewBilingualAnswer text={qa.a} /></p>
                     </div>
                   </div>
                 ))}

@@ -2469,6 +2469,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const responseBatchId = createResponseBatchId();
             const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
             const parts = stripInvalidStickerParts(rawParts, r.characterId);
+            const multiPhotoReply = parts.filter(part => part.mediaType === "image").length > 1;
             let attachedState = false;
             let savedAnyPart = false;
             for (const part of parts) {
@@ -2611,8 +2612,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     senderName: r.characterName,
                 }, guard);
                 throwIfGenerationStopped(guard);
+                if (multiPhotoReply && isPendingChatGeneratedImageMessage(draft)) draft.mediaData = { ...draft.mediaData, imageGenerationStatus: "text" };
                 const msg = pushChatMessage(draft);
-                imageReplacementTasks.push(scheduleGeneratedImageReplacement(msg, r.characterId, guard));
+                if (!multiPhotoReply) imageReplacementTasks.push(scheduleGeneratedImageReplacement(msg, r.characterId, guard));
                 if (attachHere) attachedState = true;
                 savedAnyPart = true;
                 msgsSetter(prev => [...prev, msg]);
@@ -2946,6 +2948,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         // Build rich-media drafts first, then publish them in the same order as the UI display.
         const messageDrafts: Array<{ draft: AssistantMessageDraft; afterPublish?: (message: ChatMessage) => Promise<unknown> | void }> = [];
+        const multiPhotoReply = filteredParts.filter(part => part.mediaType === "image").length > 1;
         const imageReplacementTasks: Promise<unknown>[] = [];
         // 面板挂到第一条能显示它的消息上；全是拍一拍等系统样式时补空消息驮面板
         let metaIdx = filteredParts.findIndex(canCarryFoldedPanel);
@@ -2973,9 +2976,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 freshStateValues: idx === metaIdx ? freshStateValues : undefined,
             }, options);
             throwIfGenerationStopped(options);
+            if (multiPhotoReply && isPendingChatGeneratedImageMessage(draft)) draft.mediaData = { ...draft.mediaData, imageGenerationStatus: "text" };
             messageDrafts.push({
                 draft,
-                afterPublish: isPendingChatGeneratedImageMessage(draft)
+                afterPublish: !multiPhotoReply && isPendingChatGeneratedImageMessage(draft)
                     ? (message) => scheduleGeneratedImageReplacement(message, session.contactId, options)
                     : afterPublishEffects[idx],
             });
@@ -3670,6 +3674,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const previousState = getLatestCharacterStateValues(senderInfo.characterId);
                         const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(text, previousState);
                         const parts = stripInvalidStickerParts(rawParts, senderInfo.characterId);
+                        const multiPhotoReply = parts.filter(part => part.mediaType === "image").length > 1;
                         let attachedState = false;
                         let savedAnyPart = false;
                         for (const part of parts) {
@@ -3695,8 +3700,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 senderName: senderInfo.characterName,
                             }, generationGuard);
                             throwIfGenerationStopped(generationGuard);
+                            if (multiPhotoReply && isPendingChatGeneratedImageMessage(draft)) draft.mediaData = { ...draft.mediaData, imageGenerationStatus: "text" };
                             const msg = pushChatMessage(draft);
-                            streamedImageReplacementTasks.push(scheduleGeneratedImageReplacement(msg, senderInfo.characterId, generationGuard));
+                            if (!multiPhotoReply) streamedImageReplacementTasks.push(scheduleGeneratedImageReplacement(msg, senderInfo.characterId, generationGuard));
                             attachedState = true;
                             savedAnyPart = true;
                             setMessages(prev => [...prev, msg]);
@@ -5857,6 +5863,22 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     // Skip messages that belong to a voice call group (rendered above)
                     if (voiceCallGroups.memberSet.has(idx)) return null;
 
+                    // A selection of photos is stored as independent messages, but appears as one deck.
+                    // Assistant pictures from the same generated reply use their response batch id.
+                    const photoKey = (item: ChatMessage) => (item.mediaType === "image" || (item.mediaType === "media_file" && item.mediaData?.fileType === "image"))
+                        ? (item.mediaData?.photoBatchId || (item.role === "assistant" ? item.responseBatchId : undefined))
+                        : undefined;
+                    const thisPhotoKey = photoKey(msg);
+                    const samePhotoBatch = (item: ChatMessage | undefined) => Boolean(item && thisPhotoKey && photoKey(item) === thisPhotoKey
+                        && item.role === msg.role && item.senderCharacterId === msg.senderCharacterId);
+                    if (samePhotoBatch(projectedMessages[idx - 1])) return null;
+                    const photoGroup: ChatMessage[] = [msg];
+                    if (thisPhotoKey) {
+                        for (let next = idx + 1; next < projectedMessages.length && samePhotoBatch(projectedMessages[next]); next++) {
+                            photoGroup.push(projectedMessages[next]);
+                        }
+                    }
+
                     const renderMsg = msg;
                     const isSystemInstruction = isSystemInstructionMessage(renderMsg);
                     const bubbleDisplayContent = getMessageDisplayContent(renderMsg);
@@ -6126,6 +6148,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
                                             <MessageBubble
                                                 msg={renderMsg}
+                                                photoGroup={photoGroup.length > 1 ? photoGroup : undefined}
                                                 displayContent={msg.displayProjected ? undefined : bubbleDisplayContent}
                                                 charName={character?.name}
                                                 userName={userIdentity?.name || "你"}
@@ -6527,7 +6550,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             )}
             {richModal === "photo" && (
                 <PhotoInputModal
-                    onSend={(desc, imageDataUrl) => { setRichModal(null); sendRichMessage("image", { label: desc }, "", imageDataUrl); }}
+                    onSend={(desc, imageDataUrls) => {
+                        setRichModal(null);
+                        const photoBatchId = imageDataUrls.length > 1 ? `photo-${Date.now()}-${Math.random().toString(36).slice(2)}` : undefined;
+                        imageDataUrls.forEach(imageDataUrl => sendRichMessage("image", { label: desc, photoBatchId }, "", imageDataUrl));
+                    }}
                     onClose={() => setRichModal(null)}
                 />
             )}

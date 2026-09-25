@@ -80,6 +80,9 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     const hasConnectedRef = useRef(false);
     const [callDuration, setCallDuration] = useState(0);
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
+    const [queuedTurns, setQueuedTurns] = useState(0);
+    const [playingSubtitleId, setPlayingSubtitleId] = useState<string | null>(null);
+    const subtitleAudioCacheRef = useRef(new Map<string, Blob>());
     const [interimText, setInterimText] = useState("");
     const [isMuted, setIsMuted] = useState(false);
     const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
@@ -424,12 +427,17 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
 
     // ── Full conversation turn ──────────────────────
 
-    const runConversationTurn = useCallback(async (userText?: string) => {
-        if (userText) {
-            const userMsg = pushChatMessage({ sessionId: session.id, role: "user", content: userText });
-            messagesRef.current = [...messagesRef.current, userMsg];
-            setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: userText }]);
-        }
+    const queueUserText = useCallback((text: string) => {
+        if (!text.trim() || stateRef.current === "ENDED") return;
+        const userMsg = pushChatMessage({ sessionId: session.id, role: "user", content: text.trim() });
+        messagesRef.current = [...messagesRef.current, userMsg];
+        setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: text.trim() }]);
+        setQueuedTurns(count => count + 1);
+        setInterimText("");
+        setCallState("IDLE");
+    }, [session.id]);
+
+    const runConversationTurn = useCallback(async () => {
         setCallState("PROCESSING");
         setInterimText("");
 
@@ -443,34 +451,10 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
 
             const { cleanParts } = processAIResponse(aiResponseText);
             const displayText = cleanParts.join("\n");
-            const speechText = stripBilingualForSpeech(displayText);
-
             if (!displayText) { setCallState("IDLE"); return; }
 
             setSubtitles(prev => [...prev, { id: `ai-${Date.now()}`, role: "assistant", text: displayText }]);
-
-            // 缩小为悬浮窗期间收到的回复：只静默记录文字，不播放语音
-            if (minimizedRef.current) {
-                setCallState("IDLE");
-                return;
-            }
-
-            setCallState("AI_SPEAKING");
-
-            const voiceConfig = resolveVoiceConfig(session.contactId);
-            if (voiceConfig && !isSpeakerMutedRef.current) {
-                try {
-                    const audioBlob = await synthesizeSpeech(speechText, voiceConfig);
-                    if (stateRef.current === "ENDED") return;
-                    if (audioBlob && !isSpeakerMutedRef.current) {
-                        const { promise, abort } = playCallAudio(audioBlob);
-                        audioAbortRef.current = abort;
-                        await promise;
-                        audioAbortRef.current = null;
-                    }
-                } catch (e) { console.warn("[VideoCall] TTS failed:", e); }
-            }
-
+            setQueuedTurns(0);
             if (stateRef.current !== "ENDED") setCallState("IDLE");
         } catch (error: any) {
             if (stateRef.current !== "ENDED") {
@@ -478,7 +462,32 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 setCallState("IDLE");
             }
         }
-    }, [session, processAIResponse, captureCameraFrame, playCallAudio]);
+    }, [session, processAIResponse, captureCameraFrame]);
+
+    const playSubtitle = useCallback(async (subtitle: SubtitleEntry) => {
+        if (minimizedRef.current || stateRef.current !== "IDLE" || isSpeakerMutedRef.current) return;
+        const voiceConfig = resolveVoiceConfig(session.contactId);
+        if (!voiceConfig) return;
+        if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
+        setPlayingSubtitleId(subtitle.id);
+        setCallState("AI_SPEAKING");
+        try {
+            let blob = subtitleAudioCacheRef.current.get(subtitle.id);
+            if (!blob) {
+                blob = await synthesizeSpeech(stripBilingualForSpeech(subtitle.text), voiceConfig) || undefined;
+                if (blob) subtitleAudioCacheRef.current.set(subtitle.id, blob);
+            }
+            if (!blob || stateRef.current === "ENDED" || minimizedRef.current || isSpeakerMutedRef.current) return;
+            const { promise, abort } = playCallAudio(blob);
+            audioAbortRef.current = abort;
+            await promise;
+        } catch (error) { console.warn("[VideoCall] manual TTS failed:", error); }
+        finally {
+            audioAbortRef.current = null;
+            setPlayingSubtitleId(null);
+            if (stateRef.current !== "ENDED") setCallState("IDLE");
+        }
+    }, [session.contactId, playCallAudio]);
 
     // ── Auto-listen ────────────────────────────────
 
@@ -498,7 +507,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             },
             onFinal: (text) => {
                 sttRef.current = null;
-                if (text.trim()) runConversationTurn(text.trim());
+                interimTextRef.current = "";
+                if (text.trim()) queueUserText(text.trim());
                 else { setInterimText(""); setCallState("IDLE"); }
             },
             onError: () => {
@@ -517,7 +527,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 sttRef.current = null;
                 if (stateRef.current === "USER_SPEAKING" || stateRef.current === "IDLE") {
                     const fallback = interimTextRef.current;
-                    if (fallback.trim()) runConversationTurn(fallback.trim());
+                    if (fallback.trim()) queueUserText(fallback.trim());
                     else { setInterimText(""); setCallState("IDLE"); }
                 }
             },
@@ -529,7 +539,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             sttRef.current = null;
             showSttCompatibilityWarning();
         }
-    }, [androidTextInputOnly, holdToTalk, runConversationTurn, session.contactId, showSttCompatibilityWarning]);
+    }, [androidTextInputOnly, holdToTalk, queueUserText, session.contactId, showSttCompatibilityWarning]);
 
     useEffect(() => {
         if (holdToTalk) return; // 按住说话模式无自动监听
@@ -568,10 +578,10 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         if (!text || callState !== "IDLE") return;
         if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
         setTypedText("");
-        runConversationTurn(text);
-    }, [typedText, callState, runConversationTurn]);
+        queueUserText(text);
+    }, [typedText, callState, queueUserText]);
 
-    // 输入框左侧的"重回"键：不发送新内容，直接让对方基于当前上下文重新回复一次
+    // 只有点召唤回复时才生成；没有待发文本也可以催对方主动说话。
     const handleRegenerate = useCallback(() => {
         if (callState !== "IDLE") return;
         if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
@@ -586,10 +596,8 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             setInterimText("");
             if (stateRef.current === "IDLE") setCallState("USER_SPEAKING");
         },
-        onTranscribeStart: () => {
-            if (stateRef.current === "USER_SPEAKING") setCallState("PROCESSING");
-        },
-        onTranscript: (text) => { void runConversationTurn(text); },
+        onTranscribeStart: () => {},
+        onTranscript: (text) => { queueUserText(text); },
         onError: () => {
             if (stateRef.current === "USER_SPEAKING" || stateRef.current === "PROCESSING") {
                 setCallState("IDLE");
@@ -646,7 +654,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     }
 
     return (
-        <div className="absolute inset-0 z-[100] flex flex-col bg-black text-white overflow-hidden call-keyboard-shift" style={keyboardOffsetStyle}>
+        <div className="absolute inset-0 z-[100] flex flex-col bg-black text-white overflow-hidden call-keyboard-shift videocall-redesign" style={keyboardOffsetStyle}>
             <CallVolumeControl />
 
             {onMinimize && callState !== "ENDED" && (
@@ -675,7 +683,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             />
 
             {/* Main center view (character avatar by default, swaps with self when clicked) */}
-            <div className="absolute inset-0 flex items-center justify-center z-[1]">
+            <div className="videocall-main-frame flex items-center justify-center z-[1]">
                 {pipSwapped ? (
                     cameraEnabled ? (
                         <video
@@ -772,6 +780,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         data-role={sub.role}
                     >
                         <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                        {sub.role === "assistant" && !sub.text.startsWith("⚠️") && <button type="button" className="call-subtitle-play" onClick={() => { void playSubtitle(sub); }} disabled={callState !== "IDLE" || isSpeakerMuted} aria-label="播放或重听这条语音">{playingSubtitleId === sub.id ? "播放中…" : "▶ 播放语音"}</button>}
                     </div>
                 ))}
                 {interimText && callState === "USER_SPEAKING" && (
@@ -801,14 +810,10 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         onClick={handleRegenerate}
                         className="call-regenerate-btn"
                         disabled={callState !== "IDLE"}
-                        aria-label="让对方重新回复"
-                        title="让对方重新回复"
+                        aria-label="召唤回复"
+                        title="召唤回复"
                     >
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M23 4v6h-6" />
-                            <path d="M1 20v-6h6" />
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                        </svg>
+                        {queuedTurns ? `召唤回复 · ${queuedTurns}` : "召唤回复"}
                     </button>
                     <div className="call-text-input-shell">
                         <input
@@ -833,6 +838,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 </form>
             )}
 
+            {inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && <button type="button" className="call-voice-summon" onClick={handleRegenerate} disabled={callState !== "IDLE"}>{queuedTurns ? `召唤回复 · ${queuedTurns}` : "召唤回复"}</button>}
             {/* 按住说话提示/错误行 */}
             {holdToTalk && inputMode === "voice" && callState !== "CONNECTING" && callState !== "ENDED" && (
                 <div className="text-center ts-12 opacity-80 px-5 relative z-[1]">
