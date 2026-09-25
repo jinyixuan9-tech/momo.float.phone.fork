@@ -89,7 +89,6 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [replyError, setReplyError] = useState<string | null>(null);
-    const [pipSwapped, setPipSwapped] = useState(false);
     const [showSttWarning, setShowSttWarning] = useState(false);
 
     const sttRef = useRef<STTSession | null>(null);
@@ -708,61 +707,9 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 }}
             />
 
-            {/* A custom call background fills the whole screen. The camera remains in the corner. */}
-            <div className={`videocall-main-frame flex items-center justify-center z-[1]${pipSwapped ? "" : " videocall-main-frame-hidden"}`}>
-                {pipSwapped ? (
-                    cameraEnabled ? (
-                        <video
-                            autoPlay
-                            playsInline
-                            muted
-                            ref={(el) => {
-                                videoElRef.current = el;
-                                if (el && cameraStreamRef.current && el.srcObject !== cameraStreamRef.current) {
-                                    el.srcObject = cameraStreamRef.current;
-                                    el.play().catch(() => {});
-                                }
-                            }}
-                            className="w-full h-full object-cover"
-                        />
-                    ) : (callAppearanceResolved || userAvatarRef.current) ? (
-                        <img src={callAppearanceResolved || userAvatarRef.current || ""} alt={userNameRef.current} className="w-full h-full object-cover" style={{ opacity: 0.85 }} />
-                    ) : (
-                        <div className="w-[150px] h-[150px] rounded-full bg-[#333] flex items-center justify-center">
-                            <span className="ts-60 text-[var(--c-icon)]">{userNameRef.current?.[0] || "?"}</span>
-                        </div>
-                    )
-                ) : character.avatar ? (
-                    <img
-                        src={character.avatar}
-                        alt={character.name}
-                        className="w-full h-full object-cover transition-opacity duration-500 ease-in-out"
-                        style={{
-                            opacity: callState === "CONNECTING" ? 0.5 : 0.85,
-                        }}
-                    />
-                ) : (
-                    <div className="w-[150px] h-[150px] rounded-full bg-[#333] flex items-center justify-center">
-                        <span className="ts-60 text-[var(--c-icon)]">{character.name?.[0] || "?"}</span>
-                    </div>
-                )}
-            </div>
-
-            {/* PIP corner (self by default, character when swapped) — click to swap */}
-            <button
-                type="button"
-                className="videocall-self-cam"
-                onClick={() => setPipSwapped((v) => !v)}
-                aria-label="切换大小画面"
-                title="点击切换大小画面"
-            >
-                {pipSwapped ? (
-                    character.avatar ? (
-                        <img src={character.avatar} alt={character.name} className="w-full h-full object-cover" />
-                    ) : (
-                        <span className="ts-18 text-[var(--c-icon)]">{character.name?.[0] || "?"}</span>
-                    )
-                ) : cameraEnabled ? (
+            {/* A single small self picture; the custom call background fills the rest of the screen. */}
+            <div className="videocall-self-cam" aria-label="我的通话画面">
+                {cameraEnabled ? (
                     <video
                         autoPlay
                         playsInline
@@ -778,7 +725,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         <circle cx="12" cy="7" r="4" />
                     </svg>
                 )}
-            </button>
+            </div>
 
             {/* Top info bar */}
             <div className="relative z-10 gcall-topbar gcall-topbar-video">
@@ -797,7 +744,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             {/* Subtitle log — scrollable */}
             <div
                 ref={subtitlesScrollRef}
-                className="call-subtitles-log"
+                className="videocall-transcript-viewport"
             >
                 {subtitles.map(sub => sub.kind === "action" ? <div key={sub.id} className="call-video-action" data-role={sub.role}>{sub.text}</div> :
                     sub.role === "assistant" ? <CallTranscriptBubble key={sub.id} text={sub.text} onPlay={() => { void playSubtitle(sub); }}
@@ -839,7 +786,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                             value={typedText}
                             onChange={e => setTypedText(e.target.value)}
                             className="call-text-input"
-                            placeholder={callState !== "IDLE" ? "稍等对方说完..." : composeKind === "action" ? "用中文描述动作..." : "输入你想说的话..."}
+                            placeholder="say something..."
                             disabled={callState !== "IDLE"}
                         />
                         <button type="button" className="call-reroll-btn" onClick={handleReroll}
@@ -849,7 +796,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                             type="button"
                             className="call-text-send-btn"
                             onClick={handleRegenerate}
-                            disabled={callState !== "IDLE"}
+                            aria-disabled={callState !== "IDLE"}
                             aria-label={queuedTurns ? `召唤回复，已发送 ${queuedTurns} 条` : "召唤回复"}
                             title="召唤回复"
                         >

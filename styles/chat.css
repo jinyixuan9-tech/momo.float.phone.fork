@@ -7400,14 +7400,36 @@
 .voicecall-dark.call-bg-default {
   background: radial-gradient(ellipse 74% 38% at 50% 31%, #353938 0%, #232625 47%, #111413 100%);
 }
-.voicecall-dark .voicecall-portrait-wrap { position: relative; isolation: isolate; }
-.voicecall-dark .voicecall-portrait-wrap::before {
-  content: ""; position: absolute; z-index: -1; width: 230px; height: 230px;
-  border-radius: 50%; border: 1px solid #ffffff18;
-  box-shadow: 0 0 0 35px #ffffff05, 0 0 90px 13px #e8f4e61c;
-  pointer-events: none;
+.voicecall-dark .voicecall-portrait-wrap { position: relative; }
+.voicecall-dark .voicecall-portrait-wrap::before { content: none; }
+.voicecall-dark .voicecall-avatar-stage { isolation: isolate; }
+.voicecall-dark .voicecall-avatar-stage::before,
+.voicecall-dark .voicecall-avatar-stage::after {
+  content: ""; position: absolute; z-index: -1; border-radius: 50%; pointer-events: none;
 }
-.voicecall-dark .voicecall-avatar { border-color: #ffffff55; box-shadow: 0 0 38px #f7fff025; }
+.voicecall-dark .voicecall-avatar-stage::before {
+  width: 162px; height: 162px;
+  background: radial-gradient(circle, transparent 36%, #e8f4e630 56%, transparent 74%);
+  filter: blur(8px); animation: voicecall-soft-aura 3s ease-in-out infinite;
+}
+.voicecall-dark .voicecall-avatar-stage::after {
+  width: 136px; height: 136px; border: 1px solid #eef5ee55;
+  box-shadow: 0 0 22px #e8f4e62a;
+  animation: voicecall-soft-ring 3s ease-in-out infinite;
+}
+.voicecall-dark .voicecall-avatar { border-color: #ffffff65; box-shadow: 0 0 16px #f7fff03d; }
+@keyframes voicecall-soft-aura {
+  0%, 100% { opacity: .38; transform: scale(.94); }
+  50% { opacity: .92; transform: scale(1.1); }
+}
+@keyframes voicecall-soft-ring {
+  0%, 100% { opacity: .35; transform: scale(.97); }
+  50% { opacity: .8; transform: scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voicecall-dark .voicecall-avatar-stage::before,
+  .voicecall-dark .voicecall-avatar-stage::after { animation: none; }
+}
 .voicecall-dark .call-subtitle[data-role="user"],
 .videocall-redesign .call-subtitle[data-role="user"] {
   background: #e2ebe02b; border: 1px solid #ffffff32; border-radius: 17px 17px 5px 17px;
@@ -7442,11 +7464,16 @@
 .call-voice-actions .call-voice-summon { display: grid; place-items: center; width: 34px; height: 34px; margin: 0; padding: 0; font-size: 21px; }
 .call-reply-error { z-index: 16; max-width: 85%; margin: 5px auto; padding: 6px 11px; border-radius: 12px; background: #16191bd9; color: #fff; font-size: calc(11px * var(--app-text-scale, 1)); }
 .videocall-redesign .videocall-bg-blur { filter: blur(18px) brightness(.57); }
-.videocall-redesign .videocall-main-frame-hidden { display: none; }
-.videocall-redesign .call-subtitles-log {
+.videocall-redesign .videocall-self-cam {
+  top: calc(max(20px, env(safe-area-inset-top)) + 102px);
+}
+.videocall-redesign .videocall-transcript-viewport {
+  position: absolute; z-index: 10; left: 10px; right: 10px;
   top: 30%; bottom: calc(max(30px, env(safe-area-inset-bottom, 0px)) + 192px);
-  max-height: none; background: transparent; border: 0; backdrop-filter: none;
-  -webkit-backdrop-filter: none; padding: 8px 16px; gap: 12px;
+  display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+  padding: 8px 16px; background: none; border: 0; box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
 }
 .videocall-redesign .call-speech-bubble { background: #1b1c1c78; border-color: #ffffff31; }
 .call-video-action {
@@ -7466,3 +7493,9 @@
   width: 32px; height: 32px; flex: 0 0 32px; background: #fff;
   color: #192020; box-shadow: 0 2px 9px #0003;
 }
+.voicecall-dark .call-text-send-btn:disabled,
+.videocall-redesign .call-text-send-btn:disabled {
+  opacity: .84; background: #f5f5f5; color: #192020;
+}
+.voicecall-dark .call-text-send-btn svg,
+.videocall-redesign .call-text-send-btn svg { opacity: 1; stroke: currentColor; }

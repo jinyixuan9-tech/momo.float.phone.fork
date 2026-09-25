@@ -693,7 +693,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
                 {/* Center: Avatar + connecting ring */}
                 <div className="voicecall-portrait-wrap flex-none flex justify-center items-center pt-[30px] pb-5">
-                    <div className="relative flex items-center justify-center">
+                    <div className="voicecall-avatar-stage relative flex items-center justify-center">
                         <div
                             className="voicecall-avatar"
                             {...(callState === "AI_SPEAKING" ? { "data-speaking": "" } : {})}
@@ -768,7 +768,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                                 value={typedText}
                                 onChange={e => setTypedText(e.target.value)}
                                 className="call-text-input"
-                                placeholder={callState === "IDLE" ? "输入你想说的话..." : "稍等对方说完..."}
+                                placeholder="say something..."
                                 disabled={callState !== "IDLE"}
                             />
                             <button type="button" className="call-reroll-btn" onClick={handleReroll}
@@ -778,7 +778,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                                 type="button"
                                 className="call-text-send-btn"
                                 onClick={handleRegenerate}
-                                disabled={callState !== "IDLE"}
+                                aria-disabled={callState !== "IDLE"}
                                 aria-label={queuedTurns ? `召唤回复，已发送 ${queuedTurns} 条` : "召唤回复"}
                                 title="召唤回复"
                             >
