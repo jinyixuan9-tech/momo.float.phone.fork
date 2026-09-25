@@ -378,6 +378,10 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerAuthorType, setComposerAuthorType] = useState<WeverseAuthorType>("user");
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [photoEditor, setPhotoEditor] = useState<{ postId: string; description: string } | null>(null);
+  const [noticePhotoEditor, setNoticePhotoEditor] = useState<{ noticeId: string; communityId: string; description: string } | null>(null);
+  const [photoGenerating, setPhotoGenerating] = useState(false);
+  const photoHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [postMenuId, setPostMenuId] = useState<string | null>(null);
   const [commentMenu, setCommentMenu] = useState<{ postId: string; commentId: string } | null>(null);
   const [communityMenuId, setCommunityMenuId] = useState<string | null>(null);
@@ -1709,6 +1713,44 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const postShowsOriginal = (post: WeversePost) => showOriginalByPost[post.id] ?? (state.settings.translationDefault === "original");
   const commentShowsOriginal = (comment: WeverseComment) => showOriginalByComment[comment.id] ?? (!state.settings.autoTranslateComments || state.settings.translationDefault === "original");
 
+  const savePhotoDescription = () => {
+    if (!photoEditor?.description.trim()) return;
+    setState(updateWeversePost(photoEditor.postId, { imageUrl: undefined, photoLibraryId: undefined, photoSource: undefined, photoDescription: photoEditor.description.trim() }));
+    setPhotoEditor(null);
+  };
+
+  const generatePhotoFromDescription = async () => {
+    if (!photoEditor?.description.trim() || photoGenerating) return;
+    const draft = photoEditor;
+    const post = postMap.get(draft.postId);
+    if (!post) return;
+    setPhotoGenerating(true);
+    setState(updateWeversePost(draft.postId, { imageUrl: undefined, photoLibraryId: undefined, photoSource: undefined, photoDescription: draft.description.trim() }));
+    setPhotoEditor(null);
+    const actor = post.authorType === "artist" ? { type: "character" as const, characterId: post.authorId } : { type: "official" as const, officialId: post.communityId, photoIds: [] };
+    const media = await resolveMediaForUse({ actor, description: draft.description.trim(), channel: "wvs", targetId: post.communityId, appId: "weverse", mode: "generate" }).catch(() => null);
+    if (media?.imageUrl) setState(updateWeversePost(draft.postId, { imageUrl: media.imageUrl, photoLibraryId: media.photoLibraryId, photoSource: "generated" }));
+    else onNotice?.("生图未配置或生成失败，已保留文字照片");
+    setPhotoGenerating(false);
+  };
+
+  const saveNoticePhotoDescription = () => {
+    if (!noticePhotoEditor?.description.trim()) return;
+    setState(updateWeverseNotice(noticePhotoEditor.noticeId, { imageUrl: undefined, photoLibraryId: undefined, photoSource: undefined, photoDescription: noticePhotoEditor.description.trim() }));
+    setNoticePhotoEditor(null);
+  };
+
+  const generateNoticePhoto = async () => {
+    if (!noticePhotoEditor?.description.trim() || photoGenerating) return;
+    const draft = noticePhotoEditor;
+    setPhotoGenerating(true);
+    saveNoticePhotoDescription();
+    const media = await resolveMediaForUse({ actor: { type: "official", officialId: draft.communityId, photoIds: [] }, description: draft.description.trim(), channel: "wvs", targetId: draft.communityId, appId: "weverse", mode: "generate" }).catch(() => null);
+    if (media?.imageUrl) setState(updateWeverseNotice(draft.noticeId, { imageUrl: media.imageUrl, photoSource: "generated", photoLibraryId: media.photoLibraryId }));
+    else onNotice?.("生图未配置或生成失败，已保留文字照片");
+    setPhotoGenerating(false);
+  };
+
   const renderPostActions = (post: WeversePost, detail = false) => (
     <div className={styles.actions}>
       <div className={styles.actionLeft}>
@@ -1735,7 +1777,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
           <button type="button" className={styles.more} onClick={() => setPostMenuId(post.id)} aria-label="贴文菜单"><MoreHorizontal size={20} /></button>
         </div>
         {post.postType === "voice" && post.authorType === "artist" ? <WeverseVoicePost post={post} onNotice={onNotice} /> : post.body ? <div className={styles.postBody} onClick={() => !detail && navigate({ type: "post", postId: post.id })}>{showOriginal && post.originalBody ? post.originalBody : post.body}</div> : null}
-        {post.imageUrl ? <WeversePostImage src={post.imageUrl} onClick={() => !detail && navigate({ type: "post", postId: post.id })} /> : null}
+        {post.imageUrl || post.photoDescription ? <div onContextMenu={event => { event.preventDefault(); setPhotoEditor({ postId: post.id, description: post.photoDescription || "" }); }} onTouchStart={() => { if (photoHoldTimer.current) clearTimeout(photoHoldTimer.current); photoHoldTimer.current = setTimeout(() => { setPhotoEditor({ postId: post.id, description: post.photoDescription || "" }); photoHoldTimer.current = null; }, 520); }} onTouchEnd={() => { if (photoHoldTimer.current) clearTimeout(photoHoldTimer.current); photoHoldTimer.current = null; }} onTouchMove={() => { if (photoHoldTimer.current) clearTimeout(photoHoldTimer.current); photoHoldTimer.current = null; }}>{post.imageUrl ? <WeversePostImage src={post.imageUrl} onClick={() => !detail && !photoEditor && navigate({ type: "post", postId: post.id })} /> : <button type="button" className={styles.textPhotoCard} onClick={() => setPhotoEditor({ postId: post.id, description: post.photoDescription || "" })}><span className={styles.textPhotoScroll}>{post.photoDescription}</span></button>}</div> : null}
         {post.postType !== "voice" && post.originalBody && post.originalBody !== post.body ? <button type="button" className={styles.translateBtn} onClick={() => setShowOriginalByPost((prev) => ({ ...prev, [post.id]: !showOriginal }))}>{showOriginal ? "查看翻译" : "查看原文"}</button> : null}
         {renderPostActions(post, detail)}
       </article>
@@ -2023,7 +2065,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
   const renderNoticeDetail = (notice: WeverseNotice) => {
     const community = communityMap.get(notice.communityId);
     const showOriginal = Boolean(showOriginalByPost[`notice:${notice.id}`]);
-    return <div className={styles.scrollArea}><article className={styles.noticeDetail}><div className={styles.noticeDetailMeta}>{community?.official.displayName || "Official"} · {new Date(notice.createdAt).toLocaleString("zh-CN")}</div><h1>{notice.title}</h1><div className={styles.noticeBody}>{showOriginal && notice.originalBody ? notice.originalBody : notice.body}</div>{notice.imageUrl?<ResolvedAssetImage src={notice.imageUrl} className={styles.noticeImage} alt="Notice"/>:null}{notice.originalBody && notice.originalBody!==notice.body?<button type="button" className={styles.translateBtn} onClick={()=>setShowOriginalByPost((prev)=>({...prev,[`notice:${notice.id}`]:!showOriginal}))}>{showOriginal?"查看翻译":"查看原文"}</button>:null}<div className={styles.noticeManage}><button type="button" onClick={()=>openNoticeEditor(notice.communityId,notice)}><Pencil size={16}/> 编辑</button><button type="button" onClick={()=>removeNotice(notice)}><Trash2 size={16}/> 删除</button></div></article></div>;
+    return <div className={styles.scrollArea}><article className={styles.noticeDetail}><div className={styles.noticeDetailMeta}>{community?.official.displayName || "Official"} · {new Date(notice.createdAt).toLocaleString("zh-CN")}</div><h1>{notice.title}</h1><div className={styles.noticeBody}>{showOriginal && notice.originalBody ? notice.originalBody : notice.body}</div>{notice.imageUrl || notice.photoDescription ? <div onContextMenu={event => { event.preventDefault(); setNoticePhotoEditor({ noticeId: notice.id, communityId: notice.communityId, description: notice.photoDescription || "" }); }}>{notice.imageUrl ? <ResolvedAssetImage src={notice.imageUrl} className={styles.noticeImage} alt="Notice"/> : <button type="button" className={styles.textPhotoCard} onClick={() => setNoticePhotoEditor({ noticeId: notice.id, communityId: notice.communityId, description: notice.photoDescription || "" })}><span className={styles.textPhotoScroll}>{notice.photoDescription}</span></button>}</div> : null}{notice.originalBody && notice.originalBody!==notice.body?<button type="button" className={styles.translateBtn} onClick={()=>setShowOriginalByPost((prev)=>({...prev,[`notice:${notice.id}`]:!showOriginal}))}>{showOriginal?"查看翻译":"查看原文"}</button>:null}<div className={styles.noticeManage}><button type="button" onClick={()=>openNoticeEditor(notice.communityId,notice)}><Pencil size={16}/> 编辑</button>{notice.photoDescription && <button type="button" onClick={() => setNoticePhotoEditor({ noticeId: notice.id, communityId: notice.communityId, description: notice.photoDescription || "" })}><ImagePlus size={16}/> 编辑照片描述</button>}<button type="button" onClick={()=>removeNotice(notice)}><Trash2 size={16}/> 删除</button></div></article></div>;
   };
 
   const renderPostDetail = (post: WeversePost) => {
@@ -2253,7 +2295,9 @@ export function WeverseApp({ onClose, onNotice }: Props) {
 
       <input ref={replayCoverInputRef} className={styles.hiddenInput} type="file" accept="image/*" onChange={async (e) => { const file = e.target.files?.[0]; await applyReplayCoverFile(file); e.currentTarget.value = ""; }} />
 
-      {postMenuId ? (() => { const post = postMap.get(postMenuId); if (!post) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setPostMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><button type="button" onClick={() => openPostEditor(post)}><Pencil size={18} /> 编辑贴文</button><button type="button" className={styles.dangerSheetAction} onClick={() => removePost(post)}><Trash2 size={18} /> 删除贴文</button><button type="button" onClick={() => setPostMenuId(null)}>取消</button></section></div>; })() : null}
+      {photoEditor && <div className={styles.sheetMask} onMouseDown={event => { if (event.currentTarget === event.target) setPhotoEditor(null); }}><section className={styles.sheet}><div className={styles.sheetHandle}/><div className={styles.sheetTitle}><h2>编辑照片描述</h2><button type="button" className={styles.iconBtn} onClick={() => setPhotoEditor(null)}><X size={20}/></button></div><textarea className={styles.textarea} value={photoEditor.description} onChange={event => setPhotoEditor({ ...photoEditor, description: event.target.value })} placeholder="描述照片里看到的内容"/><button type="button" className={styles.secondaryButton} disabled={!photoEditor.description.trim()} onClick={savePhotoDescription}>仅保存文字</button><button type="button" className={styles.primaryButton} disabled={!photoEditor.description.trim() || photoGenerating} onClick={() => void generatePhotoFromDescription()}>开始生图</button></section></div>}
+      {noticePhotoEditor && <div className={styles.sheetMask} onMouseDown={event => { if (event.currentTarget === event.target) setNoticePhotoEditor(null); }}><section className={styles.sheet}><div className={styles.sheetHandle}/><div className={styles.sheetTitle}><h2>编辑公告照片描述</h2><button type="button" className={styles.iconBtn} onClick={() => setNoticePhotoEditor(null)}><X size={20}/></button></div><textarea className={styles.textarea} value={noticePhotoEditor.description} onChange={event => setNoticePhotoEditor({ ...noticePhotoEditor, description: event.target.value })} placeholder="描述照片里看到的内容"/><button type="button" className={styles.secondaryButton} disabled={!noticePhotoEditor.description.trim()} onClick={saveNoticePhotoDescription}>仅保存文字</button><button type="button" className={styles.primaryButton} disabled={!noticePhotoEditor.description.trim() || photoGenerating} onClick={() => void generateNoticePhoto()}>开始生图</button></section></div>}
+      {postMenuId ? (() => { const post = postMap.get(postMenuId); if (!post) return null; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setPostMenuId(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} /><button type="button" onClick={() => { setPostMenuId(null); setPhotoEditor({ postId: post.id, description: post.photoDescription || "" }); }}><ImagePlus size={18}/> 编辑照片描述</button><button type="button" onClick={() => openPostEditor(post)}><Pencil size={18} /> 编辑贴文</button><button type="button" className={styles.dangerSheetAction} onClick={() => removePost(post)}><Trash2 size={18} /> 删除贴文</button><button type="button" onClick={() => setPostMenuId(null)}>取消</button></section></div>; })() : null}
 
       {commentMenu ? (() => { const post = postMap.get(commentMenu.postId); const comment = post?.comments.find((item) => item.id === commentMenu.commentId); if (!post || !comment) return null; const allowReply = post.authorType !== "artist" && post.authorType !== "official"; return <div className={styles.sheetMask} onMouseDown={(event) => { if (event.currentTarget === event.target) setCommentMenu(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`}><div className={styles.sheetHandle} />{allowReply ? <button type="button" onClick={() => { const author = resolveCommentAuthor(comment, post); setReplyTarget({ postId: post.id, commentId: comment.id, name: author.name }); setCommentMenu(null); setTimeout(() => document.getElementById("wvs-comment-input")?.focus(), 30); }}><MessageCircle size={18} /> 回复</button> : null}<button type="button" className={styles.dangerSheetAction} onClick={() => removeComment(post, comment)}><Trash2 size={18} /> 删除评论</button><button type="button" onClick={() => setCommentMenu(null)}>取消</button></section></div>; })() : null}
 

@@ -22,7 +22,7 @@ import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkBreaks from "remark-breaks";
 import { createPortal } from "react-dom";
 import { Blocks, Maximize2, ReceiptText } from "lucide-react";
-import { retryChatGeneratedImage } from "@/lib/generated-image-retry";
+import { retryChatGeneratedImage, saveChatImageDescription } from "@/lib/generated-image-retry";
 import { hasCharacterReferenceImage } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
@@ -1177,6 +1177,7 @@ function GeneratedImagePromptDialog({
     onChange,
     onCancel,
     onConfirm,
+    onSaveText,
     busy,
     error,
     useReferenceImage,
@@ -1187,6 +1188,7 @@ function GeneratedImagePromptDialog({
     onChange: (value: string) => void;
     onCancel: () => void;
     onConfirm: () => void;
+    onSaveText: () => void;
     busy: boolean;
     error?: string;
     useReferenceImage: boolean;
@@ -1236,12 +1238,13 @@ function GeneratedImagePromptDialog({
                 </div>
                 <div className="modal-footer" data-ui="modal-footer">
                     <button className="ui-btn ui-btn-ghost" onClick={onCancel}>取消</button>
+                    <button className="ui-btn ui-btn-outline" disabled={busy || !value.trim()} onClick={onSaveText}>仅保存文字</button>
                     <button
                         className="ui-btn ui-btn-action"
                         disabled={busy || !value.trim()}
                         onClick={onConfirm}
                     >
-                        生成
+                        开始生图
                     </button>
                 </div>
             </div>
@@ -1353,6 +1356,7 @@ function ImageBubble({
                     onUseReferenceImageChange={setUseReferenceDraft}
                     hasReferenceImage={hasRef}
                     onConfirm={handleRetry}
+                    onSaveText={() => { const updated = saveChatImageDescription(msg, promptDraft); onUpdate?.(updated); setShowPromptEditor(false); setShowPreview(false); }}
                     onCancel={() => setShowPromptEditor(false)}
                     busy={regenerating}
                     error={retryError}
@@ -1403,11 +1407,11 @@ function ImageBubble({
     return (
         <div className="chat-generated-image-retry-stack">
             <div
-                className="chat-photo-card w-[180px] aspect-square rounded-none"
+                className="chat-photo-card chat-photo-card--text"
                 style={{ cursor: "pointer" }}
                 onClick={e => { e.stopPropagation(); setShowPreview(true); }}
             >
-                <div className="chat-photo-card-placeholder w-full h-full flex items-center justify-center px-5">
+                <div className="chat-photo-card-placeholder">
                     <div className="chat-photo-card-text">{label}</div>
                 </div>
             </div>
@@ -2127,6 +2131,7 @@ function MediaFileBubble({
                         onUseReferenceImageChange={setImageUseReferenceDraft}
                         hasReferenceImage={hasRef}
                         onConfirm={handleRegenerateImage}
+                        onSaveText={() => { const updated = saveChatImageDescription(msg, imagePromptDraft); onUpdate?.(updated); setShowImagePromptEditor(false); }}
                         onCancel={() => setShowImagePromptEditor(false)}
                         busy={imageRegenerating}
                         error={imageRetryError}

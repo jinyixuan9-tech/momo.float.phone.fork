@@ -12,6 +12,7 @@ export type LysnMessage = {
   quote?: LysnQuote; opener?: boolean; createdAt: number;
   sourceText?: string; seenAt?: number;
   photoCaptionDetached?: boolean;
+  photoDescription?: string;
 };
 export type LysnProfile = { name: string; avatar: string; cover?: string; bio?: string; group?: string; updatedAt: number };
 export type LysnUserProfile = { name: string; avatar: string; cover: string; birthday: string; gender: string; stickers?: LysnSticker[] };
@@ -19,6 +20,7 @@ export type LysnSettings = {
   notificationsEnabled: boolean; fontSize: "small" | "normal" | "large";
   enterToSend: boolean; translationMode: "replace" | "fold";
   autonomousMessages: boolean; deepRealism: boolean;
+  testMode?: boolean;
 };
 export type LysnSticker = { id: string; name: string; imageUrl: string };
 export type LysnStickerPack = { id: string; name: string; stickers: LysnSticker[] };
@@ -39,7 +41,7 @@ export type LysnRoom = {
 };
 export const DEFAULT_LYSN_SETTINGS: LysnSettings = {
   notificationsEnabled: true, fontSize: "normal", enterToSend: true,
-  translationMode: "fold", autonomousMessages: true, deepRealism: false,
+  translationMode: "fold", autonomousMessages: true, deepRealism: false, testMode: false,
 };
 export const DEFAULT_LYSN_USER: LysnUserProfile = { name: "我", avatar: "", cover: "", birthday: "", gender: "" };
 export type LysnState = {

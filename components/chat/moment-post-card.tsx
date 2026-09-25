@@ -267,6 +267,13 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
         setPhotoRetryError("");
         setShowPhotoPromptEditor(true);
     }, [characterId, post.photoDescription, post.photoUseReferenceImage]);
+    const saveTextPhoto = useCallback(() => {
+        const description = photoPromptDraft.trim();
+        if (!description) return;
+        updateMomentPost(post.id, { photoUrl: undefined, photoDescription: description, photoSource: undefined, photoLibraryId: undefined, photoGenerationStatus: "text", photoGenerationError: undefined });
+        setShowPhotoPromptEditor(false);
+        onUpdate();
+    }, [onUpdate, photoPromptDraft, post.id]);
     const handleRegeneratePhotoWithPrompt = useCallback(() => {
         const nextDescription = photoPromptDraft.trim();
         if (!nextDescription) {
@@ -396,11 +403,11 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                     <div className="feed-post-photo-retry-stack">
                         <div className="feed-post-photo-retry-row">
                             <div
-                                className="feed-post-photo-description ts-13 italic leading-[1.8] opacity-80 text-[var(--c-text)] px-4 py-3 block w-full"
-                                style={{ background: "color-mix(in srgb, var(--c-text) 10%, transparent)", borderRadius: 0, cursor: canRetryPhoto ? "pointer" : undefined }}
+                                className="feed-post-photo-description"
+                                style={{ cursor: canRetryPhoto ? "pointer" : undefined }}
                                 onClick={canRetryPhoto ? (e => { e.stopPropagation(); setShowFallbackPreview(true); }) : undefined}
                             >
-                                <MomentInlineBilingualText text={fallbackPhotoDescription} defaultExpanded={defaultTranslationExpanded} />
+                                <span className="feed-post-photo-description-inner"><MomentInlineBilingualText text={fallbackPhotoDescription} defaultExpanded={defaultTranslationExpanded} textColor="#222029" translationColor="#222029" /></span>
                             </div>
                         </div>
                         {post.photoGenerationStatus === "pending" && (
@@ -449,12 +456,13 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                         </div>
                         <div className="modal-footer" data-ui="modal-footer">
                             <button className="ui-btn ui-btn-ghost" onClick={() => setShowPhotoPromptEditor(false)}>取消</button>
+                            <button className="ui-btn ui-btn-outline" disabled={photoRegenerating || !photoPromptDraft.trim()} onClick={saveTextPhoto}>仅保存文字</button>
                             <button
                                 className="ui-btn ui-btn-action"
                                 disabled={photoRegenerating || !photoPromptDraft.trim()}
                                 onClick={handleRegeneratePhotoWithPrompt}
                             >
-                                生成
+                                开始生图
                             </button>
                         </div>
                     </div>

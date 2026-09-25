@@ -230,7 +230,7 @@ export type ChatMessage = {
         imageGenerationUsedReference?: boolean;
         imageSource?: "album" | "generated";
         photoLibraryId?: string;
-        imageGenerationStatus?: "pending" | "failed" | "generated";
+        imageGenerationStatus?: "pending" | "failed" | "generated" | "text";
         imageGenerationError?: string;
         mediaCompressedAt?: string;
         mediaCleanedAt?: string;

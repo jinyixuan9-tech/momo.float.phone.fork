@@ -52,10 +52,9 @@ import { bgSetInterval } from "./bg-timer";
 import { sendBrowserNotification } from "./browser-notification";
 import { buildTwoLevelMomentThreads } from "./moments-comment-threading";
 import { DEFAULT_MOMENTS_BILINGUAL_PROMPT, resolveBilingualPrompt } from "./bilingual-prompt-defaults";
-import { generateImageFromConfiguredApi } from "./image-generation-service";
 import { isAbortError, throwIfAborted } from "./abort-utils";
-import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
-import { getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "./photo-library-resolver";
+import { getChatImageFromIndexedDB } from "./chat-asset-storage";
+import { resolveMediaForUse } from "./media-resolver";
 import {
     getVisibleMomentCommentsForCharacter,
     getVisibleMomentLikesForCharacter,
@@ -1180,7 +1179,7 @@ export function parseMomentPostResponse(rawText: string): {
 
 /**
  * 生图后台任务：帖子已先入库（photoGenerationStatus: "pending"），图片生成完再补挂。
- * 失败/超时/中断只把状态标为 failed（卡片上可手动重试），绝不影响帖子本身。
+ * 与其他应用共用相册/生图解析；无法生图时留下可编辑的文字照片。
  */
 export function attachMomentPhotoInBackground(
     postId: string,
@@ -1190,47 +1189,43 @@ export function attachMomentPhotoInBackground(
     signal?: AbortSignal,
 ): void {
     void (async () => {
-        let photoUrl: string | undefined;
-        let errorMessage: string | undefined;
-        let aborted = false;
-        let sourcePatch: Partial<MomentPost> = {};
         try {
-            const strategy = getPhotoSourceStrategy("moments");
-            if (strategy !== "generated_only") {
-                const match = await resolvePhotoForUse({ characterId, description, channel: "moments" });
-                if (match) {
-                    photoUrl = `asset://${match.photo.assetId}`;
-                    sourcePatch = { photoSource: "album", photoLibraryId: match.photo.id, photoGenerationPrompt: undefined };
-                    recordPhotoUse(match, { characterId, description, channel: "moments" });
-                } else if (strategy === "album_only") {
-                    // 仅匹配模式：没找到就不挂图，也不偷跑生图。朋友圈正文照常发布。
-                    updateMomentPost(postId, {
-                        photoUrl: undefined,
-                        photoDescription: undefined,
-                        photoGenerationStatus: undefined,
-                        photoGenerationError: undefined,
-                        photoSource: undefined,
-                        photoLibraryId: undefined,
-                    });
-                    dispatchMomentsUpdated();
-                    return;
-                }
-            }
-            if (!photoUrl) {
-                photoUrl = await generateMomentPhotoUrl(description, characterId, useReferenceImage, signal);
-                if (photoUrl) sourcePatch = { photoSource: "generated", photoLibraryId: undefined };
-            }
+            const result = await resolveMediaForUse({
+                actor: { type: "character", characterId }, description,
+                channel: "moments", appId: "moments", useReferenceImage, signal,
+            });
+            throwIfAborted(signal);
+            updateMomentPost(postId, result?.imageUrl ? {
+                photoUrl: result.imageUrl,
+                photoSource: result.source === "album" ? "album" : "generated",
+                photoLibraryId: result.photoLibraryId,
+                photoGenerationPrompt: result.generatedPrompt,
+                photoGenerationStatus: "generated",
+                photoGenerationError: undefined,
+            } : result?.placeholderDescription ? {
+                photoUrl: undefined,
+                photoDescription: result.placeholderDescription,
+                photoSource: undefined,
+                photoLibraryId: undefined,
+                photoGenerationStatus: "text",
+                photoGenerationError: undefined,
+            } : {
+                // Album-only without a match: publish the post without a photo.
+                photoUrl: undefined,
+                photoDescription: undefined,
+                photoSource: undefined,
+                photoLibraryId: undefined,
+                photoGenerationStatus: undefined,
+                photoGenerationError: undefined,
+            });
+            dispatchMomentsUpdated();
         } catch (error) {
-            aborted = isAbortError(error);
-            errorMessage = error instanceof Error ? error.message : String(error);
+            if (isAbortError(error)) return;
+            const reason = error instanceof Error ? error.message : String(error);
+            updateMomentPost(postId, { photoGenerationStatus: "failed", photoGenerationError: reason });
+            dispatchMomentsUpdated();
+            dispatchMomentPhotoGenerationFailed(reason);
         }
-        const reason = errorMessage || "生图配置未启用或生成失败";
-        updateMomentPost(postId, photoUrl
-            ? { photoUrl, photoGenerationStatus: "generated", photoGenerationError: undefined, ...sourcePatch }
-            : { photoGenerationStatus: "failed", photoGenerationError: reason });
-        dispatchMomentsUpdated();
-        // 失败时只在当下弹一次提示（卡片上不再挂红字），中断不算失败
-        if (!photoUrl && !aborted) dispatchMomentPhotoGenerationFailed(reason);
     })();
 }
 
@@ -1249,18 +1244,12 @@ export async function generateMomentPhotoUrl(
 ): Promise<string | undefined> {
     try {
         throwIfAborted(signal);
-        const generated = await generateImageFromConfiguredApi({
-            description,
-            characterId,
-            appId: "moments",
-            useReferenceImage,
-            signal,
+        const generated = await resolveMediaForUse({
+            actor: { type: "character", characterId }, description,
+            channel: "moments", appId: "moments", mode: "generate", useReferenceImage, signal,
         });
         throwIfAborted(signal);
-        if (!generated) return undefined;
-        const assetId = await saveChatImageToIndexedDB(generated.blob);
-        throwIfAborted(signal);
-        return `asset://${assetId}`;
+        return generated?.imageUrl;
     } catch (error) {
         if (isAbortError(error)) throw error;
         console.warn("[Moments] Image generation failed:", error);

@@ -1482,9 +1482,67 @@
   text-align: center;
   overflow-wrap: anywhere;
 }
-
 .chat-photo-card-image {
   background: #ffffff;
+}
+
+/* Shared portrait size with Bubble; only the description scrolls. */
+.chat-photo-card.chat-photo-card--text {
+  width: 180px;
+  height: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f2f3f7;
+}
+.chat-photo-card--text .chat-photo-card-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 14px;
+  background: #f2f3f7;
+}
+.chat-photo-card--text .chat-photo-card-text {
+  max-width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  color: #222029;
+  font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-style: normal;
+  font-size: calc(13px * var(--app-text-scale,1));
+  line-height: 1.5;
+}
+
+/* Moments keep a square text photo, independent of the post width. */
+.feed-post-photo-description {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 220px);
+  height: 220px;
+  padding: 16px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  border-radius: 14px;
+  background: #f2f3f7;
+  color: #222029;
+  font-size: calc(13px * var(--app-text-scale,1));
+  font-style: normal;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.feed-post-photo-description-inner {
+  display: block;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .chat-photo-card--pending {
@@ -1702,7 +1760,7 @@
 .feed-post-photo-description {
   position: relative;
   min-height: 44px;
-  padding-right: 44px !important;
+  padding-right: 16px;
   box-sizing: border-box;
 }
 

@@ -8,6 +8,7 @@ import { loadLysn, type LysnMessage, type LysnQuote } from "./lysn-storage";
 import { lysnAutonomousProfilePrompt } from "./lysn-profile-autonomy";
 import { lysnPublicBoundary } from "./lysn-identity";
 import { loadPhotoLibrary } from "./photo-library-storage";
+import { getPhotoSourceStrategy } from "./photo-library-resolver";
 
 export type GeneratedLysn = {
   kind: "text" | "photo" | "voice" | "sticker";
@@ -35,16 +36,21 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   const preset = presets.find(x => x.id === slot.presetId) || presets.find(x => x.builtIn) || null;
   const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(x => x.id === id)).filter(Boolean) as WorldBookConfig[];
   const regexes = (slot.regexIds || []).map(id => loadRegexes().find(x => x.id === id)).filter(Boolean) as RegexConfig[];
-  const room = loadLysn().rooms[characterId];
+  const lysnState = loadLysn();
+  const room = lysnState.rooms[characterId];
+  const testMode = lysnState.settings.testMode === true;
   const stickers = (room?.stickerPacks || []).flatMap(p => p.stickers).filter(s => s.name.trim() && s.imageUrl);
-  const photoChoices = loadPhotoLibrary().photos.filter(p => p.linkedCharacterIds.includes(characterId) && p.aiUsable && p.visionStatus === "done").slice(-20);
+  const photoStrategy = getPhotoSourceStrategy("bubble");
+  const photoChoices = photoStrategy === "generated_only" ? [] : loadPhotoLibrary().photos.filter(p => p.linkedCharacterIds.includes(characterId) && p.aiUsable && p.visionStatus === "done").slice(-20);
   // There is no private Chat history or Chat user identity in this prompt.
   const prompt = assemblePromptPayload({ character, history: [], preset, worldBooks, regexes,
     appId: "lysn", appTags: ["lysn", "bubble"], timeContext: buildCharacterTimeContext(character.timeZone) });
   const timeline = history.slice(-18).map(m => `${m.sender === "fan" ? "匿名粉丝" : m.sender === "artist" ? m.opener ? "频道开场白" : "艺人" : "系统"}: ${m.original}`).join("\n");
   const photoRequest = mode === "reply" && /(?:照片|自拍|图片|发图|张图|几张|多张|photo|picture|pics|사진|셀카)/i.test(fanMessage || "");
   const multiplePhotosRequested = photoRequest && /(?:几张|多张|两张|三张|连发|一组|一堆|几[张幅]|多[张幅]|[2-9][张幅]|multiple|several|photos|pictures|여러\s*장|두\s*장|세\s*장)/i.test(fanMessage || "");
-  const quoteTest = mode === "reply" && /(?:引用|测试引用|quote|인용|引用して)/i.test(fanMessage || "");
+  const quoteTest = testMode && mode === "reply" && /(?:引用|测试引用|quote|인용|引用して)/i.test(fanMessage || "");
+  const voiceTest = testMode && mode === "reply" && /(?:发.*语音|语音.*发|说句语音|voice|음성|보이스)/i.test(fanMessage || "");
+  const photoTest = testMode && photoRequest && (photoChoices.length > 0 || photoStrategy !== "album_only");
   const mayQuote = (mode === "new" || mode === "reply") && (quoteTest || Math.random() < ({ rare: .1, normal: .32, often: .7 }[room?.quoteStyle || "normal"]));
   const quotedFan = quoteTest ? [...history].reverse().find(m => m.sender === "fan" && m.kind === "text" && m.original.trim()) : undefined;
   const profilePrompt = mode === "new" || mode === "reply" ? lysnAutonomousProfilePrompt(characterId) : null;
@@ -56,15 +62,16 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
     mode === "birthday" ? "生日留言写成适合卡片的一段话，可以亲切但不伪装你和这个订阅者私下相识。" : "频道里的匿名粉丝留言可以作为灵感，但不必一条一条轮流答复；像本人随手分享近况那样，自然时可连发短句，安静时也可不发。别把每次出现都写成有问必答的私聊。",
     mode === "opening" ? configuredOpener ? "这是首次进入频道显示的一次性开场白。用户提供了开场白内容：保持意思和语气，用角色本人自然的语言写 original；用户已用角色语言写成原文时保留原文措辞；translated 是忠实的简体中文翻译。只写一条，不要增添新信息。" : "这是首次进入频道显示的一次性开场白，写一条符合人设的开场消息。它不算正式到场或回复，也不要提及已经读到粉丝来信。" : "",
     mode === "birthday" ? `这是订阅者 ${birthdayYear || "这一"} 年的生日卡片。写一条符合人设的生日祝福，可以使用 {{nickname}} 占位符；不要声称今天就是生日，用户可能在日历回看往年的卡片。` : "",
-    mode === "reply" ? "你看到了若干匿名粉丝来信。可以因此发新消息，也可以选择暂时不公开发消息；没有发消息不表示没看到。" : "",
+    mode === "reply" ? testMode ? "测试模式：明确让你发照片、发语音、引用时，优先按要求输出真实对应消息种类；照片可从相册或生图/文字照片中选择，不要只口头说发了。" : "拟真模式：你不一定看到了每一条匿名来信；可以完全没看到这条，接着上一段自己的话说，忽略它，或接另一位模拟粉丝的话，允许答非所问。看到来信也不一定回复；按自己的出现与看消息习惯行事。" : "",
     quoteTest && quotedFan ? `这轮粉丝明确要求测试引用。请引用这条已存在的匿名留言并自然回复，不要编造另一条替代：${quotedFan.original.slice(0, 300)}。只引用文字，不暴露发言者身份；本轮 publish=true，至少一条消息。` : mayQuote ? "如果自然合适，可以先模拟一条匿名粉丝留言并引用它，然后再作公开回复。quote 必须有 original 和 translated，两者分别是模拟留言原文和中文翻译。引用只存在于艺人消息里，不要把模拟留言当作用户发言。" : "这轮不要引用粉丝留言，也不要输出 quote。",
     profilePrompt || "这次不修改资料；即使对话提到了昵称或头像，也不要输出 profileUpdate。你可以自然问问大家的意见。",
     stickers.length ? `本聊天室可发送表情包的名称：${stickers.map(s => s.name).join("、")}。发送时 kind=sticker 且 stickerName 严格使用列表中某个名称，original 填该名称。` : "没有配置表情包，不要发送表情包。",
-    photoChoices.length ? `这是已关联到你且可用的相册候选（只允许从中选择）：${photoChoices.map(p => `${p.id}：${[p.subject, p.visionSummary, ...(p.visionTags || [])].filter(Boolean).join("、").slice(0, 95) || "未填写内容"}`).join("；")}。发照片时每张各输出一条 kind=photo，并填写准确的 photoId；想发多张时选择不同 photoId，连续排列所有 photo 消息，最后再写文字消息。photo 的 original 可以是一句照片发出后要说的话，它会显示成下一条独立气泡；不要声称已经发图却只输出文字。` : "当前没有已关联、允许使用且完成识图的角色照片；不要说照片已发出。如果这轮想发图，先按人设解释暂时发不了。",
-    photoRequest ? "匿名粉丝正在请求照片。你可以按人设决定发或不发；若你说‘发了、给你看这张’等已经发送的措辞，这一条必须输出 kind=photo，并填写相册中的 photoId。只用文字形容照片不算发送照片。" : "",
-    multiplePhotosRequested && photoChoices.length > 1 ? "粉丝想看好几张图。若你愿意发，选 2 至 4 张不同的已关联照片，每张各一个 kind=photo，连续排在 messages 开头；等所有照片发完，再单独说话。不要重复发送同一张。" : "",
+    photoChoices.length ? `这是已关联到你且可用的相册候选：${photoChoices.map(p => `${p.id}：${[p.subject, p.visionSummary, ...(p.visionTags || [])].filter(Boolean).join("、").slice(0, 95) || "未填写内容"}`).join("；")}。每张图独立选择：画面符合相册图时填写准确 photoId；食物、物件、风景等相册没有合适图时（且策略允许生图）不要填 photoId，填写具体 photoDescription 与 mediaIntent 交由共同媒体解析器生图或保留文字描述。一组里可以混合相册自拍与生图食物。多张 photo 连排，说话另发 text。` : photoStrategy === "album_only" ? "没有可用相册照片，不能假装发了照片。" : "暂无可用相册照片，生活场景可以通过生图或文字照片发送；人物自拍按统一媒体策略处理。",
+    photoRequest ? "匿名粉丝正在请求照片。你可以按人设决定发或不发；若明确说照片已经发出，必须输出 kind=photo 并填写画面描述，允许相册或生图。" : "",
+    multiplePhotosRequested ? "若愿意发多张，连续输出 2 至 4 条不同画面的 photo，每张独立选择相册或生图，最后再用单独的 text 说话。" : "",
+    voiceTest ? "测试模式：用户明确要求语音，本轮至少一条 kind=voice，original 是你本人的语言逐字稿。" : "",
     "只输出 JSON：{\"publish\":true/false,\"messages\":[{\"kind\":\"text/photo/voice/sticker\",\"original\":\"...\",\"translated\":\"...\",\"quote\":{\"original\":\"...\",\"translated\":\"...\"},\"stickerName\":\"...\",\"photoId\":\"已关联相册照片ID\",\"photoDescription\":\"...\",\"mediaIntent\":\"selfie/portrait/group/food/scenery/object/pet/other\"}]}。无需 quote 时省略该字段。",
-    mode === "opening" || mode === "birthday" || quoteTest && quotedFan ? "publish 必须为 true，写至少一条消息。" : multiplePhotosRequested ? "可以决定 publish=false 且 messages=[]；如果发图，最多四张照片加一条文字，总共至多五条。" : "可以决定 publish=false 且 messages=[]，这表示艺人暂时没有公开消息。publish=true 时自然发一至三条。",
+    mode === "opening" || mode === "birthday" || quoteTest && quotedFan || voiceTest || photoTest ? "publish 必须为 true，写至少一条消息。" : multiplePhotosRequested ? "可以决定 publish=false 且 messages=[]；如果发图，最多四张照片加一条文字，总共至多五条。" : "可以决定 publish=false 且 messages=[]，这表示艺人暂时没有公开消息。publish=true 时自然发一至三条。",
     "photo 必须填写照片描述，voice 的 original 是逐字稿。",
     `频道最近消息：\n${timeline || "暂无消息"}`,
     fanMessage ? `最近收到的匿名粉丝来信：${fanMessage}` : "",
@@ -76,15 +83,16 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   let raw = await sendLLMRequest(api, preset, messages, regexes, requestMeta, requestOptions);
   let data = parseJson(raw);
   const initialRows = Array.isArray(data.messages) ? data.messages as Record<string, unknown>[] : [];
-  const promisedPhotoOnly = photoRequest && photoChoices.length > 0 && initialRows.some(row => claimsPhotoSent(asText(row.original)) && !["photo", "image", "picture", "照片", "图片", "사진"].includes(asText(row.kind).toLowerCase()));
-  const initialPhotoIds = initialRows.filter(row => ["photo", "image", "picture", "照片", "图片", "사진"].includes(asText(row.kind).toLowerCase())).map(row => asText(row.photoId));
-  const tooFewPhotos = multiplePhotosRequested && photoChoices.length > 1 && initialPhotoIds.length > 0 && new Set(initialPhotoIds).size < 2;
-  if (promisedPhotoOnly || tooFewPhotos || quoteTest && quotedFan && (data.publish === false || !initialRows.length)) {
-    const correction = promisedPhotoOnly ? "你刚才说照片已经发出，却只输出文字。请重新输出 JSON：若确实要发，必须有 kind=photo 和候选列表中的 photoId；否则明确说暂时不能发，不要假装已经发出。" : tooFewPhotos ? "粉丝请求多张照片且相册有多张候选。若你决定发图，请重新输出 2 至 4 条连续的 kind=photo，各用不同 photoId；说话单独放在最后的 text 消息。" : "粉丝明确要求测试引用，但你刚才没有发消息。请写一条自然回复，并引用最近这条已有的匿名粉丝留言。";
+  const initialPhotoRows = initialRows.filter(row => ["photo", "image", "picture", "照片", "图片", "사진"].includes(asText(row.kind).toLowerCase()));
+  const missingPhotoTest = photoTest && !initialPhotoRows.length;
+  const missingVoiceTest = voiceTest && !initialRows.some(row => asText(row.kind) === "voice");
+  const tooFewPhotos = testMode && multiplePhotosRequested && initialPhotoRows.length > 0 && initialPhotoRows.length < 2;
+  if (missingPhotoTest || missingVoiceTest || tooFewPhotos || quoteTest && quotedFan && (data.publish === false || !initialRows.length)) {
+    const correction = missingPhotoTest ? "测试模式：这一轮请确实发一张 kind=photo，填写 photoDescription 与 mediaIntent；允许匹配相册或使用文字图片兜底，不能只口头声称发了。" : missingVoiceTest ? "测试模式：请确实输出至少一条 kind=voice，original 写逐字稿，不要只回复文字。" : tooFewPhotos ? "测试模式：这轮要求多张照片，输出 2 至 4 条不同内容的 kind=photo，每张分别填写 photoDescription 与 mediaIntent，说话另发 text；相册 ID 可按照片分别填写或留空。" : "测试模式：请引用最近这条已有的匿名留言并自然回复。";
     raw = await sendLLMRequest(api, preset, [...messages, { role: "assistant", content: raw }, { role: "user", content: correction }], regexes, requestMeta, requestOptions);
     data = parseJson(raw);
   }
-  if (data.publish === false && mode !== "opening" && mode !== "birthday" && !(quoteTest && quotedFan)) return [];
+  if (data.publish === false && mode !== "opening" && mode !== "birthday" && !(quoteTest && quotedFan) && !photoTest && !voiceTest) return [];
   const rows: GeneratedLysn[] = (Array.isArray(data.messages) ? data.messages : [data]).slice(0, multiplePhotosRequested ? 5 : 3).map((item, index) => {
     const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
     const rawKind = asText(row.kind);

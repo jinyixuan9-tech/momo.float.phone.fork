@@ -34,6 +34,7 @@ import { sendBrowserNotification } from "@/lib/browser-notification";
 import { resolveVoiceConfig, synthesizeSpeech, playAudioBlobViaMediaElement, unlockAudioPlayback } from "@/lib/tts-service";
 import { generateLysn } from "@/lib/lysn-engine";
 import { prepareLysnMessages } from "@/lib/lysn-message";
+import { resolveMediaForUse } from "@/lib/media-resolver";
 import { maybeCelebrateLysn } from "@/lib/lysn-celebrations";
 import { applyLysnProfileAction } from "@/lib/lysn-profile-autonomy";
 import { noteLysnFanMessage } from "@/lib/lysn-identity";
@@ -207,7 +208,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
   const [voiceViewer, setVoiceViewer] = useState<LysnMessage | null>(null);
   const [messageMenu, setMessageMenu] = useState<LysnMessage | null>(null);
   const [rerollTarget, setRerollTarget] = useState<LysnMessage | null>(null);
-  const [editDraft, setEditDraft] = useState<{ id: string; original: string; translated: string } | null>(null);
+  const [editDraft, setEditDraft] = useState<{ id: string; sender: LysnMessage["sender"]; kind: LysnMessage["kind"]; original: string; translated: string } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<UploadTarget>("artistAvatar");
@@ -292,10 +293,23 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
   const saveEditedMessage = () => {
     if (!editDraft) return;
     const next = loadLysn();
-    next.messages = next.messages.map(message => message.id === editDraft.id ? { ...message, original: editDraft.original, translated: editDraft.translated || editDraft.original } : message);
+    next.messages = next.messages.map(message => message.id === editDraft.id ? editDraft.kind === "photo" ? { ...message, photoDescription: editDraft.original, original: editDraft.original, translated: editDraft.original, imageUrl: undefined, photoId: undefined, photoCaptionDetached: true } : { ...message, original: editDraft.original, translated: editDraft.sender === "artist" ? editDraft.translated || editDraft.original : editDraft.original } : message);
     commit(next);
     setEditDraft(null);
     onNotice?.("已保存修改");
+  };
+
+  const generateEditedPhoto = async () => {
+    if (!editDraft || editDraft.kind !== "photo") return;
+    const draft = editDraft;
+    saveEditedMessage();
+    const message = loadLysn().messages.find(row => row.id === draft.id);
+    if (!message) return;
+    const media = await resolveMediaForUse({ actor: { type: "character", characterId: message.characterId }, description: draft.original, channel: "bubble", targetId: message.characterId, appId: "lysn", mode: "generate" }).catch(() => null);
+    if (!media?.imageUrl) { onNotice?.("生图未配置或生成失败，已保留文字照片"); return; }
+    const next = loadLysn();
+    next.messages = next.messages.map(row => row.id === draft.id ? { ...row, imageUrl: media.imageUrl, photoId: media.photoLibraryId } : row);
+    commit(next);
   };
 
   const rerollMessage = async (message: LysnMessage, mode: "single" | "session") => {
@@ -569,7 +583,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
   };
 
   const openEditMessage = (message: LysnMessage) => {
-    setEditDraft({ id: message.id, original: message.original, translated: message.translated || message.original });
+    setEditDraft({ id: message.id, sender: message.sender, kind: message.kind, original: message.kind === "photo" ? message.photoDescription || message.original : message.original, translated: message.translated || message.original });
     setMessageMenu(null);
   };
 
@@ -612,9 +626,9 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
   const messageItems: Array<LysnMessage | LysnMessage[]> = [];
   for (const message of messages) {
     const previous = messageItems.at(-1);
-    if (!chatSearchOpen && room.foldPhotos !== false && message.sender === "artist" && message.kind === "photo" && message.imageUrl && previous) {
+    if (!chatSearchOpen && room.foldPhotos !== false && message.sender === "artist" && message.kind === "photo" && (message.imageUrl || message.photoDescription) && previous) {
       const last = Array.isArray(previous) ? previous.at(-1) : previous;
-      if (last?.sender === "artist" && last.kind === "photo" && last.imageUrl && !last.quote && !message.quote && (last.photoCaptionDetached || !last.original || /^(?:照片|图片|photo|picture|사진)$/i.test(last.original)) && (message.photoCaptionDetached || !message.original || /^(?:照片|图片|photo|picture|사진)$/i.test(message.original)) && message.createdAt - last.createdAt < 120000) {
+      if (last?.sender === "artist" && last.kind === "photo" && (last.imageUrl || last.photoDescription) && !last.quote && !message.quote && (last.photoCaptionDetached || !last.original || /^(?:照片|图片|photo|picture|사진)$/i.test(last.original)) && (message.photoCaptionDetached || !message.original || /^(?:照片|图片|photo|picture|사진)$/i.test(message.original)) && message.createdAt - last.createdAt < 120000) {
         if (Array.isArray(previous)) previous.push(message);
         else messageItems[messageItems.length - 1] = [previous, message];
         continue;
@@ -623,7 +637,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
     messageItems.push(message);
   }
 
-  const mediaItems = useMemo(() => [...messages].filter(m => m.sender === "artist" && ((m.kind === "photo" && m.imageUrl) || m.kind === "voice")).sort((a, b) => b.createdAt - a.createdAt), [messages]);
+  const mediaItems = useMemo(() => [...messages].filter(m => m.sender === "artist" && (m.kind === "photo" || m.kind === "voice")).sort((a, b) => b.createdAt - a.createdAt), [messages]);
 
   const renderMessage = (item: LysnMessage | LysnMessage[]) => {
     if (Array.isArray(item)) {
@@ -632,7 +646,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
           <Avatar src={avatar} name={roomName} className={`${styles.messageAvatar} ${styles.artistAvatarRing}`}/>
           <div className={styles.messageBody}>
             <div className={styles.senderLine}><ArtistBadge/><b>{displayName}</b></div>
-            <PhotoStack rows={item} onOpen={setViewerUrl}/>
+            <PhotoStack rows={item} onOpen={setViewerUrl} onEdit={openEditMessage}/>
           </div>
           <div className={styles.messageMeta}><time>{formatClock(item.at(-1)!.createdAt)}</time></div>
         </div>
@@ -674,6 +688,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
           {m.quote && <div className={styles.quoteBubble}><span>ARTIST 的回复：</span><p>{showName(m.quote.original)}</p><small>{showName(m.quote.translated)}</small></div>}
           <div className={`${styles.bubble} ${m.kind === "voice" ? styles.voiceBubbleShell : ""} ${m.kind === "photo" ? styles.photoBubbleOnly : ""}`} onClick={bubbleClick}>
             {m.kind === "photo" && m.imageUrl && <button type="button" className={styles.photoButton} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl} className={styles.photo}/></button>}
+            {m.kind === "photo" && !m.imageUrl && <button type="button" className={styles.textPhoto} onClick={() => openEditMessage(m)}><span className={styles.photoTextScroll}>{m.photoDescription || m.original}</span></button>}
             {m.kind === "sticker" && m.imageUrl && <AssetImage src={m.imageUrl} className={styles.stickerBubble}/>}
             {m.kind === "voice" && <VoicePlayer message={m} onNotice={onNotice} />}
             {m.kind !== "sticker" && m.kind !== "voice" && m.kind !== "photo" && <p>{showName(displayText)}</p>}
@@ -734,7 +749,7 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
 
       {route === "ourBox" && <>{header("OUR BOX")}<main className={styles.libraryScroll}>{messages.filter(m => (room.favoriteMessageIds || []).includes(m.id)).length ? messages.filter(m => (room.favoriteMessageIds || []).includes(m.id)).map(m => <div key={m.id} className={styles.savedMessage}><time>{new Date(m.createdAt).toLocaleString()}</time><div>{m.sender === "artist" ? <Avatar src={avatar} name={displayName} className={styles.artistAvatarRing}/> : <Avatar src={room.avatar || user.avatar} name={room.nickname || user.name}/>}<p>{showName(m.original)}</p></div><button type="button" onClick={() => toggleFavorite(m.id)}>移出收藏</button></div>) : <p className={styles.empty}>长按消息，就能收藏到这里。</p>}</main></>}
 
-      {route === "media" && <>{header("总览")}<main className={`${styles.libraryScroll} ${styles.mediaGrid}`}>{mediaItems.length ? mediaItems.map((m, index, arr) => <div key={m.id} className={styles.mediaTile}>{(index === 0 || formatDateGroup(arr[index - 1].createdAt) !== formatDateGroup(m.createdAt)) && <p className={styles.libraryDate}>{formatDateGroup(m.createdAt)}</p>}{m.kind === "photo" && m.imageUrl ? <button type="button" className={styles.mediaImage} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl}/></button> : <button type="button" className={styles.mediaVoiceCard} onClick={() => setVoiceViewer(m)}><div className={styles.mediaVoiceCardName}>{displayName}</div><Avatar src={avatar} name={displayName} className={styles.mediaVoiceAvatar}/><div className={styles.mediaVoiceDuration}>{`00:${String(estimateVoiceSeconds(m)).padStart(2, "0")}`}</div></button>}</div>) : <p className={styles.empty}>艺人发送的图片和语音会自动收在这里。</p>}</main></>}
+      {route === "media" && <>{header("总览")}<main className={`${styles.libraryScroll} ${styles.mediaGrid}`}>{mediaItems.length ? mediaItems.map((m, index, arr) => <div key={m.id} className={styles.mediaTile}>{(index === 0 || formatDateGroup(arr[index - 1].createdAt) !== formatDateGroup(m.createdAt)) && <p className={styles.libraryDate}>{formatDateGroup(m.createdAt)}</p>}{m.kind === "photo" ? m.imageUrl ? <button type="button" className={styles.mediaImage} onClick={() => setViewerUrl(m.imageUrl || "")}><AssetImage src={m.imageUrl}/></button> : <button type="button" className={styles.textPhoto} onClick={() => openEditMessage(m)}><span className={styles.photoTextScroll}>{m.photoDescription || m.original}</span></button> : <button type="button" className={styles.mediaVoiceCard} onClick={() => setVoiceViewer(m)}><div className={styles.mediaVoiceCardName}>{displayName}</div><Avatar src={avatar} name={displayName} className={styles.mediaVoiceAvatar}/><div className={styles.mediaVoiceDuration}>{`00:${String(estimateVoiceSeconds(m)).padStart(2, "0")}`}</div></button>}</div>) : <p className={styles.empty}>艺人发送的图片和语音会自动收在这里。</p>}</main></>}
 
       {route === "stickers" && <>{header("本聊天室的表情包", <button type="button" onClick={() => { const name = stickerPackName.trim(); if (!name) { onNotice?.("先填写分类名称"); return; } updatePacks([...(room.stickerPacks || []), { id: lysnId(), name, stickers: [] }]); setStickerPackName(""); }}>创建</button>)}<main className={styles.libraryScroll}><p className={styles.settingsNote}>只供 {roomName} 在 LYSN 使用，与「聊天」App 的表情库分开。</p><label className={styles.field}><span>新分类名称</span><input value={stickerPackName} onChange={e => setStickerPackName(e.target.value)} placeholder="例如：小动物、日常表情" /></label><div className={styles.packGrid}>{(room.stickerPacks || []).map(pack => <button type="button" key={pack.id} onClick={() => { setActivePackId(pack.id); setRoute("stickerPack"); }}><Languages size={30}/><b>{pack.name}</b><small>{pack.stickers.length} 个表情</small></button>)}</div>{!(room.stickerPacks || []).length && <p className={styles.empty}>创建分类后，可以上传图片或填写图片 URL。</p>}</main></>}
 
@@ -746,18 +761,18 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
 
       {route === "myEdit" && <>{header("编辑个人资料", <button type="button" onClick={saveUser}>保存</button>)}<main className={styles.editScroll}><div className={styles.editCover}>{userDraft.cover ? <AssetImage src={userDraft.cover} className={styles.coverImage}/> : <div className={styles.coverFallback}/>}<button type="button" className={styles.editCoverButton} onClick={() => requestUpload("userCover")}><Camera size={18}/>更换背景</button><button type="button" className={styles.editAvatarButton} onClick={() => requestUpload("userAvatar")}><Avatar src={userDraft.avatar} name={userDraft.name} className={styles.editAvatar}/><Camera size={17}/></button></div><div className={styles.fields}>{editField("昵称", userDraft.name, value => setUserDraft(prev => ({ ...prev, name: value })))}{editField("生日（可选，例：2001-07-17）", userDraft.birthday, value => setUserDraft(prev => ({ ...prev, birthday: value })))}{editField("性别（可选）", userDraft.gender, value => setUserDraft(prev => ({ ...prev, gender: value })))}<section className={styles.myStickerSettings}><h3>我的表情</h3><p>上传后可以在 Bubble 输入栏旁的笑脸中发送，所有聊天室共用。</p><button type="button" onClick={() => requestUpload("userSticker")}><Camera size={17}/>上传表情图片</button><div className={styles.myStickerGrid}>{(userDraft.stickers || []).map(sticker => <div key={sticker.id}><AssetImage src={sticker.imageUrl}/><input aria-label="表情名称" value={sticker.name} onChange={e => setUserDraft(prev => ({ ...prev, stickers: (prev.stickers || []).map(item => item.id === sticker.id ? { ...item, name: e.target.value } : item) }))}/><button type="button" aria-label={`删除${sticker.name}`} onClick={() => setUserDraft(prev => ({ ...prev, stickers: (prev.stickers || []).filter(item => item.id !== sticker.id) }))}><X size={15}/></button></div>)}</div></section><button type="button" className={styles.primaryButton} onClick={saveUser}>保存个人资料</button></div></main></>}
 
-      {route === "settings" && <>{header("设置")}<main className={styles.settingsScroll}><h3>基本信息</h3><button type="button" className={styles.settingRow} onClick={startUserEdit}><Avatar src={user.avatar} name={user.name}/><span>{user.name}</span><small>编辑个人资料</small><ChevronRight size={18}/></button><h3>通知与体验</h3>{settingsSwitch("LYSN 新消息通知", state.settings.notificationsEnabled, value => updateSetting({ notificationsEnabled: value }))}{settingsSwitch("艺人自主发消息", state.settings.autonomousMessages, value => updateSetting({ autonomousMessages: value }), "关闭后只在点发送时尝试生成新消息")}{settingsSwitch("加深拟真", state.settings.deepRealism, value => updateSetting({ deepRealism: value }), "每次艺人回复后或一天后可再发三条；字数随订阅天数增加")}
+      {route === "settings" && <>{header("设置")}<main className={styles.settingsScroll}><h3>基本信息</h3><button type="button" className={styles.settingRow} onClick={startUserEdit}><Avatar src={user.avatar} name={user.name}/><span>{user.name}</span><small>编辑个人资料</small><ChevronRight size={18}/></button><h3>通知与体验</h3>{settingsSwitch("LYSN 新消息通知", state.settings.notificationsEnabled, value => updateSetting({ notificationsEnabled: value }))}{settingsSwitch("艺人自主发消息", state.settings.autonomousMessages, value => updateSetting({ autonomousMessages: value }), "关闭后只在点发送时尝试生成新消息")}{settingsSwitch("加深拟真", state.settings.deepRealism, value => updateSetting({ deepRealism: value }), "每次艺人回复后或一天后可再发三条；字数随订阅天数增加")}{settingsSwitch("测试模式", state.settings.testMode === true, value => updateSetting({ testMode: value }), "打开后优先执行明确的发照片、语音和引用请求；默认关闭")}
         <h3>翻译显示</h3>{([ ["fold", "折叠翻译"], ["replace", "覆盖原文"] ] as const).map(([value, label]) => <button type="button" className={styles.settingRow} key={value} onClick={() => updateSetting({ translationMode: value })}><span>{label}</span>{state.settings.translationMode === value && <Check size={20} className={styles.selectedCheck}/>}</button>)}
 
       </main></>}
 
-      {roomSheet && route === "details" && <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) setRoomSheet(false); }}><section className={`${styles.sheet} ${styles.roomSheet}`} role="dialog" aria-label="聊天室设置"><header><b>聊天室设置</b><button type="button" onClick={() => setRoomSheet(false)} aria-label="关闭"><X size={21}/></button></header><div className={styles.roomSheetScroll}><p className={styles.roomSection}>个人资料 <small>仅当前聊天室生效</small></p><button type="button" className={styles.settingRow} onClick={() => requestUpload("roomAvatar")}><span>个人头像</span><Avatar src={room.avatar || user.avatar} name={room.nickname || user.name}/><Camera size={17}/></button><label className={styles.field}><span>我的昵称 · 艺人称呼你时使用</span><input value={room.nickname || ""} placeholder={user.name} onChange={e => updateRoom({ nickname: e.target.value })}/></label><p className={styles.roomSection}>艺人</p><label className={styles.field}><span>聊天室名称 · 你看到的名字</span><input value={room.chatName || ""} placeholder={displayName} onChange={e => updateRoom({ chatName: e.target.value })}/></label><p className={styles.roomSection}>艺人泡泡状态</p><label className={styles.field}><span>出现频率</span><select value={room.activity || "normal"} onChange={e => updateRoom({ activity: e.target.value as LysnRoom["activity"] })}><option value="quiet">不常来</option><option value="normal">普通</option><option value="frequent">经常来</option></select></label><label className={styles.field}><span>看粉丝消息</span><select value={room.readStyle || "normal"} onChange={e => updateRoom({ readStyle: e.target.value as LysnRoom["readStyle"], nextFanReadAt: undefined })}><option value="rare">不常看</option><option value="normal">普通</option><option value="often">经常看</option></select></label><label className={styles.field}><span>引用粉丝消息</span><select value={room.quoteStyle || "normal"} onChange={e => updateRoom({ quoteStyle: e.target.value as LysnRoom["quoteStyle"] })}><option value="rare">很少引用</option><option value="normal">偶尔引用</option><option value="often">喜欢引用</option></select></label><p className={styles.settingsNote}>这些是大致偏好，看消息和引用会有随机变化；看过消息不一定马上回复。</p><button type="button" className={styles.detailsRow} onClick={() => { setRoomSheet(false); setRoute("stickers"); }}><Languages size={20}/>本聊天室的表情包<ChevronRight size={19}/></button><p className={styles.roomSection}>当前聊天室背景</p><div className={styles.roomBackgroundControl}><div className={styles.roomBackgroundPreview}>{room.backgroundUrl ? <AssetImage src={room.backgroundUrl}/> : <span>默认背景</span>}</div><div className={styles.roomBackgroundActions}><button type="button" onClick={() => requestUpload("roomBackground")}>上传图片</button>{room.backgroundUrl && <button type="button" onClick={() => updateRoom({ backgroundUrl: "" })}>恢复默认</button>}</div></div><label className={styles.field}><span>或输入背景图片链接</span><input type="url" value={room.backgroundUrl?.startsWith("asset://") ? "" : room.backgroundUrl || ""} placeholder="https://…" onChange={e => updateRoom({ backgroundUrl: e.target.value.trim() })}/></label><p className={styles.roomSection}>通知与显示</p>{settingsSwitch("置顶聊天", Boolean(room.pinned), value => updateRoom({ pinned: value }))}{settingsSwitch("消息免打扰", Boolean(room.muted), value => updateRoom({ muted: value }))}{settingsSwitch("多图折叠展示", room.foldPhotos !== false, value => updateRoom({ foldPhotos: value }), "连续发送的多张图片叠放轮播，点击展开可逐张看")}</div></section></div>}
+      {roomSheet && route === "details" && <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) setRoomSheet(false); }}><section className={`${styles.sheet} ${styles.roomSheet}`} role="dialog" aria-label="聊天室设置"><header><b>聊天室设置</b><button type="button" onClick={() => setRoomSheet(false)} aria-label="关闭"><X size={21}/></button></header><div className={styles.roomSheetScroll}><p className={styles.roomSection}>个人资料 <small>仅当前聊天室生效</small></p><button type="button" className={styles.settingRow} onClick={() => requestUpload("roomAvatar")}><span>个人头像</span><Avatar src={room.avatar || user.avatar} name={room.nickname || user.name}/><Camera size={17}/></button><label className={styles.field}><span>我的昵称 · 艺人称呼你时使用</span><input value={room.nickname || ""} placeholder={user.name} onChange={e => updateRoom({ nickname: e.target.value })}/></label><p className={styles.roomSection}>艺人</p><label className={styles.field}><span>聊天室名称 · 你看到的名字</span><input value={room.chatName || ""} placeholder={displayName} onChange={e => updateRoom({ chatName: e.target.value })}/></label><p className={styles.roomSection}>艺人泡泡状态</p><label className={styles.field}><span>出现频率</span><select value={room.activity || "normal"} onChange={e => updateRoom({ activity: e.target.value as LysnRoom["activity"] })}><option value="quiet">不常来</option><option value="normal">普通</option><option value="frequent">经常来</option></select></label><label className={styles.field}><span>看粉丝消息</span><select value={room.readStyle || "normal"} onChange={e => updateRoom({ readStyle: e.target.value as LysnRoom["readStyle"], nextFanReadAt: undefined })}><option value="rare">不常看</option><option value="normal">普通</option><option value="often">经常看</option></select></label><label className={styles.field}><span>引用粉丝消息</span><select value={room.quoteStyle || "normal"} onChange={e => updateRoom({ quoteStyle: e.target.value as LysnRoom["quoteStyle"] })}><option value="rare">很少引用</option><option value="normal">偶尔引用</option><option value="often">喜欢引用</option></select></label><p className={styles.settingsNote}>这些是大致偏好，看消息和引用会有随机变化；看过消息不一定马上回复。</p><button type="button" className={styles.detailsRow} onClick={() => { setRoomSheet(false); setRoute("stickers"); }}><Smile size={20}/>本聊天室的表情包<ChevronRight size={19}/></button><p className={styles.roomSection}>当前聊天室背景</p><div className={styles.roomBackgroundControl}><div className={styles.roomBackgroundPreview}>{room.backgroundUrl ? <AssetImage src={room.backgroundUrl}/> : <span>默认背景</span>}</div><div className={styles.roomBackgroundActions}><button type="button" onClick={() => requestUpload("roomBackground")}>上传图片</button>{room.backgroundUrl && <button type="button" onClick={() => updateRoom({ backgroundUrl: "" })}>恢复默认</button>}</div></div><label className={styles.field}><span>或输入背景图片链接</span><input type="url" value={room.backgroundUrl?.startsWith("asset://") ? "" : room.backgroundUrl || ""} placeholder="https://…" onChange={e => updateRoom({ backgroundUrl: e.target.value.trim() })}/></label><p className={styles.roomSection}>通知与显示</p>{settingsSwitch("置顶聊天", Boolean(room.pinned), value => updateRoom({ pinned: value }))}{settingsSwitch("消息免打扰", Boolean(room.muted), value => updateRoom({ muted: value }))}{settingsSwitch("多图折叠展示", room.foldPhotos !== false, value => updateRoom({ foldPhotos: value }), "连续发送的多张图片叠放轮播，点击展开可逐张看")}</div></section></div>}
 
       {messageMenu && <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) setMessageMenu(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`} role="dialog" aria-label="消息操作"><button type="button" className={styles.actionSheetButton} onClick={() => { toggleFavorite(messageMenu.id); setMessageMenu(null); }}><Bookmark size={18}/>{(room.favoriteMessageIds || []).includes(messageMenu.id) ? "取消收藏" : "收藏"}</button><button type="button" className={styles.actionSheetButton} onClick={() => openEditMessage(messageMenu)}><Pencil size={18}/>编辑</button><button type="button" className={styles.actionSheetButton} onClick={() => { setRerollTarget(messageMenu); setMessageMenu(null); }}><RotateCcw size={18}/>重回</button><button type="button" className={`${styles.actionSheetButton} ${styles.actionDanger}`} onClick={() => removeMessage(messageMenu.id)}><Trash2 size={18}/>删除</button><button type="button" className={styles.actionCancel} onClick={() => setMessageMenu(null)}>取消</button></section></div>}
 
       {rerollTarget && <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) setRerollTarget(null); }}><section className={`${styles.sheet} ${styles.actionSheet}`} role="dialog" aria-label="重回消息"><button type="button" className={styles.actionSheetButton} onClick={() => { void rerollMessage(rerollTarget, "single"); }}><RotateCcw size={18}/>重回本条</button><button type="button" className={styles.actionSheetButton} onClick={() => { void rerollMessage(rerollTarget, "session"); }}><RotateCcw size={18}/>重回本次</button><button type="button" className={styles.actionCancel} onClick={() => setRerollTarget(null)}>取消</button></section></div>}
 
-      {editDraft && <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) setEditDraft(null); }}><section className={`${styles.sheet} ${styles.editMessageSheet}`} role="dialog" aria-label="编辑消息"><header><b>编辑消息</b><button type="button" onClick={() => setEditDraft(null)} aria-label="关闭"><X size={20}/></button></header><label className={styles.field}><span>原文</span><textarea value={editDraft.original} onChange={e => setEditDraft(prev => prev ? { ...prev, original: e.target.value } : prev)} /></label><label className={styles.field}><span>翻译</span><textarea value={editDraft.translated} onChange={e => setEditDraft(prev => prev ? { ...prev, translated: e.target.value } : prev)} /></label><button type="button" className={styles.primaryButton} onClick={saveEditedMessage}>保存修改</button></section></div>}
+      {editDraft && <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) setEditDraft(null); }}><section className={`${styles.sheet} ${styles.editMessageSheet}`} role="dialog" aria-label="编辑消息"><header><b>{editDraft.kind === "photo" ? "编辑照片描述" : "编辑消息"}</b><button type="button" onClick={() => setEditDraft(null)} aria-label="关闭"><X size={20}/></button></header><div className={styles.editMessageFields}><label className={styles.field}><span>{editDraft.kind === "photo" ? "画面描述" : "原文"}</span><textarea value={editDraft.original} onChange={e => setEditDraft(prev => prev ? { ...prev, original: e.target.value } : prev)} /></label>{editDraft.sender === "artist" && editDraft.kind !== "photo" && <label className={styles.field}><span>翻译</span><textarea value={editDraft.translated} onChange={e => setEditDraft(prev => prev ? { ...prev, translated: e.target.value } : prev)} /></label>}</div><button type="button" className={styles.primaryButton} disabled={!editDraft.original.trim()} onClick={saveEditedMessage}>{editDraft.kind === "photo" ? "仅保存文字" : "保存修改"}</button>{editDraft.kind === "photo" && <button type="button" className={styles.primaryButton} disabled={!editDraft.original.trim()} onClick={() => void generateEditedPhoto()}>开始生图</button>}</section></div>}
 
       {viewerUrl && <div className={styles.imageViewer} role="dialog" aria-label="查看图片" onClick={() => setViewerUrl("")}><button type="button" aria-label="关闭图片"><X size={26}/></button><AssetImage src={viewerUrl}/></div>}
 
@@ -766,31 +781,36 @@ export function LysnApp({ onClose, onNotice }: { onClose: () => void; onNotice?:
   );
 }
 
-function PhotoStack({ rows, onOpen }: { rows: LysnMessage[]; onOpen: (url: string) => void }) {
+function PhotoStack({ rows, onOpen, onEdit }: { rows: LysnMessage[]; onOpen: (url: string) => void; onEdit: (message: LysnMessage) => void }) {
   const [active, setActive] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [dragX, setDragX] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
   const [flipping, setFlipping] = useState<1 | -1 | null>(null);
   const startX = useRef<number | null>(null);
+  const startY = useRef<number | null>(null);
   const flipTimer = useRef<number | null>(null);
-  useEffect(() => () => { if (flipTimer.current !== null) window.clearTimeout(flipTimer.current); }, []);
+  const holdTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  useEffect(() => () => { if (flipTimer.current !== null) window.clearTimeout(flipTimer.current); if (holdTimer.current !== null) window.clearTimeout(holdTimer.current); }, []);
+  const canFlip = (nextDirection: 1 | -1) => active + nextDirection >= 0 && active + nextDirection < rows.length;
   const flip = (nextDirection: 1 | -1) => {
-    if (flipping || rows.length < 2) return;
+    if (flipping || !canFlip(nextDirection)) { setDragX(0); return; }
     setDirection(nextDirection);
     setFlipping(nextDirection);
     setDragX(nextDirection === 1 ? -150 : 150);
     flipTimer.current = window.setTimeout(() => {
-      setActive(index => (index + nextDirection + rows.length) % rows.length);
+      setActive(index => index + nextDirection);
       setDragX(0);
       setFlipping(null);
       flipTimer.current = null;
     }, 230);
   };
-  if (expanded) return <div className={styles.photoExpanded}><div className={styles.photoExpandedGrid}>{rows.map(row => <button type="button" key={row.id} onClick={() => row.imageUrl && onOpen(row.imageUrl)} aria-label={`查看照片 ${rows.indexOf(row) + 1}`}><AssetImage src={row.imageUrl || ""}/></button>)}</div><button type="button" className={styles.photoViewAll} onClick={() => setExpanded(false)}>收起照片</button></div>;
+  if (expanded) return <div className={styles.photoExpanded}><div className={styles.photoExpandedGrid}>{rows.map(row => <button type="button" key={row.id} onClick={() => row.imageUrl ? onOpen(row.imageUrl) : onEdit(row)} onContextMenu={e => { e.preventDefault(); onEdit(row); }} aria-label={`查看照片 ${rows.indexOf(row) + 1}`}>{row.imageUrl ? <AssetImage src={row.imageUrl}/> : <span className={styles.photoTextCard}><span className={styles.photoTextScroll}>{row.photoDescription || row.original}</span></span>}</button>)}</div><button type="button" className={styles.photoViewAll} onClick={() => setExpanded(false)}>收起照片</button></div>;
   return <div className={styles.stackWrap}><div className={styles.photoDeck} role="group" aria-label={`${rows.length} 张照片，左右滑动翻页`}>
     {rows.map((_, depth) => {
-      const index = (active + depth * direction + rows.length * 2) % rows.length;
+      const index = active + depth * direction;
+      if (index < 0 || index >= rows.length) return null;
       const row = rows[index];
       const front = depth === 0;
       const moveX = front ? dragX : flipping && depth === 1 ? 0 : depth * 6;
@@ -798,14 +818,15 @@ function PhotoStack({ rows, onOpen }: { rows: LysnMessage[]; onOpen: (url: strin
       const angle = front ? dragX / 15 : flipping && depth === 1 ? 0 : depth * 3;
       return <button type="button" key={row.id} tabIndex={front ? 0 : -1} aria-hidden={!front} aria-label={`第 ${index + 1} 张，共 ${rows.length} 张；轻点或滑动翻页`} className={styles.photoCard} style={{ zIndex: rows.length - depth, transform: `translate(${moveX}px,${moveY}px) rotate(${angle}deg)`, transition: front && startX.current !== null && !flipping ? "none" : undefined, pointerEvents: front ? "auto" : "none" }}
         onDragStart={e => e.preventDefault()}
-        onPointerDown={front ? e => { if (flipping) return; startX.current = e.clientX; e.currentTarget.setPointerCapture(e.pointerId); } : undefined}
-        onPointerMove={front ? e => { if (startX.current === null || flipping) return; const delta = Math.max(-135, Math.min(135, e.clientX - startX.current)); setDragX(delta); if (Math.abs(delta) > 8) setDirection(delta < 0 ? 1 : -1); } : undefined}
-        onPointerUp={front ? e => { if (startX.current === null) return; const delta = e.clientX - startX.current; startX.current = null; if (Math.abs(delta) > 28) flip(delta < 0 ? 1 : -1); else { setDragX(0); if (Math.abs(delta) < 8) flip(1); } } : undefined}
-        onPointerCancel={front ? () => { startX.current = null; setDragX(0); } : undefined}
+        onContextMenu={front ? e => { e.preventDefault(); onEdit(row); } : undefined}
+        onPointerDown={front ? e => { if (flipping) return; startX.current = e.clientX; startY.current = e.clientY; longPressed.current = false; if (holdTimer.current !== null) window.clearTimeout(holdTimer.current); holdTimer.current = window.setTimeout(() => { longPressed.current = true; startX.current = null; onEdit(row); holdTimer.current = null; }, 520); e.currentTarget.setPointerCapture(e.pointerId); } : undefined}
+        onPointerMove={front ? e => { if (startX.current === null || flipping) return; const delta = Math.max(-135, Math.min(135, e.clientX - startX.current)); const vertical = Math.abs(e.clientY - (startY.current ?? e.clientY)); if ((Math.abs(delta) > 8 || vertical > 8) && holdTimer.current !== null) { window.clearTimeout(holdTimer.current); holdTimer.current = null; } if (vertical > Math.abs(delta)) { setDragX(0); return; } const nextDirection = delta < 0 ? 1 : -1; setDragX(canFlip(nextDirection) ? delta : 0); if (Math.abs(delta) > 8 && canFlip(nextDirection)) setDirection(nextDirection); } : undefined}
+        onPointerUp={front ? e => { if (holdTimer.current !== null) { window.clearTimeout(holdTimer.current); holdTimer.current = null; } if (longPressed.current) { longPressed.current = false; return; } if (startX.current === null) return; const delta = e.clientX - startX.current; const vertical = Math.abs(e.clientY - (startY.current ?? e.clientY)); startX.current = null; startY.current = null; if (vertical > 8 && vertical > Math.abs(delta)) { setDragX(0); return; } if (Math.abs(delta) > 28) flip(delta < 0 ? 1 : -1); else { setDragX(0); if (Math.abs(delta) < 8) row.imageUrl ? flip(1) : onEdit(row); } } : undefined}
+        onPointerCancel={front ? () => { if (holdTimer.current !== null) window.clearTimeout(holdTimer.current); holdTimer.current = null; startX.current = null; startY.current = null; setDragX(0); } : undefined}
         onClick={front ? e => { if (e.detail === 0) flip(1); } : undefined}
         onKeyDown={front ? e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); flip(e.key === "ArrowLeft" ? -1 : 1); } } : undefined}>
-        <AssetImage src={row.imageUrl || ""}/>
+        {row.imageUrl ? <AssetImage src={row.imageUrl}/> : <span className={styles.photoTextCard}><span className={styles.photoTextScroll}>{row.photoDescription || row.original}</span></span>}
       </button>;
     })}
-  </div><div className={styles.photoDeckControls}><span>{active + 1} / {rows.length}</span><button type="button" className={styles.photoViewAll} onClick={() => setExpanded(true)}>查看全部</button></div></div>;
+  </div><div className={styles.photoDeckControls}><button type="button" className={styles.photoViewAll} onClick={() => setExpanded(true)}>展开全部 {rows.length}</button></div></div>;
 }

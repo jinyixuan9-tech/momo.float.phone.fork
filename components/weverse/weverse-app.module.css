@@ -845,3 +845,6 @@
 .notificationRow p { margin:4px 0 0; font-size:11px; line-height:1.45; color:#50565a; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .notificationRow small { display:block; margin-top:5px; color:#9aa0a4; font-size:9px; }
 .notificationRow > i { position:absolute; right:11px; top:13px; width:6px; height:6px; border-radius:50%; background:#1fd1bb; }
+.textPhotoCard{display:flex;align-items:center;justify-content:center;width:min(100%,270px);min-height:200px;margin:12px 0;padding:22px;border:0;border-radius:16px;background:#f2f3f7;color:#565967;line-height:1.6;text-align:center;overflow-wrap:anywhere}
+.textPhotoCard{height:180px;min-height:180px;padding:16px;color:#222029;overflow:hidden}
+.textPhotoScroll{display:block;max-width:100%;max-height:100%;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;line-height:1.5;text-align:center;overflow-wrap:anywhere}

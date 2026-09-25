@@ -77,6 +77,8 @@ import {
     createPendingChatGeneratedImageData,
     generateAndApplyChatGeneratedImage,
     isPendingChatGeneratedImageMessage,
+    retryChatGeneratedImage,
+    saveChatImageDescription,
 } from "@/lib/generated-image-retry";
 import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
@@ -4461,11 +4463,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setEditingResponseContent("");
         setEditingMessageId(msg.id);
         // 语音条的文字存在 mediaData.label 里，content 是空的
-        setEditingContent(msg.mediaType === "audio" ? (msg.mediaData?.label || msg.content) : msg.content);
+        setEditingContent(msg.mediaType === "audio" || msg.mediaType === "image" || (msg.mediaType === "media_file" && msg.mediaData?.fileType === "image") ? (msg.mediaData?.label || msg.content) : msg.content);
         setActiveMessageId(null);
     };
 
-    const handleEditMessageSave = () => {
+    const handleEditMessageSave = (generatePhoto = false) => {
         if (!editingMessageId || !editingContent.trim()) {
             setEditingMessageId(null);
             setEditingContent("");
@@ -4473,6 +4475,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
 
         const originalMessage = messages.find(m => m.id === editingMessageId) || loadChatMessages(session.id).find(m => m.id === editingMessageId);
+        if (originalMessage && (originalMessage.mediaType === "image" || originalMessage.mediaType === "media_file" && originalMessage.mediaData?.fileType === "image")) {
+            const description = editingContent.trim();
+            const updated = saveChatImageDescription(originalMessage, description);
+            setMessages(prev => prev.map(m => m.id === updated.id ? updated : m));
+            if (generatePhoto) void retryChatGeneratedImage(updated, session.contactId, description).then(next => setMessages(prev => prev.map(m => m.id === next.id ? next : m))).catch(error => showChatToast(error instanceof Error ? error.message : String(error)));
+            setEditingMessageId(null);
+            setEditingContent("");
+            return;
+        }
         const isEditingSystemInstruction = originalMessage ? isSystemInstructionMessage(originalMessage) : false;
         const placement = originalMessage?.role === "user" ? 1 : 2;
         const nextContent = isEditingSystemInstruction
@@ -5432,6 +5443,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     };
 
     const editingMessage = editingMessageId ? messages.find(m => m.id === editingMessageId) : null;
+    const editingPhotoDescription = editingMessage?.mediaType === "image" || editingMessage?.mediaType === "media_file" && editingMessage.mediaData?.fileType === "image";
     const editingSystemInstruction = editingMessage ? isSystemInstructionMessage(editingMessage) : false;
 
     // 群聊通话没有缩小悬浮窗，维持原有的整屏早退渲染
@@ -6734,7 +6746,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     >
                         <div className="flex items-center justify-between gap-3">
                             <div className="flex flex-col gap-1">
-                                <span className="menu-label">{editingSystemInstruction ? "编辑系统指令" : "编辑消息"}</span>
+                                <span className="menu-label">{editingSystemInstruction ? "编辑系统指令" : editingPhotoDescription ? "编辑照片描述" : "编辑消息"}</span>
                                 <span className="menu-desc !mt-0">{editingSystemInstruction ? "保存后会按当前位置更新后续上下文" : "保存后会同步更新聊天记录和后续上下文"}</span>
                             </div>
                             <button
@@ -6756,11 +6768,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 type="button"
                             >取消</button>
                             <button
-                                onClick={handleEditMessageSave}
+                                onClick={() => handleEditMessageSave(false)}
                                 disabled={!editingContent.trim()}
                                 className="ui-btn ui-btn-primary"
                                 type="button"
-                            >保存</button>
+                            >{editingPhotoDescription ? "仅保存文字" : "保存"}</button>
+                            {editingPhotoDescription && <button onClick={() => handleEditMessageSave(true)} disabled={!editingContent.trim()} className="ui-btn ui-btn-primary" type="button">开始生图</button>}
                         </div>
                     </div>
                 </div>

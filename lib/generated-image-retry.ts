@@ -1,9 +1,9 @@
-import { saveChatImageToIndexedDB } from "./chat-asset-storage";
+import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
 import { syncChatGeneratedImagePromptText, updateChatMessage, type ChatMessage } from "./chat-storage";
 import { generatedImageFilename, generateImageFromConfiguredApi } from "./image-generation-service";
 import { updateMomentPost } from "./moments-storage";
 import type { MomentPost } from "./moments-types";
-import { generateAlbumNoMatchReply, getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "./photo-library-resolver";
+import { resolveMediaForUse } from "./media-resolver";
 
 function errorToMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -36,6 +36,21 @@ export function createPendingChatGeneratedImageData(
 
 export function isPendingChatGeneratedImageMessage(message: Pick<ChatMessage, "mediaType" | "mediaData">): boolean {
     return message.mediaType === "image" && message.mediaData?.imageGenerationStatus === "pending";
+}
+
+/** Save a text photo without invoking any image API. Its description stays editable in every app. */
+export function saveChatImageDescription(message: ChatMessage, description: string): ChatMessage {
+    const label = description.trim();
+    if (!label) throw new Error("图片描述不能为空");
+    const updated = updateChatMessage(message.id, {
+        content: "",
+        mediaType: "image",
+        mediaUrl: undefined,
+        mediaData: { ...message.mediaData, label, imageSource: undefined, photoLibraryId: undefined, imageGenerationStatus: "text", imageGenerationError: undefined },
+    });
+    if (!updated) throw new Error("原消息不存在，无法保存图片描述");
+    dispatchChatMessagesUpdated(updated.sessionId, updated);
+    return updated;
 }
 
 export async function generateAndApplyChatGeneratedImage(
@@ -74,64 +89,20 @@ export async function generateAndApplyChatGeneratedImage(
     }
 
     try {
-        const strategy = options?.forceGenerated ? "generated_only" : getPhotoSourceStrategy("chat");
-        if (strategy !== "generated_only" && characterId) {
-            const match = await resolvePhotoForUse({
-                characterId,
-                description,
-                channel: "dm_user",
-            });
-            if (match) {
-                const previousData = message.mediaData ?? {};
-                const fileName = match.photo.originalName || `${description.slice(0, 24) || "照片"}.png`;
-                const updated = updateChatMessage(message.id, {
-                    content: fileName,
-                    mediaType: "media_file",
-                    mediaUrl: match.dataUrl,
-                    mediaData: {
-                        ...previousData,
-                        label: description,
-                        fileType: "image",
-                        fileName,
-                        useReferenceImage: effectiveUseReference,
-                        imageSource: "album",
-                        photoLibraryId: match.photo.id,
-                        imageGenerationMediaRef: undefined,
-                        imageGenerationPrompt: undefined,
-                        imageGenerationUsedReference: undefined,
-                        imageGenerationStatus: "generated",
-                        imageGenerationError: undefined,
-                    },
-                });
-                if (!updated) throw new Error("原消息不存在，无法替换相册图片");
-                recordPhotoUse(match, { characterId, description, channel: "dm_user" });
-                dispatchChatMessagesUpdated(updated.sessionId, updated);
-                return updated;
-            }
-            if (strategy === "album_only") {
-                const fallback = await generateAlbumNoMatchReply(characterId, description);
-                const updated = updateChatMessage(message.id, {
-                    content: fallback,
-                    mediaType: undefined,
-                    mediaUrl: undefined,
-                    mediaData: undefined,
-                });
-                if (!updated) throw new Error("原消息不存在，无法替换未匹配提示");
-                dispatchChatMessagesUpdated(updated.sessionId, updated);
-                return updated;
-            }
-        }
-
-        const generated = await generateImageFromConfiguredApi({
+        const media = await resolveMediaForUse({
+            actor: { type: "character", characterId: characterId || "" },
             description,
-            characterId,
+            channel: "dm_user",
             appId: "chat",
+            mode: options?.forceGenerated ? "generate" : "auto",
+            intentKind: effectiveUseReference || /自拍|合照|人像|selfie|portrait/i.test(description) ? "selfie" : /食物|料理|餐|吃|food|meal/i.test(description) ? "food" : "other",
             useReferenceImage: effectiveUseReference,
             signal: options?.signal,
         });
-        if (!generated) throw new Error("生图配置未启用或不完整");
-
-        const fileName = generatedImageFilename(description, generated.mimeType);
+        if (!media?.imageUrl) return saveChatImageDescription(message, description);
+        const photoAssetId = media.imageUrl.startsWith("asset://") ? media.imageUrl.slice(8) : "";
+        const albumUrl = media.source === "album" && photoAssetId ? await getChatImageFromIndexedDB(photoAssetId) : null;
+        const fileName = media.source === "album" ? `${description.slice(0, 24) || "照片"}.png` : generatedImageFilename(description, media.generatedMimeType || "image/png");
         const previousData = message.mediaData ?? {};
         const nextData: ChatMessage["mediaData"] = {
             ...previousData,
@@ -139,18 +110,18 @@ export async function generateAndApplyChatGeneratedImage(
             fileType: "image",
             fileName,
             useReferenceImage: effectiveUseReference,
-            imageGenerationMediaRef: generated.mediaRef,
-            imageGenerationPrompt: generated.prompt,
-            imageGenerationUsedReference: generated.usedReferenceImage,
-            imageSource: "generated",
-            photoLibraryId: undefined,
+            imageGenerationMediaRef: media.generatedMediaRef,
+            imageGenerationPrompt: media.generatedPrompt,
+            imageGenerationUsedReference: media.generatedUsedReference,
+            imageSource: media.source === "album" ? "album" : "generated",
+            photoLibraryId: media.photoLibraryId,
             imageGenerationStatus: "generated",
             imageGenerationError: undefined,
         };
         const updated = updateChatMessage(message.id, {
             content: fileName,
             mediaType: "media_file",
-            mediaUrl: generated.dataUrl,
+            mediaUrl: media.generatedDataUrl || albumUrl || media.imageUrl,
             mediaData: nextData,
         });
         if (!updated) throw new Error("原消息不存在，无法替换图片");

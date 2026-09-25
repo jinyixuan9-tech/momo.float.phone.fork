@@ -30,6 +30,10 @@ export type MediaResolverRequest = {
   channel: PhotoUsageChannel;
   targetId?: string;
   appId: string;
+  /** auto uses the shared album strategy; generate skips the album; text saves a description without an API request. */
+  mode?: "auto" | "generate" | "text";
+  useReferenceImage?: boolean;
+  signal?: AbortSignal;
 };
 
 export type MediaResolverResult = {
@@ -38,6 +42,11 @@ export type MediaResolverResult = {
   placeholderDescription?: string;
   source: "album" | "generated" | "text_placeholder";
   photoLibraryId?: string;
+  generatedDataUrl?: string;
+  generatedPrompt?: string;
+  generatedMediaRef?: string;
+  generatedMimeType?: string;
+  generatedUsedReference?: boolean;
   debug?: {
     strategy: string;
     intentKind: MediaIntentKind;
@@ -139,7 +148,8 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
     description: request.description,
     characterId,
     appId: request.appId,
-    useReferenceImage: request.actor.type === "character" && ["selfie", "portrait", "group"].includes(intentKind),
+    useReferenceImage: request.useReferenceImage ?? (request.actor.type === "character" && ["selfie", "portrait", "group"].includes(intentKind)),
+    signal: request.signal,
   }).catch(() => null);
   if (!generated) {
     return {
@@ -157,6 +167,11 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
   return {
     imageUrl: `asset://${assetId}`,
     source: "generated",
+    generatedDataUrl: generated.dataUrl,
+    generatedPrompt: generated.prompt,
+    generatedMediaRef: generated.mediaRef,
+    generatedMimeType: generated.mimeType,
+    generatedUsedReference: generated.usedReferenceImage,
     debug: getPhotoResolverDebugEnabled() ? {
       strategy: getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other"),
       intentKind,
@@ -172,11 +187,12 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
 export async function resolveMediaForUse(request: MediaResolverRequest): Promise<MediaResolverResult | null> {
   const description = request.description.trim();
   if (!description) return null;
+  if (request.mode === "text") return { source: "text_placeholder", placeholderDescription: description };
   const strategy = getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other");
   const intentKind = request.intentKind || "other";
   const debugEnabled = getPhotoResolverDebugEnabled();
 
-  if (strategy !== "generated_only") {
+  if (request.mode !== "generate" && strategy !== "generated_only") {
     if (request.actor.type === "character") {
       if (request.actor.photoIds) {
         const poolMatch = await resolveCharacterPoolPhoto(request as MediaResolverRequest & { actor: CharacterMediaActor }).catch(() => null);
@@ -232,7 +248,7 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
     }
   }
 
-  if (strategy === "album_only") return null;
-  if (strategy === "album_then_generated" && !shouldGenerateInSmartMode(intentKind)) return null;
+  if (request.mode !== "generate" && strategy === "album_only") return null;
+  if (request.mode !== "generate" && strategy === "album_then_generated" && !shouldGenerateInSmartMode(intentKind)) return null;
   return generateMedia(request, intentKind);
 }
