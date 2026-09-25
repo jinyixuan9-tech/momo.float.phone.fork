@@ -325,7 +325,7 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
                 <div className={styles.bubble} role={hasTranslation?"button":undefined} tabIndex={hasTranslation?0:undefined} aria-expanded={hasTranslation?expanded:undefined}
                   onKeyDown={e=>{if(hasTranslation && (e.key==="Enter" || e.key===" ")){e.preventDefault();setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}}
                   onClick={()=>{if(skipClick.current || contextId){skipClick.current=false;return;}if(selectingMessages){setSelectedMessages(ids=>ids.includes(m.id)?ids.filter(id=>id!==m.id):[...ids,m.id]);return;}if(pickedEmoji && m.direction==="incoming"){react(m.id,pickedEmoji);return;}if(hasTranslation)setTranslationExpanded(value=>({...value,[m.id]:!expanded}));}}>{m.original}</div>
-                {m.reactions?.length ? <div className={styles.reactions}>{m.reactions.map(r=><span key={r.id} className={styles.reaction}>{r.emoji}</span>)}</div> : null}
+                {m.reactions?.length ? <div className={styles.reactions}>{m.reactions.map(r=><span key={r.id} className={styles.reactionSticker}><span className={styles.reaction}>{r.emoji}</span></span>)}</div> : null}
               </div>
               {hasTranslation && expanded && <div className={styles.translation}>{m.translated}</div>}
               {delivered && <span className={styles.delivered}>Delivered</span>}
