@@ -5,6 +5,7 @@ import { appendLysn, loadLysn, saveLysn } from "./lysn-storage";
 import { sendBrowserNotification } from "./browser-notification";
 import { maybeCelebrateLysn } from "./lysn-celebrations";
 import { applyLysnProfileAction } from "./lysn-profile-autonomy";
+import { noteLysnFanMessage } from "./lysn-identity";
 
 const FIRST_MESSAGE_WAIT_MS = 15 * 60 * 1000;
 const RETRY_WAIT_MS = 30 * 60 * 1000;
@@ -17,6 +18,7 @@ export async function maybeGenerateLysnBackgroundMessage(): Promise<void> {
   // Local simulated reads run even when automatic artist messages are disabled.
   const readNow = Date.now();
   let readChanged = false;
+  const observedMessages: Array<{ characterId: string; text: string }> = [];
   for (const characterId of state.subscribedIds) {
     const room = state.rooms[characterId];
     if (!room?.openerShown) continue;
@@ -33,33 +35,38 @@ export async function maybeGenerateLysnBackgroundMessage(): Promise<void> {
       readChanged = true;
     } else if (readNow >= room.nextFanReadAt) {
       const count = Math.min(unread.length, 1 + Math.floor(Math.random() * Math.min(unread.length, 3)));
-      unread.slice(0, count).forEach(m => { m.seenAt = readNow; });
+      unread.slice(0, count).forEach(m => { m.seenAt = readNow; if (m.kind === "text") observedMessages.push({ characterId, text: m.original }); });
       room.nextFanReadAt = undefined;
       readChanged = true;
     }
   }
   if (readChanged) saveLysn(state);
-  if (!state.settings.autonomousMessages) return;
+  observedMessages.forEach(message => noteLysnFanMessage(message.characterId, message.text));
+  const scheduleState = loadLysn();
+  if (!scheduleState.settings.autonomousMessages) return;
   const now = Date.now();
-  const id = state.subscribedIds.find(characterId => {
-    const room = state.rooms[characterId];
+  const id = scheduleState.subscribedIds.find(characterId => {
+    const room = scheduleState.rooms[characterId];
     if (!room?.openerShown) return false;
     const activity = room.activity || "normal";
     const interval = ({ quiet: 12, normal: 4, frequent: 1 }[activity]) * 3600000;
     const firstWait = ({ quiet: 4 * 3600000, normal: FIRST_MESSAGE_WAIT_MS, frequent: 5 * 60000 }[activity]);
-    const latest = state.messages.filter(m => m.characterId === characterId && m.sender === "artist" && !m.opener).at(-1)?.createdAt || 0;
-    const joined = state.subscribedAt[characterId] || now;
-    return now - Math.max(latest, state.lastAutoAt[characterId] || 0, joined) >= (latest ? interval : firstWait);
+    const latest = scheduleState.messages.filter(m => m.characterId === characterId && m.sender === "artist" && !m.opener).at(-1)?.createdAt || 0;
+    const joined = scheduleState.subscribedAt[characterId] || now;
+    return now - Math.max(latest, scheduleState.lastAutoAt[characterId] || 0, joined) >= (latest ? interval : firstWait);
   });
   if (!id || !loadCharacters().some(c => c.id === id)) return;
   running = true;
-  state.lastAutoAt[id] = now; saveLysn(state);
+  scheduleState.lastAutoAt[id] = now; saveLysn(scheduleState);
   try {
-    const result = await generateLysn(id, state.messages.filter(m => m.characterId === id), "new");
+    const result = await generateLysn(id, scheduleState.messages.filter(m => m.characterId === id), "new");
     if (!result.length) return;
     const rows = await prepareLysnMessages(id, result);
+    if (!rows.length) return;
     if (!loadLysn().subscribedIds.includes(id)) return;
+    const newlyObserved = loadLysn().messages.filter(m => m.characterId === id && m.sender === "fan" && m.kind === "text" && !m.seenAt);
     appendLysn(id, rows);
+    newlyObserved.forEach(message => noteLysnFanMessage(id, message.original));
     if (result[0]?.profileUpdate) await applyLysnProfileAction(id, JSON.stringify(result[0].profileUpdate));
     const latest = loadLysn();
     if (latest.settings.notificationsEnabled && !latest.rooms[id]?.muted) {

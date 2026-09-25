@@ -7,6 +7,7 @@ import { buildCharacterTimeContext } from "./character-time";
 import { loadLysn, type LysnMessage, type LysnQuote } from "./lysn-storage";
 import { lysnAutonomousProfilePrompt } from "./lysn-profile-autonomy";
 import { lysnPublicBoundary } from "./lysn-identity";
+import { lysnPublicContinuityPrompt } from "./lysn-cross-app-context";
 import { loadPhotoLibrary } from "./photo-library-storage";
 import { getPhotoSourceStrategy } from "./photo-library-resolver";
 
@@ -26,7 +27,7 @@ function parseJson(raw: string): Record<string, unknown> {
 const asText = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const claimsPhotoSent = (value: string) => /(?:发了|发给|这张|给你看|看看这张|发(?:一张|张|个)?(?:照|图)|照片(?:是|里|给你)|보냈|보내줄|사진.*(?:보여|보내)|here.*(?:photo|pic))/i.test(value);
 /** Empty result is a deliberate decision to stay silent, rather than an error. */
-export async function generateLysn(characterId: string, history: LysnMessage[], mode: "new" | "reply" | "opening" | "birthday", fanMessage?: string, configuredOpener?: string, birthdayYear?: number): Promise<GeneratedLysn[]> {
+export async function generateLysn(characterId: string, history: LysnMessage[], mode: "new" | "reply" | "opening" | "birthday", fanMessage?: string, configuredOpener?: string, birthdayYear?: number, historicalDate?: string): Promise<GeneratedLysn[]> {
   const character = loadCharacters().find(c => c.id === characterId);
   if (!character) throw new Error("角色已不存在。");
   const slot = resolveBinding(loadBindingConfig(), characterId, "lysn");
@@ -57,11 +58,13 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   const instruction: LLMMessage = { role: "system", content: [
     mode === "birthday" ? "你正在写一张仅当前订阅者能看到的 Bubble 生日卡片；这不是公开频道消息，也不进入聊天记录。按你的本来语言写祝福并附中文译文，不要声称知道订阅者真实身份或私下关系。" : "你正在 LYSN Bubble 面向全部订阅者的艺人频道发消息。回复是匿名粉丝反馈，不是与某个人的私聊。绝不识别发送者真实身份、推断私下关系或泄露秘密。",
     lysnPublicBoundary(characterId),
+    mode === "new" || mode === "reply" ? lysnPublicContinuityPrompt(characterId) : "",
     "自然地按人设发短消息，不要总写公告。original 必须使用角色本人最自然的语言（例如人设为韩国人的角色主要用韩语，日本人的角色主要用日语）；translated 是忠实简体中文翻译，原文中文则相同。语音逐字稿也遵守这一要求，不能因为译文是中文就把原文改成中文。",
     "艺人可以使用 {{nickname}} 占位符自然称呼每位订阅者；系统会为每位订阅者替换，绝不能把某人的私密姓名写进面向全部粉丝的文本。",
     mode === "birthday" ? "生日留言写成适合卡片的一段话，可以亲切但不伪装你和这个订阅者私下相识。" : "频道里的匿名粉丝留言可以作为灵感，但不必一条一条轮流答复；像本人随手分享近况那样，自然时可连发短句，安静时也可不发。别把每次出现都写成有问必答的私聊。",
     mode === "opening" ? configuredOpener ? "这是首次进入频道显示的一次性开场白。用户提供了开场白内容：保持意思和语气，用角色本人自然的语言写 original；用户已用角色语言写成原文时保留原文措辞；translated 是忠实的简体中文翻译。只写一条，不要增添新信息。" : "这是首次进入频道显示的一次性开场白，写一条符合人设的开场消息。它不算正式到场或回复，也不要提及已经读到粉丝来信。" : "",
-    mode === "birthday" ? `这是订阅者 ${birthdayYear || "这一"} 年的生日卡片。写一条符合人设的生日祝福，可以使用 {{nickname}} 占位符；不要声称今天就是生日，用户可能在日历回看往年的卡片。` : "",
+    mode === "opening" && historicalDate ? `这条开场白要放在订阅历史的 ${historicalDate}；不要把现实今天才发生的事情说成当年就发生，也不要声称已经认识当前订阅者。` : "",
+    mode === "birthday" ? `这是订阅者 ${birthdayYear || "这一"} 年的生日卡片。只以当年为背景写符合人设的祝福，不提那一年之后才发生的事；可以使用 {{nickname}} 占位符；不要声称现实今天就是生日，用户可能在日历回看往年的卡片。` : "",
     mode === "reply" ? testMode ? "测试模式：明确让你发照片、发语音、引用时，优先按要求输出真实对应消息种类；照片可从相册或生图/文字照片中选择，不要只口头说发了。" : "拟真模式：你不一定看到了每一条匿名来信；可以完全没看到这条，接着上一段自己的话说，忽略它，或接另一位模拟粉丝的话，允许答非所问。看到来信也不一定回复；按自己的出现与看消息习惯行事。" : "",
     quoteTest && quotedFan ? `这轮粉丝明确要求测试引用。请引用这条已存在的匿名留言并自然回复，不要编造另一条替代：${quotedFan.original.slice(0, 300)}。只引用文字，不暴露发言者身份；本轮 publish=true，至少一条消息。` : mayQuote ? "如果自然合适，可以先模拟一条匿名粉丝留言并引用它，然后再作公开回复。quote 必须有 original 和 translated，两者分别是模拟留言原文和中文翻译。引用只存在于艺人消息里，不要把模拟留言当作用户发言。" : "这轮不要引用粉丝留言，也不要输出 quote。",
     profilePrompt || "这次不修改资料；即使对话提到了昵称或头像，也不要输出 profileUpdate。你可以自然问问大家的意见。",

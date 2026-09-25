@@ -13,6 +13,7 @@ export type LysnMessage = {
   sourceText?: string; seenAt?: number;
   photoCaptionDetached?: boolean;
   photoDescription?: string;
+  celebration?: { kind: "birthday"; year: number } | { kind: "anniversary"; days: number };
 };
 export type LysnProfile = { name: string; avatar: string; cover?: string; bio?: string; group?: string; updatedAt: number };
 export type LysnUserProfile = { name: string; avatar: string; cover: string; birthday: string; gender: string; stickers?: LysnSticker[] };
@@ -29,6 +30,7 @@ export type LysnRoom = {
   backgroundUrl?: string;
   pinned?: boolean; muted?: boolean; foldPhotos?: boolean;
   openerText?: string; openerShown?: boolean;
+  onboardingComplete?: boolean; historyInitialized?: boolean;
   activity?: "quiet" | "normal" | "frequent";
   quoteStyle?: "rare" | "normal" | "often";
   readStyle?: "rare" | "normal" | "often"; nextFanReadAt?: number;
@@ -38,6 +40,7 @@ export type LysnRoom = {
   birthdayCards?: Record<string, { original: string; translated: string }>;
   identitySuspicion?: number; identityClueCount?: number;
   identityHintedInChatAt?: number; identityDisclosed?: boolean;
+  identityMatchedAt?: number;
 };
 export const DEFAULT_LYSN_SETTINGS: LysnSettings = {
   notificationsEnabled: true, fontSize: "normal", enterToSend: true,
