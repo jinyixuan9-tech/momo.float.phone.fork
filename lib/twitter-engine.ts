@@ -6,8 +6,9 @@ import { loadMemoryConfig } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { buildCharacterTimeContext } from "./character-time";
-import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, loadWorldBooks, resolveBinding, resolveUserIdentity } from "./settings-storage";
-import type { RegexConfig, WorldBookConfig } from "./settings-types";
+import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "./settings-storage";
+import type { RegexConfig } from "./settings-types";
+import { selectedTwitterWorldBooks } from "./twitter-worldbooks";
 import { isPublicTwitterPost, type TwitterMessage, type TwitterPost, type TwitterState } from "./twitter-storage";
 
 export type TwitterGeneratedLine = { original: string; translated: string; photoDescription?: string };
@@ -50,7 +51,7 @@ export async function generateTwitterText(input: {
   if (!apiConfig.apiKey?.trim()) throw new Error(`当前角色／推特绑定的文字 API「${apiConfig.name || apiConfig.provider}」没有填写 Key，请在小手机设置中检查。`);
   const presets = loadPresets();
   const preset = presets.find(row => row.id === slot.presetId) ?? presets.find(row => row.builtIn) ?? null;
-  const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(row => row.id === id)).filter(Boolean) as WorldBookConfig[];
+  const worldBooks = selectedTwitterWorldBooks(input.state);
   const regexes = (slot.regexIds || []).map(id => loadRegexes().find(row => row.id === id)).filter(Boolean) as RegexConfig[];
   const anonymous = input.anonymous === true;
   const context = anonymous ? null : prepareShortTermContext(character.id, "twitter", { history: [], tokenBudgetOverride: 2800 });

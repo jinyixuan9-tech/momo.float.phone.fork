@@ -38,6 +38,7 @@ export type TwitterPost = {
   imageRef?: string;
   imageRefs?: string[];
   imageDescription?: string;
+  sensitive?: boolean;
   repostOfId?: string;
   quotePostId?: string;
   location?: string;
@@ -93,6 +94,13 @@ export type TwitterState = {
   trends: TwitterTrend[];
   regionName: string;
   publicWorldContext: string;
+  worldBookIds: string[]; // X-only selection; never inherited from global bindings.
+  sensitiveTopics: {
+    frequency: 0 | 30 | 50 | 70 | 100;
+    description: string;
+    worldBookIds: string[];
+    coverRef: string;
+  };
   audienceLocales: string[];
   alternateMediaPhotoIds: Record<string, string[]>;
 };
@@ -110,6 +118,7 @@ function blankState(): TwitterState {
     posts: [], conversations: [], notices: [], following: [],
     accounts: {}, actions: [], pendingReplies: [], deletedCommentFingerprints: {}, communityCharacters: {}, importedCharacterIds: [], communities: [], trends: [], regionName: "", publicWorldContext: DEFAULT_TWITTER_WORLD,
     audienceLocales: ["日语（日本）", "韩语（韩国）", "英语国家"], alternateMediaPhotoIds: {},
+    worldBookIds: [], sensitiveTopics: { frequency: 0, description: "", worldBookIds: [], coverRef: "" },
   };
 }
 
@@ -160,6 +169,13 @@ export function loadTwitterState(): TwitterState {
       trends: Array.isArray(row.trends) ? row.trends.filter(t => t && typeof t.id === "string" && typeof t.label === "string") : [],
       regionName: typeof row.regionName === "string" ? row.regionName : "",
       publicWorldContext: typeof row.publicWorldContext === "string" && row.publicWorldContext.trim() ? row.publicWorldContext : DEFAULT_TWITTER_WORLD,
+      worldBookIds: Array.isArray(row.worldBookIds) ? row.worldBookIds.filter((id): id is string => typeof id === "string") : [],
+      sensitiveTopics: {
+        frequency: ([0, 30, 50, 70, 100] as number[]).includes(row.sensitiveTopics?.frequency as number) ? row.sensitiveTopics!.frequency : 0,
+        description: typeof row.sensitiveTopics?.description === "string" ? row.sensitiveTopics.description : "",
+        worldBookIds: Array.isArray(row.sensitiveTopics?.worldBookIds) ? row.sensitiveTopics.worldBookIds.filter((id): id is string => typeof id === "string") : [],
+        coverRef: typeof row.sensitiveTopics?.coverRef === "string" ? row.sensitiveTopics.coverRef : "",
+      },
       audienceLocales: Array.isArray(row.audienceLocales) ? row.audienceLocales.filter((value): value is string => typeof value === "string" && TWITTER_LOCALES.includes(value as typeof TWITTER_LOCALES[number])) : fallback.audienceLocales,
       alternateMediaPhotoIds: row.alternateMediaPhotoIds && typeof row.alternateMediaPhotoIds === "object" && !Array.isArray(row.alternateMediaPhotoIds) ? row.alternateMediaPhotoIds : {},
     };
