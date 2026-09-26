@@ -3,6 +3,8 @@ import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 export const TWITTER_STORAGE_KEY = "ai_phone_twitter_v1";
 export const TWITTER_UPDATED_EVENT = "twitter-updated";
 registerKvMigration(TWITTER_STORAGE_KEY);
+export const DEFAULT_TWITTER_WORLD = "现在是2025—2026年。这里是面向世界各地用户的虚构 X／推特式交流平台，人们分享日常、学校生活、游戏、情感、娱乐和自己所在世界的热门话题。角色的公开身份与已设定人设一致；副账号是否公开关联主账号，以各自账号设置为准。路人只知道公开内容，不会自动知道角色与用户的私密关系。热门话题应符合用户写下的世界观，避免假称掌握真实世界的即时新闻、行程或未经设定的重大事件。";
+export const TWITTER_LOCALES = ["简中（大陆）", "繁中（港澳台）", "日语（日本）", "韩语（韩国）", "英语国家", "泰语（泰国）"] as const;
 
 export type TwitterProfile = {
   name: string; handle: string; bio: string; avatarUrl?: string; bannerUrl?: string;
@@ -25,7 +27,7 @@ export type TwitterCommunity = {
   includeUserPersona: boolean; createdAt: number;
 };
 export type TwitterCommunityCharacter = { id: string; name: string; handle: string; bio: string; persona: string; avatarUrl?: string; communityId: string };
-export type TwitterAction = { id: string; actorId: string; targetPostId: string; kind: "like" | "bookmark"; createdAt: number };
+export type TwitterAction = { id: string; actorId: string; targetPostId: string; kind: "like" | "bookmark"; communityId?: string; createdAt: number };
 export type TwitterPendingReply = { id: string; commentId: string; targetPostId: string; createdAt: number; attempts: number };
 export type TwitterEngagement = { likes: number; reposts: number; views: number; comments: number };
 export type TwitterPost = {
@@ -91,6 +93,8 @@ export type TwitterState = {
   trends: TwitterTrend[];
   regionName: string;
   publicWorldContext: string;
+  audienceLocales: string[];
+  alternateMediaPhotoIds: Record<string, string[]>;
 };
 
 export function createTwitterId(): string {
@@ -104,7 +108,8 @@ function blankState(): TwitterState {
     characterProfiles: {},
     worldRules: "",
     posts: [], conversations: [], notices: [], following: [],
-    accounts: {}, actions: [], pendingReplies: [], deletedCommentFingerprints: {}, communityCharacters: {}, importedCharacterIds: [], communities: [], trends: [], regionName: "", publicWorldContext: "",
+    accounts: {}, actions: [], pendingReplies: [], deletedCommentFingerprints: {}, communityCharacters: {}, importedCharacterIds: [], communities: [], trends: [], regionName: "", publicWorldContext: DEFAULT_TWITTER_WORLD,
+    audienceLocales: ["日语（日本）", "韩语（韩国）", "英语国家"], alternateMediaPhotoIds: {},
   };
 }
 
@@ -154,7 +159,9 @@ export function loadTwitterState(): TwitterState {
       communities,
       trends: Array.isArray(row.trends) ? row.trends.filter(t => t && typeof t.id === "string" && typeof t.label === "string") : [],
       regionName: typeof row.regionName === "string" ? row.regionName : "",
-      publicWorldContext: typeof row.publicWorldContext === "string" ? row.publicWorldContext : "",
+      publicWorldContext: typeof row.publicWorldContext === "string" && row.publicWorldContext.trim() ? row.publicWorldContext : DEFAULT_TWITTER_WORLD,
+      audienceLocales: Array.isArray(row.audienceLocales) ? row.audienceLocales.filter((value): value is string => typeof value === "string" && TWITTER_LOCALES.includes(value as typeof TWITTER_LOCALES[number])) : fallback.audienceLocales,
+      alternateMediaPhotoIds: row.alternateMediaPhotoIds && typeof row.alternateMediaPhotoIds === "object" && !Array.isArray(row.alternateMediaPhotoIds) ? row.alternateMediaPhotoIds : {},
     };
   } catch { return blankState(); }
 }

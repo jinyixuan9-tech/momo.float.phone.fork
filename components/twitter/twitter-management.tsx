@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { ArrowLeft, ImagePlus, Plus } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import type { Character } from "@/lib/character-types";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
-import { createTwitterId, type TwitterCommunity, type TwitterCommunityCharacter, type TwitterProfile, type TwitterState } from "@/lib/twitter-storage";
+import { createTwitterId, TWITTER_LOCALES, type TwitterCommunity, type TwitterCommunityCharacter, type TwitterProfile, type TwitterState } from "@/lib/twitter-storage";
+import { appendPhotoRecords, createPhotoId, loadPhotoLibrary } from "@/lib/photo-library-storage";
 import styles from "./twitter-app.module.css";
 
 type Tab = "accounts" | "characters" | "communities" | "world";
@@ -37,6 +38,9 @@ function ManagedImage({ imageRef }: { imageRef?: string }) {
   }, [imageRef]);
   return url ? <img src={url} alt="" /> : null;
 }
+function AccountPortrait({ imageRef, name }: { imageRef?: string; name: string }) {
+  return <span className={styles.manageRowAvatar}>{imageRef ? <ManagedImage imageRef={imageRef} /> : name.slice(0, 1) || "?"}</span>;
+}
 
 export function TwitterManagement({ state, characters, onChange, onClose, onUserAccount, onCommunity, onNotice, initialTab = "accounts", initialAccountId, createCommunity, closeOnSave, onlyCharacters }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -50,9 +54,11 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
   const [manualPersona, setManualPersona] = useState("");
   const [communityCharDrafts, setCommunityCharDrafts] = useState<Record<string, TwitterCommunityCharacter>>({});
   const [world, setWorld] = useState(state.publicWorldContext);
-  const [region, setRegion] = useState(state.regionName);
+  const [locales, setLocales] = useState<string[]>(state.audienceLocales);
   const [privateRules, setPrivateRules] = useState(state.worldRules);
   const inputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const [mediaOpen, setMediaOpen] = useState(false);
   const [imageTarget, setImageTarget] = useState<"avatarUrl" | "bannerUrl">("avatarUrl");
   const imported = characters;
   const getProfile = (id: string) => id === "user" ? state.profile : state.characterProfiles[id] || state.accounts[id];
@@ -100,13 +106,36 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
       else if (editCommunity) setCommunity(current => ({ ...current, [imageTarget]: ref }));
     } catch { onNotice("图片保存失败，请重试。"); }
   };
-  const imageButton = (field: "avatarUrl" | "bannerUrl") => <button type="button" className={styles.imagePick} onClick={() => { setImageTarget(field); inputRef.current?.click(); }}><ImagePlus size={17} />{field === "avatarUrl" ? "更换头像" : "更换封面"}</button>;
+  const chooseImage = (field: "avatarUrl" | "bannerUrl") => { setImageTarget(field); inputRef.current?.click(); };
+  const deleteAccount = () => {
+    if (!editAccount?.endsWith(":alt") || !window.confirm("确定删除这个副账号？对应帖子、私信及专用媒体池也会一并删除。")) return;
+    const accountId = editAccount;
+    onChange(current => { const accounts = { ...current.accounts }; delete accounts[accountId]; const pools = { ...current.alternateMediaPhotoIds }; delete pools[accountId]; return { ...current, accounts, alternateMediaPhotoIds: pools, following: current.following.filter(id => id !== accountId), posts: current.posts.filter(post => post.authorId !== accountId), conversations: current.conversations.filter(convo => convo.userAccountId !== accountId && convo.recipientAccountId !== accountId) }; });
+    setEditAccount(null); if (accountId === "user:alt") onUserAccount("user"); else if (closeOnSave) onClose();
+  };
+  const deleteCommunity = () => {
+    if (!editCommunity || editCommunity === "new" || !window.confirm("确定删除这个社群？其中的帖子与评论也会删除。")) return;
+    const id = community.id;
+    onChange(current => ({ ...current, communities: current.communities.filter(c => c.id !== id), posts: current.posts.filter(p => p.communityId !== id), actions: current.actions.filter(a => a.communityId !== id) }));
+    setEditCommunity(null); if (closeOnSave) onClose();
+  };
+  const uploadMedia = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = [...(event.target.files || [])].filter(file => file.type.startsWith("image/")); event.target.value = "";
+    if (!editAccount || !files.length) return;
+    try {
+      const now = Date.now(); const records = await Promise.all(files.map(async (file, index) => ({ id: createPhotoId(), assetId: await saveChatImageToIndexedDB(file), originalName: file.name, linkedCharacterIds: [], sharedPairIds: [], aiUsable: false, visionStatus: "unprocessed" as const, usageHistory: [], createdAt: now + index, updatedAt: now + index })));
+      appendPhotoRecords(records);
+      const accountId = editAccount;
+      onChange(current => ({ ...current, alternateMediaPhotoIds: { ...current.alternateMediaPhotoIds, [accountId]: [...new Set([...(current.alternateMediaPhotoIds[accountId] || []), ...records.map(row => row.id)])] } }));
+    } catch { onNotice("媒体上传失败，请重试。"); }
+  };
   return <>{editCommunity && <div className={styles.communitySheetScrim} onClick={() => { setEditCommunity(null); if (createCommunity) onClose(); }} />}<div className={`${styles.page} ${styles.managementPage} ${editCommunity ? styles.communitySheetPage : ""}`}>
     <div className={styles.pageHeader}><button onClick={() => { if (editAccount) { if (initialAccountId) onClose(); else setEditAccount(null); } else if (editCommunity) { if (createCommunity) onClose(); else setEditCommunity(null); } else onClose(); }} aria-label="返回"><ArrowLeft size={21} /></button><b>{editAccount ? "编辑主页" : editCommunity ? "添加社群" : onlyCharacters ? "角色资料" : initialTab === "world" ? "世界观" : initialTab === "communities" ? "社群" : "账号"}</b>{(editAccount || editCommunity) && <button className={styles.publish} onClick={editAccount ? saveProfile : saveCommunity}>保存</button>}{!editAccount && !editCommunity && tab === "communities" && <button onClick={() => startCommunity()} aria-label="添加社群"><Plus size={22} /></button>}</div>
     <input ref={inputRef} hidden type="file" accept="image/*" onChange={event => { void upload(event); }} />
+    <input ref={mediaInputRef} hidden type="file" multiple accept="image/*" onChange={event => { void uploadMedia(event); }} />
     {editAccount ? <div className={styles.manageScroll}>
-      <div className={styles.manageCover}><ManagedImage imageRef={draft.bannerUrl} /></div>
-      <div className={styles.manageAvatar}><span className={styles.manageAvatarPreview}>{draft.avatarUrl ? <ManagedImage imageRef={draft.avatarUrl} /> : draft.name.slice(0, 1) || "我"}</span><div className={styles.manageImageActions}>{imageButton("avatarUrl")}{imageButton("bannerUrl")}</div></div>
+      <button type="button" className={`${styles.manageCover} ${styles.manageCoverPick}`} onClick={() => chooseImage("bannerUrl")} aria-label="点击封面更换图片"><ManagedImage imageRef={draft.bannerUrl} /></button>
+      <div className={styles.manageAvatar}><button type="button" className={styles.manageAvatarPreview} onClick={() => chooseImage("avatarUrl")} aria-label="点击头像更换图片">{draft.avatarUrl ? <ManagedImage imageRef={draft.avatarUrl} /> : draft.name.slice(0, 1) || "我"}</button></div>
       <label>昵称<input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
       <label>账号名 @<input value={draft.handle} onChange={e => setDraft({ ...draft, handle: e.target.value })} /></label>
       <label>简介<textarea value={draft.bio} onChange={e => setDraft({ ...draft, bio: e.target.value })} /></label>
@@ -117,9 +146,10 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
       <label>账号可见范围<select value={draft.visibility || "public"} onChange={e => setDraft({ ...draft, visibility: e.target.value === "protected" ? "protected" : "public" })}><option value="public">公开</option><option value="protected">私密</option></select></label>
       <div className={styles.manageCounts}><label>粉丝数<input type="number" min="0" value={draft.followers ?? 0} onChange={e => setDraft({ ...draft, followers: numberValue(e.target.value) })} /></label><label>关注数<input type="number" min="0" value={draft.followingCount ?? 0} onChange={e => setDraft({ ...draft, followingCount: numberValue(e.target.value) })} /></label></div>
       <p>主账号与副账号的粉丝数、身份、互动分别保存。</p>
+      {editAccount.endsWith(":alt") && <><h3>副账号专用媒体池</h3><p>副账号只从此处选中的照片中挑选，不直接使用主账号的照片。</p><button className={styles.manageCreate} onClick={() => setMediaOpen(open => !open)}>从已有照片选择 · {(state.alternateMediaPhotoIds[editAccount] || []).length} 张</button>{mediaOpen && <div className={styles.mediaPoolGrid}>{loadPhotoLibrary().photos.map(photo => <button type="button" key={photo.id} className={(state.alternateMediaPhotoIds[editAccount] || []).includes(photo.id) ? styles.mediaPoolSelected : ""} onClick={() => { const id = editAccount; onChange(current => { const selected = current.alternateMediaPhotoIds[id] || []; return { ...current, alternateMediaPhotoIds: { ...current.alternateMediaPhotoIds, [id]: selected.includes(photo.id) ? selected.filter(value => value !== photo.id) : [...selected, photo.id] } }; }); }}><ManagedImage imageRef={photo.assetId} /></button>)}</div>}<button className={styles.manageCreate} onClick={() => mediaInputRef.current?.click()}>从设备上传到媒体池</button><button className={styles.dangerAction} onClick={deleteAccount}>删除副账号</button></>}
     </div> : editCommunity ? <div className={styles.manageScroll}>
-      <div className={styles.manageCover}><ManagedImage imageRef={community.bannerUrl} /></div>
-      <div className={styles.manageAvatar}><span className={styles.manageAvatarPreview}>{community.avatarUrl ? <ManagedImage imageRef={community.avatarUrl} /> : community.name.slice(0, 1) || "社"}</span><div className={styles.manageImageActions}>{imageButton("avatarUrl")}{imageButton("bannerUrl")}</div></div>
+      <button type="button" className={`${styles.manageCover} ${styles.manageCoverPick}`} onClick={() => chooseImage("bannerUrl")} aria-label="点击社群封面更换图片"><ManagedImage imageRef={community.bannerUrl} /></button>
+      <div className={styles.manageAvatar}><button type="button" className={styles.manageAvatarPreview} onClick={() => chooseImage("avatarUrl")} aria-label="点击社群头像更换图片">{community.avatarUrl ? <ManagedImage imageRef={community.avatarUrl} /> : community.name.slice(0, 1) || "社"}</button></div>
       <label>社区名称<input value={community.name} onChange={e => setCommunity({ ...community, name: e.target.value })} placeholder="输入社区名称" /></label>
       <label>粉丝数<input type="number" min="0" value={community.fans} onChange={e => setCommunity({ ...community, fans: numberValue(e.target.value) })} /></label>
       <label>社群内容 · 主要讨论什么<textarea value={community.description || ""} onChange={e => setCommunity({ ...community, description: e.target.value })} placeholder="例如：某个组合的日常、成员互动、粉丝分享……" /></label>
@@ -128,15 +158,16 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
       {(community.communityCharacterIds || []).map(id => <div key={id} className={styles.manualCharacterRow}><span>{(communityCharDrafts[id] || state.communityCharacters[id])?.name || "社群角色"} · @{(communityCharDrafts[id] || state.communityCharacters[id])?.handle || "community"}</span><button type="button" onClick={() => setCommunity(current => ({ ...current, communityCharacterIds: (current.communityCharacterIds || []).filter(item => item !== id) }))}>移除</button></div>)}
       <label className={styles.manageCheck}><input type="checkbox" checked={community.includeUserPersona} onChange={e => setCommunity({ ...community, includeUserPersona: e.target.checked })} />关联我的人设</label>
       <p>创建社区不会自动将你显示为主持人，也不会公开关联角色的小号。</p>
+      {editCommunity !== "new" && <button className={styles.dangerAction} onClick={deleteCommunity}>删除社群</button>}
     </div> : <><div className={styles.manageScroll}>
       {tab === "accounts" && <>
-        {!onlyCharacters && <><h3>我的账号</h3>{(["user", ...(state.accounts["user:alt"] ? ["user:alt"] : [])]).map(id => <div key={id} className={styles.manageRow}><span>{getProfile(id)?.name || "我的账号"}<small>@{getProfile(id)?.handle || "my_twitter"} · {id.endsWith(":alt") ? "副账号" : "主账号"}</small></span><button onClick={() => onUserAccount(id)}>使用</button><button onClick={() => startProfile(id)}>设置</button></div>)}
+        {!onlyCharacters && <><h3>我的账号</h3>{(["user", ...(state.accounts["user:alt"] ? ["user:alt"] : [])]).map(id => <div key={id} className={styles.manageRow}><AccountPortrait imageRef={getProfile(id)?.avatarUrl} name={getProfile(id)?.name || "我"} /><span>{getProfile(id)?.name || "我的账号"}<small>@{getProfile(id)?.handle || "my_twitter"} · {id.endsWith(":alt") ? "副账号" : "主账号"}</small></span><button onClick={() => onUserAccount(id)}>使用</button><button onClick={() => startProfile(id)}>设置</button></div>)}
         {!state.accounts["user:alt"] && <button className={styles.manageCreate} onClick={() => startProfile("user:alt")}><Plus size={18} />创建我的副账号</button>}</>}
-        <h3>角色资料</h3>{imported.map(char => <div key={char.id} className={styles.accountGroup}><div className={styles.manageRow}><span>{getProfile(char.id)?.name || char.name}<small>主账号 · 跟随人设</small></span><button onClick={() => startProfile(char.id)}>设置</button></div><div className={styles.manageRow}><span>{getProfile(`${char.id}:alt`)?.name || "未创建副账号"}<small>副账号 · 独立身份</small></span><button onClick={() => startProfile(`${char.id}:alt`)}>{state.accounts[`${char.id}:alt`] ? "设置" : "创建"}</button></div></div>)}
+        <h3>角色资料</h3>{imported.map(char => <div key={char.id} className={styles.accountGroup}><div className={styles.manageRow}><AccountPortrait imageRef={getProfile(char.id)?.avatarUrl || char.avatar} name={getProfile(char.id)?.name || char.name} /><span>{getProfile(char.id)?.name || char.name}<small>主账号 · 跟随人设</small></span><button onClick={() => startProfile(char.id)}>设置</button></div><div className={styles.manageRow}><AccountPortrait imageRef={getProfile(`${char.id}:alt`)?.avatarUrl} name={getProfile(`${char.id}:alt`)?.name || "副"} /><span>{getProfile(`${char.id}:alt`)?.name || "未创建副账号"}<small>副账号 · 独立身份</small></span><button onClick={() => startProfile(`${char.id}:alt`)}>{state.accounts[`${char.id}:alt`] ? "设置" : "创建"}</button></div></div>)}
       </>}
       {tab === "characters" && <><h3>已有角色</h3>{characters.map(char => <div key={char.id} className={styles.accountGroup}><div className={styles.manageRow}><span>{char.name}<small>主账号</small></span><button onClick={() => startProfile(char.id)}>编辑</button></div><div className={styles.manageRow}><span>{state.accounts[`${char.id}:alt`]?.name || "未创建副账号"}<small>副账号</small></span><button onClick={() => startProfile(`${char.id}:alt`)}>设置</button></div></div>)}{Object.values(state.communityCharacters).map(char => <div key={char.id} className={styles.manageRow}><span>{char.name}<small>社群角色 · @{char.handle}</small></span><button onClick={() => startProfile(char.id)}>编辑主页</button></div>)}</>}
       {tab === "communities" && <><h3>关注的社群</h3>{state.communities.length ? state.communities.map(item => <div key={item.id} className={styles.manageRow}><span>{item.name}<small>{item.description || `${item.fans.toLocaleString()} 位粉丝`}</small></span><button onClick={() => onCommunity(item.id)}>进入</button><button onClick={() => startCommunity(item.id)}>编辑</button></div>) : <p className={styles.communityEmpty}>暂无关注</p>}</>}
-      {tab === "world" && <><h3>世界与趋势</h3><label>公开世界背景<textarea value={world} onChange={e => setWorld(e.target.value)} placeholder="例：架空的赛博朋克城市，人们常谈论街区、演出和日常生活。不要填私密关系。" /></label><label>虚构地区名称<input value={region} onChange={e => setRegion(e.target.value)} placeholder="例：霓湾区" /></label><label>角色补充规则（不用于路人和趋势）<textarea value={privateRules} onChange={e => setPrivateRules(e.target.value)} placeholder="可以填写角色在推特发言时要遵守的私密边界。" /></label><button className={styles.manageCreate} onClick={() => { onChange(current => ({ ...current, publicWorldContext: world.trim(), regionName: region.trim(), worldRules: privateRules.trim() })); onNotice("世界与地区设置已保存。"); }}>保存设置</button><p>刷新趋势只使用公开背景，不读取角色的私密规则或小号身份。</p></>}
+      {tab === "world" && <><h3>世界与趋势</h3><label>公开世界背景<textarea value={world} onChange={e => setWorld(e.target.value)} placeholder="写这里的人们生活在什么样的世界，以及常讨论的事。" /></label><h3>生成内容的语言与地区</h3><p>影响路人动态、评论、转帖和陌生人私信。全部选中时平均生成；角色仍按各自人设说话。</p>{TWITTER_LOCALES.map(locale => <label className={styles.manageCheck} key={locale}><input type="checkbox" checked={locales.includes(locale)} onChange={e => setLocales(current => e.target.checked ? [...current, locale] : current.filter(item => item !== locale))} />{locale}</label>)}<label>角色公开发言补充规则（可留空）<textarea value={privateRules} onChange={e => setPrivateRules(e.target.value)} placeholder="例如角色公开发言时需遵守的边界；不会提供给路人或趋势生成。" /></label><button className={styles.manageCreate} onClick={() => { onChange(current => ({ ...current, publicWorldContext: world.trim(), audienceLocales: locales, worldRules: privateRules.trim() })); onNotice("世界观与语言地区已保存。"); }}>保存设置</button><p>世界背景可随时修改；刷新趋势不读取角色私密规则或副账号归属。</p></>}
     </div></>}
   </div></>;
 }

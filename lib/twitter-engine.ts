@@ -10,7 +10,7 @@ import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, loadWorldB
 import type { RegexConfig, WorldBookConfig } from "./settings-types";
 import { isPublicTwitterPost, type TwitterMessage, type TwitterPost, type TwitterState } from "./twitter-storage";
 
-export type TwitterGeneratedLine = { original: string; translated: string };
+export type TwitterGeneratedLine = { original: string; translated: string; photoDescription?: string };
 export type TwitterCommentDraft = { name: string; handle: string; original: string; translated?: string };
 
 function parseLines(text: string): TwitterGeneratedLine[] {
@@ -18,9 +18,9 @@ function parseLines(text: string): TwitterGeneratedLine[] {
   try {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
-    const row = JSON.parse(start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed) as { lines?: Array<{ original?: string; translated?: string }>; original?: string; translated?: string };
+    const row = JSON.parse(start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed) as { lines?: Array<{ original?: string; translated?: string; photoDescription?: string }>; original?: string; translated?: string; photoDescription?: string };
     const lines = Array.isArray(row.lines) ? row.lines : [row];
-    return lines.map(line => ({ original: String(line.original || "").trim(), translated: String(line.translated || line.original || "").trim() }))
+    return lines.map(line => ({ original: String(line.original || "").trim(), translated: String(line.translated || line.original || "").trim(), photoDescription: String(line.photoDescription || "").trim().slice(0, 350) || undefined }))
       .filter(line => line.original).slice(0, 3);
   } catch {
     return trimmed ? [{ original: trimmed.slice(0, 650), translated: trimmed.slice(0, 650) }] : [];
@@ -44,8 +44,10 @@ export async function generateTwitterText(input: {
   const character = loadCharacters().find(row => row.id === input.characterId);
   if (!character) throw new Error("角色已不存在。");
   const slot = resolveBinding(loadBindingConfig(), character.id, "twitter");
-  const apiConfig = loadApiConfigs().find(row => row.id === slot.apiConfigId) ?? loadApiConfigs()[0];
-  if (!apiConfig) throw new Error("先在设置中配置文字 API，才能生成角色内容。");
+  const configs = loadApiConfigs();
+  const apiConfig = slot.apiConfigId ? configs.find(row => row.id === slot.apiConfigId) : configs.find(row => row.apiKey?.trim()) || configs[0];
+  if (!apiConfig) throw new Error(slot.apiConfigId ? "当前角色／推特绑定的文字 API 已不存在，请检查绑定。" : "先在设置中配置文字 API，才能生成角色内容。");
+  if (!apiConfig.apiKey?.trim()) throw new Error(`当前角色／推特绑定的文字 API「${apiConfig.name || apiConfig.provider}」没有填写 Key，请在小手机设置中检查。`);
   const presets = loadPresets();
   const preset = presets.find(row => row.id === slot.presetId) ?? presets.find(row => row.builtIn) ?? null;
   const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(row => row.id === id)).filter(Boolean) as WorldBookConfig[];
@@ -76,7 +78,7 @@ export async function generateTwitterText(input: {
     const recent = input.state.posts.filter(p => !p.replyToId && isPublicTwitterPost(input.state, p)).slice(-10).map(p => `${p.authorId === "user" ? input.state.profile.name : p.authorId === character.id ? character.name : "其他账号"}：${p.original}`).join("\n");
     const accountRule = input.accountKind === "alternate" ? `你以副账号“${input.accountProfile?.name || "副账号"}”发帖；对外身份是“${input.accountProfile?.identity || "未设定"}”。账号关联方式：${input.accountProfile?.disclosure === "full" ? "已经完全公开与主账号的关系，可以自然谈及。" : input.accountProfile?.disclosure === "clues" ? `只存在以下可见线索“${input.accountProfile.disclosureClues || "无"}”，不能直接证实或曝光身份。` : "独立身份，不要主动泄漏与主账号的联系或私密记忆。"}` : "";
     const communityRule = input.communityName ? `这条发在“${input.communityName.slice(0, 60)}”社区，内容要贴合社区主题，不能因关联角色而公开其未公开的小号。` : "";
-    instruction = `${publicRule}\n${stateRule}\n${accountRule}\n${communityRule}\n近期公开帖子：\n${recent || "暂无"}\n根据本人设定、记忆与时间，自然发布一条适合当前情境的新帖子，可以回应近期公开话题，但不要机械模仿。${shared}\nJSON 格式：{"original":"帖子原文","translated":"中文译文"${input.withComments ? ',"comments":[{"name":"路人昵称","handle":"路人账号","original":"短评论原文","translated":"中文译文"}]' : ""}}。${input.withComments ? "同时给 5 至 10 条自然的路人评论，避免暴露副账号与主账号的隐藏关联。" : ""}`;
+    instruction = `${publicRule}\n${stateRule}\n${accountRule}\n${communityRule}\n近期公开帖子：\n${recent || "暂无"}\n根据本人设定、记忆与时间，自然发布一条适合当前情境的新帖子，可以回应近期公开话题，但不要机械模仿。可偶尔发照片；只有这次确实想配图时才填写 photoDescription，描述照片的主体、人物或场景，便于从该账号可用相册匹配；不发图时留空。${shared}\nJSON 格式：{"original":"帖子原文","translated":"中文译文","photoDescription":"配图描述，若不发图则留空"${input.withComments ? ',"comments":[{"name":"路人昵称","handle":"路人账号","original":"短评论原文","translated":"中文译文"}]' : ""}}。${input.withComments ? "同时给 5 至 10 条自然的路人评论，避免暴露副账号与主账号的隐藏关联。" : ""}`;
   } else if (input.kind === "reply") {
     if (!input.targetPost) throw new Error("找不到要回复的帖子。");
     instruction = `${publicRule}\n${stateRule}\n你正在回复一条推特帖子，内容：“${input.targetPost.original.slice(0, 900)}”。直接回应具体内容，自然简短，不要离题。${shared}\nJSON 格式：{"original":"回复原文","translated":"中文译文"}`;

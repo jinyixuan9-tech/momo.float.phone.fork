@@ -32,7 +32,7 @@ import { loadChatOfflineProjectionEntries } from "./chat-offline-storage";
 import { loadCheckPhoneProjectionEntries } from "./checkphone-storage";
 import { formatShoppingPaymentRequestHistory } from "./shopping-payment-request";
 import { loadCustomAppTimelineEntries } from "./custom-app-storage";
-import { loadSmsProjectionEntries } from "./sms-storage";
+import * as smsStorage from "./sms-storage";
 import {
     canCharacterSeeMomentPost,
     getVisibleMomentCommentsForCharacter,
@@ -397,12 +397,15 @@ export function loadNativeTimeline(
     // Full SMS messages stay in sms-storage; only a compact, role-knowledge-safe
     // projection joins shared memory so Chat ↔ SMS can continue naturally without
     // multiplying tokens for every short text / virtual number.
-    const smsEntries = loadSmsProjectionEntries(characterId, {
+    // Older SMS overwrite packs may not export the projection helper yet.
+    // Keep character generation working while an earlier SMS bundle is installed.
+    const smsLoader = (smsStorage as unknown as Record<string, unknown>).loadSmsProjectionEntries as undefined | ((id: string, options: { afterTimestamp?: string; userName?: string; charName?: string; excludeThreadId?: string }) => Array<{ id: string; timestamp: string; content: string }>);
+    const smsEntries = typeof smsLoader === "function" ? smsLoader(characterId, {
         afterTimestamp: options?.afterTimestamp,
         userName,
         charName,
         excludeThreadId: options?.excludeSmsThreadId,
-    });
+    }) : [];
     for (const smsEntry of smsEntries) {
         entries.push({
             id: smsEntry.id,

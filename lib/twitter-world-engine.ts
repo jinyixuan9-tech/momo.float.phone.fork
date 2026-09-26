@@ -3,7 +3,7 @@ import { loadApiConfigs, loadBindingConfig, loadPresets, resolveBinding } from "
 import type { TwitterState, TwitterPost, TwitterCommunityCharacter } from "./twitter-storage";
 
 export type TwitterWorldComment = { name: string; handle: string; original: string; translated?: string };
-export type TwitterWorldPost = { name: string; handle: string; original: string; translated?: string; trend?: string; comments: TwitterWorldComment[] };
+export type TwitterWorldPost = { name: string; handle: string; original: string; translated?: string; trend?: string; imageDescription?: string; comments: TwitterWorldComment[] };
 export type TwitterWorldBatch = { trends: Array<{ label: string; scope: "world" | "region" }>; posts: TwitterWorldPost[] };
 export type TwitterStranger = { name: string; handle: string; original: string; translated?: string };
 
@@ -24,8 +24,8 @@ const commentsFrom = (value: unknown): TwitterWorldComment[] => Array.isArray(va
 async function ask(instruction: string): Promise<Record<string, unknown>> {
   const configs = loadApiConfigs();
   const selectedId = resolveBinding(loadBindingConfig(), undefined, "twitter").apiConfigId;
-  const config = selectedId ? configs.find(row => row.id === selectedId) : configs[0];
-  if (!config) throw new Error("请先设置文字 API，才能刷新推特内容。");
+  const config = selectedId ? configs.find(row => row.id === selectedId) : configs.find(row => row.apiKey?.trim()) || configs[0];
+  if (!config) throw new Error(selectedId ? "当前绑定的文字 API 已不存在，请检查推特或全局绑定。" : "请先在小手机的全局绑定或推特绑定里设置文字 API，才能刷新内容。");
   if (!config.apiKey?.trim()) throw new Error(`推特当前使用的文字 API「${config.name || config.provider}」没有填写 Key，请在小手机的全局绑定中选择可用配置。`);
   const presets = loadPresets();
   const preset = presets.find(p => p.builtIn) ?? presets[0] ?? null;
@@ -36,22 +36,23 @@ async function ask(instruction: string): Promise<Record<string, unknown>> {
   return jsonObject(raw);
 }
 
-export async function generateTwitterWorldBatch(state: TwitterState, hint: string): Promise<TwitterWorldBatch> {
+export async function generateTwitterWorldBatch(state: TwitterState, hint: string, desiredPosts = 5): Promise<TwitterWorldBatch> {
   const context = state.publicWorldContext.trim().slice(0, 1600);
   const region = state.regionName.trim().slice(0, 70);
   const existing = state.trends.slice(-8).map(t => t.label).join("、");
-  const request = `你为一个纯虚构的推特世界生成生活化动态和虚构趋势。只采用以下明确公开的背景：${context || "普通现代城市的虚构日常"}。地区：${region || "没有指定地区"}。用户偏好：${hint.slice(0, 250) || "生活、校园、情感、游戏、都市传闻、艺人日常，内容混合"}。现有趋势：${existing || "无"}。趋势应是该世界内此刻有人讨论的具体话题，地区趋势依赖设定的地区；不要用真实世界的时事、真实新闻、外链或联系方式；除用户明确关联的角色外，不写现实艺人的实际行程；不要凭空确立影响世界观的大事件，不要透露私下关系、角色小号身份。输出 2 至 3 个趋势以及 3 至 5 条不同虚构路人账号的帖子，每条帖子附 5 至 10 条短评论。可围绕趋势讨论，也可以写普通日常。original 是作者使用的语言；外语需准确附中文译文；#标签始终沿用原文不翻译。JSON: {"trends":[{"label":"具体趋势","scope":"world或region"}],"posts":[{"name":"昵称","handle":"英文账号","original":"帖子","translated":"中文译文","trend":"趋势名称或空字符串","comments":[{"name":"昵称","handle":"英文账号","original":"评论","translated":"中文译文"}]}]}。`;
+  const locales = state.audienceLocales?.length ? state.audienceLocales.join("、") : "中文";
+  const request = `你为一个纯虚构的推特世界生成生活化动态和虚构趋势。只采用以下明确公开的背景：${context || "普通现代城市的虚构日常"}。用户偏好或搜索目标：${hint.slice(0, 450) || "生活、校园、情感、游戏、都市传闻、艺人日常，内容混合"}。账号语言地区从${locales}中尽量均衡选用，如果六个地区全选则均匀分配。现有趋势：${existing || "无"}。趋势名称必须用中文；不要虚构实时现实新闻、外链或联系方式；除用户明确关联的角色外，不写现实艺人的实际行程；不要凭空确立影响世界观的大事件，不要透露私下关系、角色小号身份。输出 2 至 3 个趋势以及恰好 ${desiredPosts} 条不同虚构路人账号的帖子，每条附 5 至 10 条短评论；搜索或指定话题时每条必须相关。original 是作者使用的语言；外语需准确附简体中文译文；#标签始终沿用原文不翻译。如路人想发照片，用 imageDescription 写出照片画面供文字图片卡片显示；不发图则留空，禁止直接请求生图。JSON: {"trends":[{"label":"中文趋势","scope":"world"}],"posts":[{"name":"昵称","handle":"英文账号","original":"帖子","translated":"中文译文","trend":"趋势名称或空字符串","imageDescription":"可留空的图片描述","comments":[{"name":"昵称","handle":"英文账号","original":"评论","translated":"中文译文"}]}]}。`;
   const row = await ask(request);
   const proposedTrends = Array.isArray(row.trends) ? row.trends.slice(0, 4).flatMap(item => {
     const trend = item && typeof item === "object" ? item as Record<string, unknown> : {};
     const label = asText(trend.label, 64);
     return label ? [{ label, scope: trend.scope === "region" && region ? "region" as const : "world" as const }] : [];
   }) : [];
-  const posts = Array.isArray(row.posts) ? row.posts.slice(0, 6).flatMap(item => {
+  const posts = Array.isArray(row.posts) ? row.posts.slice(0, Math.max(1, desiredPosts)).flatMap(item => {
     if (!item || typeof item !== "object") return [];
     const post = item as Record<string, unknown>;
     const original = asText(post.original, 850);
-    return original ? [{ name: asText(post.name, 40) || "路人", handle: asText(post.handle, 35), original, translated: asText(post.translated, 850), trend: asText(post.trend, 64), comments: commentsFrom(post.comments) }] : [];
+    return original ? [{ name: asText(post.name, 40) || "路人", handle: asText(post.handle, 35), original, translated: asText(post.translated, 850), trend: asText(post.trend, 64), imageDescription: asText(post.imageDescription, 350), comments: commentsFrom(post.comments) }] : [];
   }) : [];
   if (!posts.length) throw new Error("这次没有生成有效帖子，请重试。");
   const trends = proposedTrends.filter(t => posts.some(p => p.trend === t.label));
@@ -59,9 +60,9 @@ export async function generateTwitterWorldBatch(state: TwitterState, hint: strin
 }
 
 export async function generateTwitterTrends(state: TwitterState): Promise<string[]> {
-  const row = await ask(`按纯虚构世界的公开背景生成恰好五条此刻被讨论的话题。背景：${state.publicWorldContext.slice(0, 1300) || "现代虚构世界的日常"}；地区设定：${state.regionName.slice(0, 100) || "未指定"}。这些是同一个“当前热门”列表，不区分世界或地区。可涉及生活、娱乐、校园、游戏、情感、都市传闻。禁止真实新闻、真实时事、私密关系、人物小号身份。只输出 JSON：{"trends":["话题一","话题二","话题三","话题四","话题五"]}。`);
+  const row = await ask(`按纯虚构世界的公开背景生成恰好五条中文热门话题标题。背景：${state.publicWorldContext.slice(0, 1300) || "现代虚构世界的日常"}。不区分世界或地区。可涉及生活、娱乐、校园、游戏、情感、都市传闻；标题用中文，不必翻译贴文中的标签。禁止假称掌握现实实时新闻、私密关系、人物副账号身份。只输出 JSON：{"trends":["话题一","话题二","话题三","话题四","话题五"]}。`);
   const labels = Array.isArray(row.trends) ? row.trends.map(item => asText(typeof item === "object" && item !== null ? (item as Record<string, unknown>).label : item, 64)).filter(Boolean).slice(0, 5) : [];
-  if (new Set(labels).size !== 5) throw new Error("这次没有生成五条不同的热门话题，请重试。");
+  if (new Set(labels).size !== 5 || labels.some(label => !/[\u3400-\u9fff]/.test(label))) throw new Error("这次没有生成五条不同的中文热门话题，请重试。");
   return labels;
 }
 
