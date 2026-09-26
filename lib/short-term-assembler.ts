@@ -21,7 +21,7 @@ import type { DiaryEntry, DiaryEntryBlock } from "./diary-entry-types";
 import { loadNoteWallProjectionEntries } from "./notewall-memory";
 import { loadXiaohongshuProjectionEntries } from "./xiaohongshu-memory";
 import { loadWeverseProjectionEntries } from "./weverse-memory";
-import { loadTwitterProjectionEntries } from "./twitter-storage";
+import { getTwitterPrivateAccountContext, loadTwitterProjectionEntries } from "./twitter-storage";
 import { formatXiaohongshuShareForPrompt } from "./chat-share";
 import { loadBlackMarketTheaterProjectionEntries } from "./black-market-storage";
 import { loadInterviewMagazineProjectionEntries } from "./interview-magazine-memory";
@@ -1225,6 +1225,11 @@ export function prepareShortTermContext(
         const surviving = r.entries.filter(e => survivingEntryIds.has(e.id));
         if (surviving.length === 0) continue;
         recentBlocks.push({ tag: r.tag, content: surviving.map(e => e.content).join("\n\n") });
+    }
+
+    if (appId === "chat") {
+        const privateTwitterAccount = getTwitterPrivateAccountContext(characterId);
+        if (privateTwitterAccount) recentBlocks.push({ tag: "private_twitter_account", content: privateTwitterAccount });
     }
 
     // History-style apps use an empty wrapper block around the real history turns.
