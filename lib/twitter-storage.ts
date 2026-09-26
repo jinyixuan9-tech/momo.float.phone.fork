@@ -17,7 +17,7 @@ export type TwitterPost = {
   bookmarked?: boolean;
   reposted?: boolean;
 };
-export type TwitterMessage = { id: string; role: "user" | "character"; original: string; translated?: string; createdAt: number };
+export type TwitterMessage = { id: string; role: "user" | "character"; original: string; translated?: string; replyToId?: string; createdAt: number };
 export type TwitterConversation = {
   id: string;
   characterId: string;

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft, Bell, Bookmark, Heart, Home, ImagePlus, Mail, MessageCircle,
-  MoreHorizontal, Repeat2, Search, Send, Settings2, Sparkles, Trash2, X,
+  MoreHorizontal, Phone, Reply, Repeat2, Search, Send, Settings2, Sparkles, Trash2, Video, X,
 } from "lucide-react";
 import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -12,7 +12,7 @@ import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-
 import { generateTwitterText } from "@/lib/twitter-engine";
 import {
   createTwitterId, loadTwitterState, saveTwitterState, TWITTER_UPDATED_EVENT,
-  type TwitterPost, type TwitterProfile, type TwitterState,
+  type TwitterMessage, type TwitterPost, type TwitterProfile, type TwitterState,
 } from "@/lib/twitter-storage";
 import styles from "./twitter-app.module.css";
 
@@ -27,6 +27,8 @@ const timestamp = (value: number) => {
   if (delta < 86400_000) return `${Math.floor(delta / 3600_000)} 小时`;
   return new Date(value).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 };
+const messageDay = (value: number) => new Date(value).toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" });
+const messageDate = (value: number) => new Date(value).toLocaleString("zh-CN", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
 
 function StoredImage({ imageRef, className = "" }: { imageRef?: string; className?: string }) {
   const [url, setUrl] = useState("");
@@ -46,6 +48,32 @@ function Avatar({ image, label, size = "" }: { image?: string; label: string; si
   </span>;
 }
 
+function DmMessage({ message, reference, speaker, onReply, onJump }: {
+  message: TwitterMessage;
+  reference?: TwitterMessage;
+  speaker: string;
+  onReply: () => void;
+  onJump: (id: string) => void;
+}) {
+  const [translationOpen, setTranslationOpen] = useState(false);
+  const mine = message.role === "user";
+  const canTranslate = !mine && !!message.translated && message.translated !== message.original;
+  return <div id={`tw-dm-${message.id}`} className={`${styles.messageRow} ${mine ? styles.myMessageRow : ""}`}>
+    <div className={`${styles.message} ${mine ? styles.mine : styles.theirs}`} title={messageDate(message.createdAt)}>
+      {reference && <button type="button" className={styles.messageQuote} onClick={() => onJump(reference.id)}>
+        <span><Reply size={12} />{reference.role === "user" ? "你" : speaker}</span>
+        <span className={styles.quoteText}>{reference.original}</span>
+      </button>}
+      <span className={styles.messageText}>{message.original}</span>
+      {canTranslate && <>
+        <button type="button" className={styles.translateToggle} aria-expanded={translationOpen} onClick={() => setTranslationOpen(open => !open)}>{translationOpen ? "收起翻译 ↑" : "查看翻译 ↓"}</button>
+        {translationOpen && <span className={styles.messageTranslation}>{message.translated}</span>}
+      </>}
+    </div>
+    <button type="button" className={styles.replyAction} onClick={onReply} aria-label={`回复${mine ? "你的" : speaker + "的"}消息`} title="回复这条消息"><Reply size={16} /></button>
+  </div>;
+}
+
 export function TwitterApp({ onClose, onNotice }: Props) {
   const [state, setState] = useState<TwitterState>(() => loadTwitterState());
   const stateRef = useRef(state);
@@ -61,6 +89,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
   const [imageRef, setImageRef] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker>(null);
   const [busy, setBusy] = useState(false);
   const [editProfile, setEditProfile] = useState(false);
@@ -138,13 +167,13 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       const created = convo;
       commit(current => ({ ...current, conversations: [created, ...current.conversations] }));
     }
-    setConversationId(convo.id); setPicker(null); setProfileId(null); setTab("messages");
+    setConversationId(convo.id); setReplyingToId(null); setPicker(null); setProfileId(null); setTab("messages");
   };
   const sendMessage = () => {
     const text = messageDraft.trim();
     if (!text || !conversationId) return;
-    commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, messages: [...c.messages, { id: createTwitterId(), role: "user", original: text, createdAt: Date.now() }] } : c) }));
-    setMessageDraft("");
+    commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, messages: [...c.messages, { id: createTwitterId(), role: "user", original: text, replyToId: replyingToId && c.messages.some(m => m.id === replyingToId) ? replyingToId : undefined, createdAt: Date.now() }] } : c) }));
+    setMessageDraft(""); setReplyingToId(null);
   };
   const aiGenerate = async (characterId: string, kind: "post" | "reply" | "dm") => {
     if (busy) return;
@@ -153,13 +182,15 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       const snapshot = stateRef.current;
       const thread = snapshot.posts.find(p => p.id === threadId);
       const convo = snapshot.conversations.find(c => c.id === conversationId);
+      const requestedReplyId = replyingToId;
       if (kind === "reply" && !thread) throw new Error("先选择一条帖子。");
       if (kind === "dm" && !convo) throw new Error("先进入一段私信。");
-      const lines = await generateTwitterText({ characterId, state: snapshot, kind, targetPost: thread, conversation: convo?.messages, anonymous: convo?.mode === "anonymous" });
+      const lines = await generateTwitterText({ characterId, state: snapshot, kind, targetPost: thread, conversation: convo?.messages, replyToMessage: convo?.messages.find(msg => msg.id === requestedReplyId), anonymous: convo?.mode === "anonymous" });
       const now = Date.now();
       if (kind === "dm") {
         const targetId = convo!.id;
-        commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === targetId ? { ...c, messages: [...c.messages, ...lines.map((line, index) => ({ id: createTwitterId(), role: "character" as const, ...line, createdAt: now + index }))] } : c) }));
+        commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === targetId ? { ...c, messages: [...c.messages, ...lines.map((line, index) => ({ id: createTwitterId(), role: "character" as const, ...line, replyToId: index === 0 && requestedReplyId && c.messages.some(m => m.id === requestedReplyId) ? requestedReplyId : undefined, createdAt: now + index }))] } : c) }));
+        setReplyingToId(current => current === requestedReplyId ? null : current);
       } else {
         const created: TwitterPost = { id: createTwitterId(), authorId: characterId, original: lines[0].original, translated: lines[0].translated, replyToId: kind === "reply" ? threadId || undefined : undefined, createdAt: now };
         commit(current => ({ ...current, posts: [...current.posts, created], notices: kind === "reply" && thread?.authorId === "user" ? [{ id: createTwitterId(), kind: "reply", actorId: characterId, postId: thread.id, text: created.original, createdAt: now }, ...current.notices] : current.notices }));
@@ -230,10 +261,13 @@ export function TwitterApp({ onClose, onNotice }: Props) {
 
     {profileId && profile && <div className={styles.page}><div className={styles.pageHeader}><button onClick={() => setProfileId(null)} aria-label="返回"><ArrowLeft size={21} /></button><b>个人主页</b></div><div className={styles.pageScroll}><div className={styles.banner}>{profile.bannerUrl && <StoredImage imageRef={profile.bannerUrl} />}</div><div className={styles.profileIntro}><Avatar label={profile.name} image={profile.avatarUrl} size="large" />{profileId === "user" ? <button onClick={() => { setProfileDraft(state.profile); setEditProfile(true); }}>编辑资料</button> : <button onClick={() => commit(current => ({ ...current, following: current.following.includes(profileId!) ? current.following.filter(id => id !== profileId) : [...current.following, profileId!] }))}>{state.following.includes(profileId) ? "正在关注" : "关注"}</button>}</div><h2>{profile.name}</h2><div className={styles.handle}>@{profile.handle}</div><p>{profile.bio}</p>{profileId === "user" && <button className={styles.rulesButton} onClick={() => { setRulesDraft(state.worldRules); setEditRules(true); }}><Settings2 size={16} />推特世界观设置</button>}{profileId !== "user" && <button className={styles.rulesButton} onClick={() => openConversation(profileId!, "real")}><Mail size={16} />私信</button>}<h3 className={styles.heading}>帖子</h3>{posts.filter(p => p.authorId === profileId).map(p => renderPost(p))}</div></div>}
 
-    {conversationId && currentConversation && <div className={styles.page}><div className={styles.pageHeader}><button onClick={() => setConversationId(null)} aria-label="返回"><ArrowLeft size={21} /></button><Avatar label={display(currentConversation.characterId).name} image={display(currentConversation.characterId).avatarUrl} /><b>{display(currentConversation.characterId).name}{currentConversation.mode === "anonymous" && <span className={styles.anon}> · 匿名</span>}</b><button onClick={() => commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, blocked: !c.blocked } : c) }))} title="切换屏蔽状态"><MoreHorizontal size={21} /></button></div><div className={styles.messages}>
-      {currentConversation.messages.map(msg => <div key={msg.id} className={`${styles.message} ${msg.role === "user" ? styles.mine : styles.theirs}`}><span>{msg.original}</span>{msg.translated && msg.translated !== msg.original && <small>{msg.translated}</small>}<time>{timestamp(msg.createdAt)}</time></div>)}
+    {conversationId && currentConversation && <div className={styles.page}><div className={styles.pageHeader}><button onClick={() => { setConversationId(null); setReplyingToId(null); }} aria-label="返回"><ArrowLeft size={21} /></button><Avatar label={display(currentConversation.characterId).name} image={display(currentConversation.characterId).avatarUrl} /><b>{display(currentConversation.characterId).name}{currentConversation.mode === "anonymous" && <span className={styles.anon}> · 匿名</span>}</b><span className={styles.dmHeaderDecoration} aria-label="通话功能暂未接入"><Phone size={21} /><Video size={23} /></span><button onClick={() => commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, blocked: !c.blocked } : c) }))} title="切换屏蔽状态"><MoreHorizontal size={21} /></button></div><div className={styles.messages}>
+      {currentConversation.messages.map((msg, index) => <div key={msg.id} className={styles.messageGroup}>
+        {(index === 0 || messageDay(msg.createdAt) !== messageDay(currentConversation.messages[index - 1].createdAt) || msg.createdAt - currentConversation.messages[index - 1].createdAt > 20 * 60_000) && <div className={styles.messageDate}>{messageDate(msg.createdAt)}</div>}
+        <DmMessage message={msg} reference={currentConversation.messages.find(row => row.id === msg.replyToId)} speaker={display(currentConversation.characterId).name} onReply={() => setReplyingToId(msg.id)} onJump={id => document.getElementById(`tw-dm-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+      </div>)}
       {busy && <div className={styles.typing}>正在输入…</div>}
-    </div><div className={styles.dmBottom}><button onClick={() => aiGenerate(currentConversation.characterId, "dm")} disabled={busy || currentConversation.blocked} aria-label="召唤回复" title="召唤回复"><Sparkles size={19} /></button><form onSubmit={event => { event.preventDefault(); sendMessage(); }}><input value={messageDraft} onChange={event => setMessageDraft(event.target.value)} placeholder={currentConversation.blocked ? "已屏蔽此会话" : "发送私信"} disabled={currentConversation.blocked} /><button disabled={!messageDraft.trim() || currentConversation.blocked} aria-label="发送私信"><Send size={19} /></button></form></div></div>}
+    </div>{replyingToId && currentConversation.messages.some(msg => msg.id === replyingToId) && <div className={styles.dmReplyPreview}><span>回复 {currentConversation.messages.find(msg => msg.id === replyingToId)?.role === "user" ? "你" : display(currentConversation.characterId).name}<small>{currentConversation.messages.find(msg => msg.id === replyingToId)?.original}</small></span><button type="button" onClick={() => setReplyingToId(null)} aria-label="取消回复"><X size={18} /></button></div>}<div className={styles.dmBottom}><button onClick={() => aiGenerate(currentConversation.characterId, "dm")} disabled={busy || currentConversation.blocked} aria-label="召唤回复" title="召唤回复"><Sparkles size={19} /></button><form onSubmit={event => { event.preventDefault(); sendMessage(); }}><input value={messageDraft} onChange={event => setMessageDraft(event.target.value)} placeholder={currentConversation.blocked ? "已屏蔽此会话" : "发送私信"} disabled={currentConversation.blocked} /><button disabled={!messageDraft.trim() || currentConversation.blocked} aria-label="发送私信"><Send size={19} /></button></form></div></div>}
 
     {compose && <div className={styles.page}><div className={styles.pageHeader}><button onClick={() => setCompose(false)} aria-label="取消"><X size={22} /></button><b>发帖</b><button className={styles.publish} onClick={publish} disabled={!draft.trim() && !imageRef}>发布</button></div><div className={styles.composeBody}><Avatar image={user.avatarUrl} label={user.name} /><textarea autoFocus value={draft} onChange={event => setDraft(event.target.value)} placeholder="有什么新鲜事？" maxLength={1200} /></div>{imageRef && <div className={styles.imagePreview}><StoredImage imageRef={imageRef} /><button onClick={() => setImageRef("")} aria-label="移除图片"><X size={17} /></button></div>}<div className={styles.composeTools}><button onClick={() => fileInputRef.current?.click()}><ImagePlus size={21} />添加照片</button><input ref={fileInputRef} type="file" accept="image/*" hidden onChange={event => { void uploadImage(event, "post"); }} /></div></div>}
 
