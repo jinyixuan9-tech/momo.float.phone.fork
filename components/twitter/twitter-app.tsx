@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import {
   ArrowLeft, Bell, Bookmark, Heart, Home, ImagePlus, MessageCircle,
-  MoreHorizontal, Plus, RefreshCw, Reply, Repeat2, Search, Send, Settings2, Sparkles, Trash2, UserRoundPlus, X, Camera, MapPin, ListPlus, CalendarDays, BadgeCheck, ChevronDown, Share2,
+  MoreHorizontal, Plus, RefreshCw, Repeat2, Search, Send, Settings2, Sparkles, Trash2, UserRoundPlus, X, Camera, MapPin, ListPlus, CalendarDays, BadgeCheck, ChevronDown, Share2,
 } from "lucide-react";
 import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -76,10 +76,11 @@ function Avatar({ image, label, size = "" }: { image?: string; label: string; si
   </span>;
 }
 
-function DmMessage({ message, reference, speaker, onJump, onContext }: {
+function DmMessage({ message, reference, speaker, avatar, onJump, onContext }: {
   message: TwitterMessage;
   reference?: TwitterMessage;
   speaker: string;
+  avatar?: string;
   onJump: (id: string) => void;
   onContext: () => void;
 }) {
@@ -89,13 +90,16 @@ function DmMessage({ message, reference, speaker, onJump, onContext }: {
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPress = () => { if (pressTimer.current) clearTimeout(pressTimer.current); pressTimer.current = null; };
   return <div id={`tw-dm-${message.id}`} className={`${styles.messageRow} ${mine ? styles.myMessageRow : ""}`}>
-    <div className={`${styles.message} ${mine ? styles.mine : styles.theirs}`} title={messageDate(message.createdAt)} onContextMenu={event => { event.preventDefault(); cancelPress(); onContext(); }} onTouchStart={() => { cancelPress(); pressTimer.current = setTimeout(onContext, 520); }} onTouchEnd={cancelPress} onTouchMove={cancelPress} onTouchCancel={cancelPress}>
+    {!mine && <Avatar image={avatar} label={speaker} />}
+    <div className={styles.messageColumn}>
       {reference && <button type="button" className={styles.messageQuote} onClick={() => onJump(reference.id)}>
-        <span><Reply size={12} />{reference.role === "user" ? "你" : speaker}</span>
+        <span>回复 {reference.role === "user" ? "你" : speaker}</span>
         <span className={styles.quoteText}>{reference.original}</span>
       </button>}
-      {canTranslate && <div className={styles.dmTranslationLine}><span>{sourceLanguage(message.original) ? `翻译自${sourceLanguage(message.original)}` : "已翻译"}</span><button type="button" className={styles.translateToggle} onClick={() => setShowOriginal(open => !open)}>{showOriginal ? "显示译文" : "显示原文"}</button></div>}
-      <span className={styles.messageText}>{canTranslate && !showOriginal ? message.translated : message.original}</span>
+      <div className={`${styles.message} ${mine ? styles.mine : styles.theirs}`} title={messageDate(message.createdAt)} onContextMenu={event => { event.preventDefault(); cancelPress(); onContext(); }} onTouchStart={() => { cancelPress(); pressTimer.current = setTimeout(onContext, 520); }} onTouchEnd={cancelPress} onTouchMove={cancelPress} onTouchCancel={cancelPress}>
+        {canTranslate && <div className={styles.dmTranslationLine}><span>{sourceLanguage(message.original) ? `翻译自${sourceLanguage(message.original)}` : "已翻译"}</span><button type="button" className={styles.translateToggle} onClick={() => setShowOriginal(open => !open)}>{showOriginal ? "显示译文" : "显示原文"}</button></div>}
+        <span className={styles.messageText}>{canTranslate && !showOriginal ? message.translated : message.original}</span>
+      </div>
     </div>
   </div>;
 }
@@ -677,7 +681,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
     {conversationId && currentConversation && <div className={`${styles.page} ${styles.topPage}`}><div className={styles.pageHeader}><button onClick={() => { setConversationId(null); setReplyingToId(null); setDmMenuOpen(false); setDmContextId(null); }} aria-label="返回"><ArrowLeft size={21} /></button><Avatar label={display(currentConversation.recipientAccountId || currentConversation.characterId).name} image={display(currentConversation.recipientAccountId || currentConversation.characterId).avatarUrl} /><b>{display(currentConversation.recipientAccountId || currentConversation.characterId).name}{currentConversation.mode === "anonymous" && <span className={styles.anon}> · 匿名</span>}</b><button onClick={() => setDmMenuOpen(open => !open)} aria-label="私信设置"><MoreHorizontal size={21} /></button></div>{dmMenuOpen && <div className={styles.dmMenu}><button onClick={() => { commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, messages: [] } : c) })); setDmMenuOpen(false); setReplyingToId(null); }}>清除聊天记录</button><button onClick={() => { commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, blocked: !c.blocked } : c) })); setDmMenuOpen(false); }}>{currentConversation.blocked ? "取消屏蔽" : "屏蔽此人"}</button></div>}<div className={styles.messages}>
       {currentConversation.messages.map((msg, index) => <div key={msg.id} className={styles.messageGroup}>
         {(index === 0 || messageDay(msg.createdAt) !== messageDay(currentConversation.messages[index - 1].createdAt) || msg.createdAt - currentConversation.messages[index - 1].createdAt > 20 * 60_000) && <div className={styles.messageDate}>{messageDate(msg.createdAt)}</div>}
-        <DmMessage message={msg} reference={currentConversation.messages.find(row => row.id === msg.replyToId)} speaker={display(currentConversation.recipientAccountId || currentConversation.characterId).name} onContext={() => { setDmContextId(msg.id); setDmEditDraft(null); }} onJump={id => document.getElementById(`tw-dm-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+        <DmMessage message={msg} reference={currentConversation.messages.find(row => row.id === msg.replyToId)} speaker={display(currentConversation.recipientAccountId || currentConversation.characterId).name} avatar={display(currentConversation.recipientAccountId || currentConversation.characterId).avatarUrl} onContext={() => { setDmContextId(msg.id); setDmEditDraft(null); }} onJump={id => document.getElementById(`tw-dm-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
       </div>)}
       {generationKind === "私信回复" && <div className={styles.typing}>正在输入…</div>}
     </div>{replyingToId && currentConversation.messages.some(msg => msg.id === replyingToId) && <div className={styles.dmReplyPreview}><span>回复 {currentConversation.messages.find(msg => msg.id === replyingToId)?.role === "user" ? "你" : display(currentConversation.recipientAccountId || currentConversation.characterId).name}<small>{currentConversation.messages.find(msg => msg.id === replyingToId)?.original}</small></span><button type="button" onClick={() => setReplyingToId(null)} aria-label="取消回复"><X size={18} /></button></div>}<div className={styles.dmBottom}><input value={messageDraft} onChange={event => setMessageDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); sendMessage(); } }} placeholder={currentConversation.blocked ? "已屏蔽此会话" : "发送私信 · 回车发送"} disabled={currentConversation.blocked} /><button onClick={() => { void aiGenerate(currentConversation.characterId, "dm"); }} disabled={busy || currentConversation.blocked} aria-label="召唤回复" title="点击请求对方回复"><Send size={20} /></button></div></div>}

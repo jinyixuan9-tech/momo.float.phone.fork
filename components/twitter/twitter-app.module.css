@@ -394,22 +394,38 @@
 .composePage .cameraRail { padding-left:35px; }
 .composePage .replyPermission { border-top:0; }
 
-/* Follow main/alternate accounts directly, without connector rules. */
+/* Connect each secondary avatar to the center axis of its own main avatar. */
 .accountGroup,.accountGroup>.manageRow,.followRow,.dmSearchResult { border-bottom:0; }
-.accountGroup { margin-bottom:9px; }
-.accountGroup>.manageRow:last-child { padding-left:0; background:#fff; }
-.accountGroup>.manageRow:last-child::before,.followAltRow::before,.dmSearchAlt::before { display:none; content:none; }
-.followRow:has(+ .followAltRow) { border-bottom:0; }
-.followAltRow { padding-left:14px; background:#fff; min-height:78px; }
-.followAltRow .followPerson>.avatar { width:38px; height:38px; margin-left:3px; margin-right:4px; }
-.dmSearchResult:has(+ .dmSearchAlt) { border-bottom:0; }
-.dmSearchAlt { padding-left:18px; }
+.accountGroup { position:relative; margin-bottom:9px; }
+.accountGroup>.manageRow:first-child { position:relative; }
+.accountGroup>.manageRow:first-child::after { content:""; position:absolute; left:19px; top:30px; bottom:0; border-left:2px solid #d5dde1; pointer-events:none; }
+.accountGroup>.manageRow:last-child { position:relative; padding-left:47px; background:#fff; }
+.accountGroup>.manageRow:last-child::before { display:block; content:""; position:absolute; left:19px; top:0; width:28px; height:30px; border-left:2px solid #d5dde1; border-bottom:2px solid #d5dde1; border-radius:0 0 0 10px; pointer-events:none; }
+.accountGroup .manageRowAvatar { position:relative; z-index:1; }
+.followRow:has(+ .followAltRow) { position:relative; }
+.followRow:has(+ .followAltRow)::after { content:""; position:absolute; left:36px; top:39px; bottom:0; border-left:2px solid #d5dde1; pointer-events:none; }
+.followAltRow { position:relative; padding-left:61px; background:#fff; min-height:83px; }
+.followAltRow::before { display:block; content:""; position:absolute; left:36px; top:0; width:25px; height:36px; border-left:2px solid #d5dde1; border-bottom:2px solid #d5dde1; border-radius:0 0 0 10px; pointer-events:none; }
+.followAltRow .followPerson>.avatar { position:relative; z-index:1; width:38px; height:38px; }
+.dmSearchResult:has(+ .dmSearchAlt) { position:relative; }
+.dmSearchResult:has(+ .dmSearchAlt)::after { content:""; position:absolute; left:37px; top:33px; bottom:0; border-left:2px solid #d6dee5; pointer-events:none; }
+.dmSearchAlt { position:relative; padding-left:61px; }
+.dmSearchAlt::before { display:block; content:""; position:absolute; top:0; left:37px; width:24px; height:33px; border-left:2px solid #d6dee5; border-bottom:2px solid #d6dee5; border-radius:0 0 0 9px; pointer-events:none; }
+.dmSearchResult>.avatar { position:relative; z-index:1; }
 
 /* Keep the community tools wholly below the cover's lower edge. */
 .communityQuickActions { margin-top:37px; }
 
-/* DM reply is available from long press; messages have fully rounded corners. */
-.message.theirs,.message.mine { border-radius:21px; }
+/* X DM: the near lower corner pulls towards its avatar; quoted text stays outside. */
+.messageRow>.avatar { width:34px; height:34px; align-self:flex-start; }
+.messageColumn { display:flex; flex-direction:column; align-items:flex-start; min-width:0; max-width:min(80vw,390px); }
+.myMessageRow .messageColumn { align-items:flex-end; }
+.messageColumn .message { width:max-content; max-width:100%; border-radius:21px; }
+.messageColumn .message.theirs { border-bottom-left-radius:2px; }
+.messageColumn .message.mine { border-bottom-right-radius:2px; }
+.messageColumn .messageQuote { display:flex; flex-direction:column; width:max-content; max-width:100%; margin:0 0 8px; padding:0 0 0 11px; border:0; border-left:2px solid #91a6b3; border-radius:0; background:transparent; color:#536873!important; text-align:left; line-height:1.45; }
+.messageColumn .messageQuote>span:first-child { color:#507086; }
+.messageColumn .messageQuote .quoteText { opacity:1; }
 
 /* WVS-style quiet comment continuation. */
 .aiReply { display:flex; align-items:center; justify-content:center; gap:9px; width:calc(100% - 28px); min-height:38px; margin:8px 14px 14px; padding:0; border:0; border-radius:0; background:transparent; color:#8a9094!important; font-size:.82em!important; font-weight:400!important; }
