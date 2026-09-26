@@ -9,6 +9,10 @@ export type TwitterProfile = {
   followers?: number; followingCount?: number; visibility?: "public" | "protected";
   identity?: string; // Public identity of an alternate account, not its private owner.
   createdAt?: number;
+  birthday?: string;
+  verification?: "none" | "blue" | "gold" | "grey";
+  disclosure?: "independent" | "full" | "clues";
+  disclosureClues?: string;
   characterIds?: string[]; // Group account only.
   includeUserPersona?: boolean;
 };
@@ -17,8 +21,12 @@ export type TwitterCommunity = {
   id: string; name: string; avatarUrl?: string; bannerUrl?: string;
   fans: number; characterIds: string[]; groupAccountId?: string;
   description?: string; manualCharacters?: string[];
+  communityCharacterIds?: string[];
   includeUserPersona: boolean; createdAt: number;
 };
+export type TwitterCommunityCharacter = { id: string; name: string; handle: string; bio: string; persona: string; avatarUrl?: string; communityId: string };
+export type TwitterAction = { id: string; actorId: string; targetPostId: string; kind: "like" | "bookmark"; createdAt: number };
+export type TwitterPendingReply = { id: string; commentId: string; targetPostId: string; createdAt: number; attempts: number };
 export type TwitterEngagement = { likes: number; reposts: number; views: number; comments: number };
 export type TwitterPost = {
   id: string;
@@ -26,6 +34,13 @@ export type TwitterPost = {
   original: string;
   translated?: string;
   imageRef?: string;
+  imageRefs?: string[];
+  imageDescription?: string;
+  repostOfId?: string;
+  quotePostId?: string;
+  location?: string;
+  replyPermission?: "everyone" | "following" | "mentioned";
+  poll?: { options: string[]; votes: number[]; votedBy?: string[] };
   replyToId?: string;
   communityId?: string;
   trendId?: string;
@@ -58,7 +73,7 @@ export type TwitterNotice = {
   read?: boolean;
 };
 export type TwitterState = {
-  version: 1;
+  version: 2;
   profile: TwitterProfile;
   characterProfiles: Record<string, TwitterProfile>;
   worldRules: string;
@@ -67,6 +82,10 @@ export type TwitterState = {
   notices: TwitterNotice[];
   following: string[];
   accounts: Record<string, TwitterProfile>; // Alternate, group and fictional bystander accounts.
+  actions: TwitterAction[];
+  pendingReplies: TwitterPendingReply[];
+  deletedCommentFingerprints: Record<string, string[]>;
+  communityCharacters: Record<string, TwitterCommunityCharacter>;
   importedCharacterIds: string[];
   communities: TwitterCommunity[];
   trends: TwitterTrend[];
@@ -80,12 +99,12 @@ export function createTwitterId(): string {
 
 function blankState(): TwitterState {
   return {
-    version: 1,
+    version: 2,
     profile: { name: "我", handle: "my_twitter", bio: "" },
     characterProfiles: {},
     worldRules: "",
     posts: [], conversations: [], notices: [], following: [],
-    accounts: {}, importedCharacterIds: [], communities: [], trends: [], regionName: "", publicWorldContext: "",
+    accounts: {}, actions: [], pendingReplies: [], deletedCommentFingerprints: {}, communityCharacters: {}, importedCharacterIds: [], communities: [], trends: [], regionName: "", publicWorldContext: "",
   };
 }
 
@@ -96,18 +115,43 @@ export function loadTwitterState(): TwitterState {
     if (!raw) return blankState();
     const row = JSON.parse(raw) as Partial<TwitterState>;
     const fallback = blankState();
+    const communities = Array.isArray(row.communities) ? row.communities.filter(c => c && typeof c.id === "string" && Array.isArray(c.characterIds)) : [];
+    const communityCharacters: Record<string, TwitterCommunityCharacter> = row.communityCharacters && typeof row.communityCharacters === "object" && !Array.isArray(row.communityCharacters) ? { ...row.communityCharacters } : {};
+    for (const community of communities) {
+      const legacy = community.manualCharacters || [];
+      const ids = new Set(community.communityCharacterIds || []);
+      legacy.forEach((name, index) => {
+        const id = `community:${community.id}:${index}`;
+        if (!communityCharacters[id]) communityCharacters[id] = { id, name, handle: `community_${index + 1}`, bio: "", persona: "", communityId: community.id };
+        ids.add(id);
+      });
+      community.communityCharacterIds = [...ids];
+      community.manualCharacters = [];
+    }
+    const posts = Array.isArray(row.posts) ? row.posts.filter(p => p && typeof p.id === "string" && typeof p.original === "string") : [];
+    const legacyActions: TwitterAction[] = [];
+    if (!Array.isArray(row.actions)) for (const post of posts) {
+      for (const [field, kind] of [["liked", "like"], ["bookmarked", "bookmark"]] as const) if (post[field]) legacyActions.push({ id: `migrated_${post.id}_${kind}`, targetPostId: post.id, actorId: "user", kind, createdAt: post.createdAt });
+    }
+    const migrateProfile = (profile: TwitterProfile) => { if (row.version === 2) return profile; const next = { ...profile }; delete next.createdAt; return next; };
+    const profiles = row.characterProfiles && typeof row.characterProfiles === "object" && !Array.isArray(row.characterProfiles) ? row.characterProfiles : {};
+    const accounts = row.accounts && typeof row.accounts === "object" && !Array.isArray(row.accounts) ? row.accounts : {};
     return {
-      version: 1,
-      profile: row.profile && typeof row.profile.name === "string" ? row.profile : fallback.profile,
-      characterProfiles: row.characterProfiles && typeof row.characterProfiles === "object" && !Array.isArray(row.characterProfiles) ? row.characterProfiles : {},
+      version: 2,
+      profile: migrateProfile(row.profile && typeof row.profile.name === "string" ? row.profile : fallback.profile),
+      characterProfiles: Object.fromEntries(Object.entries(profiles).map(([id, profile]) => [id, migrateProfile(profile)])),
       worldRules: typeof row.worldRules === "string" ? row.worldRules : "",
-      posts: Array.isArray(row.posts) ? row.posts.filter(p => p && typeof p.id === "string" && typeof p.original === "string") : [],
+      posts,
       conversations: Array.isArray(row.conversations) ? row.conversations.filter(c => c && typeof c.id === "string" && Array.isArray(c.messages)) : [],
       notices: Array.isArray(row.notices) ? row.notices.filter(n => n && typeof n.id === "string") : [],
       following: Array.isArray(row.following) ? row.following.filter(id => typeof id === "string") : [],
-      accounts: row.accounts && typeof row.accounts === "object" && !Array.isArray(row.accounts) ? row.accounts : {},
+      accounts: Object.fromEntries(Object.entries(accounts).map(([id, profile]) => [id, migrateProfile(profile)])),
+      actions: Array.isArray(row.actions) ? row.actions.filter(a => a && typeof a.id === "string" && typeof a.targetPostId === "string") : legacyActions,
+      pendingReplies: Array.isArray(row.pendingReplies) ? row.pendingReplies.filter(p => p && typeof p.commentId === "string") : [],
+      deletedCommentFingerprints: row.deletedCommentFingerprints && typeof row.deletedCommentFingerprints === "object" ? row.deletedCommentFingerprints : {},
+      communityCharacters,
       importedCharacterIds: Array.isArray(row.importedCharacterIds) ? row.importedCharacterIds.filter((id): id is string => typeof id === "string") : [],
-      communities: Array.isArray(row.communities) ? row.communities.filter(c => c && typeof c.id === "string" && Array.isArray(c.characterIds)) : [],
+      communities,
       trends: Array.isArray(row.trends) ? row.trends.filter(t => t && typeof t.id === "string" && typeof t.label === "string") : [],
       regionName: typeof row.regionName === "string" ? row.regionName : "",
       publicWorldContext: typeof row.publicWorldContext === "string" ? row.publicWorldContext : "",
