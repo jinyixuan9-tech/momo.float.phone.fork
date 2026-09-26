@@ -16,6 +16,11 @@ type Props = {
   onUserAccount: (id: string) => void;
   onCommunity: (id: string) => void;
   onNotice: (text: string) => void;
+  initialTab?: Tab;
+  initialAccountId?: string;
+  createCommunity?: boolean;
+  closeOnSave?: boolean;
+  onlyCharacters?: boolean;
 };
 const defaultHandle = (text: string) => text.trim().replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 22).toLowerCase() || "account";
 const blankProfile = (name: string, handle: string): TwitterProfile => ({ name, handle: defaultHandle(handle), bio: "", visibility: "public", followers: 0, followingCount: 0, createdAt: Date.now() });
@@ -33,8 +38,8 @@ function ManagedImage({ imageRef }: { imageRef?: string }) {
   return url ? <img src={url} alt="" /> : null;
 }
 
-export function TwitterManagement({ state, characters, onChange, onClose, onUserAccount, onCommunity, onNotice }: Props) {
-  const [tab, setTab] = useState<Tab>("accounts");
+export function TwitterManagement({ state, characters, onChange, onClose, onUserAccount, onCommunity, onNotice, initialTab = "accounts", initialAccountId, createCommunity, closeOnSave, onlyCharacters }: Props) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [editAccount, setEditAccount] = useState<string | null>(null);
   const [draft, setDraft] = useState<TwitterProfile>(blankProfile("", ""));
   const [editCommunity, setEditCommunity] = useState<string | null>(null);
@@ -59,17 +64,25 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
     const next = { ...draft, name: draft.name.trim() || "未命名账号", handle: defaultHandle(draft.handle), followers: numberValue(String(draft.followers ?? 0)), followingCount: numberValue(String(draft.followingCount ?? 0)), createdAt: draft.createdAt || Date.now() };
     onChange(current => editAccount === "user" ? { ...current, profile: next } : characters.some(c => c.id === editAccount) ? { ...current, characterProfiles: { ...current.characterProfiles, [editAccount]: next } } : { ...current, accounts: { ...current.accounts, [editAccount]: next } });
     setEditAccount(null);
+    if (closeOnSave) onClose();
   };
   const startCommunity = (id?: string) => {
     const existing = state.communities.find(c => c.id === id);
     setCommunity(existing ? { ...existing, characterIds: [...existing.characterIds] } : { id: createTwitterId(), name: "", fans: 0, characterIds: [], includeUserPersona: false, createdAt: Date.now() });
     setEditCommunity(id || "new");
   };
+  useEffect(() => {
+    if (initialAccountId) startProfile(initialAccountId);
+    else if (createCommunity) startCommunity();
+    // The destination is selected once when this page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const saveCommunity = () => {
     if (!community.name.trim()) { onNotice("请先填写社区名称。"); return; }
     const next = { ...community, name: community.name.trim(), fans: numberValue(String(community.fans)) };
     onChange(current => ({ ...current, communities: current.communities.some(c => c.id === next.id) ? current.communities.map(c => c.id === next.id ? next : c) : [...current.communities, next] }));
     setEditCommunity(null);
+    if (closeOnSave) onClose();
   };
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = "";
@@ -84,11 +97,11 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
   const imageButton = (field: "avatarUrl" | "bannerUrl") => <button type="button" className={styles.imagePick} onClick={() => { setImageTarget(field); inputRef.current?.click(); }}><ImagePlus size={17} />{field === "avatarUrl" ? "更换头像" : "更换封面"}</button>;
   const groups = Object.keys(state.accounts).filter(id => id.startsWith("group:"));
   return <div className={`${styles.page} ${styles.managementPage}`}>
-    <div className={styles.pageHeader}><button onClick={() => { if (editAccount) setEditAccount(null); else if (editCommunity) setEditCommunity(null); else onClose(); }} aria-label="返回"><ArrowLeft size={21} /></button><b>{editAccount ? "编辑账号" : editCommunity ? "社区资料" : "推特设置"}</b>{(editAccount || editCommunity) && <button className={styles.publish} onClick={editAccount ? saveProfile : saveCommunity}>保存</button>}</div>
+    <div className={styles.pageHeader}><button onClick={() => { if (editAccount) { if (initialAccountId) onClose(); else setEditAccount(null); } else if (editCommunity) { if (createCommunity) onClose(); else setEditCommunity(null); } else onClose(); }} aria-label="返回"><ArrowLeft size={21} /></button><b>{editAccount ? "编辑主页" : editCommunity ? "社群资料" : onlyCharacters ? "角色资料" : initialTab === "world" ? "世界观" : initialTab === "communities" ? "社群" : "账号"}</b>{(editAccount || editCommunity) && <button className={styles.publish} onClick={editAccount ? saveProfile : saveCommunity}>保存</button>}</div>
     <input ref={inputRef} hidden type="file" accept="image/*" onChange={event => { void upload(event); }} />
     {editAccount ? <div className={styles.manageScroll}>
       <div className={styles.manageCover}><ManagedImage imageRef={draft.bannerUrl} />{imageButton("bannerUrl")}</div>
-      <div className={styles.manageAvatar}><ManagedImage imageRef={draft.avatarUrl} />{imageButton("avatarUrl")}</div>
+      <div className={styles.manageAvatar}><span className={styles.manageAvatarPreview}>{draft.avatarUrl ? <ManagedImage imageRef={draft.avatarUrl} /> : draft.name.slice(0, 1) || "我"}</span>{imageButton("avatarUrl")}</div>
       <label>昵称<input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
       <label>账号名 @<input value={draft.handle} onChange={e => setDraft({ ...draft, handle: e.target.value })} /></label>
       <label>简介<textarea value={draft.bio} onChange={e => setDraft({ ...draft, bio: e.target.value })} /></label>
@@ -99,17 +112,17 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
       <p>大小号的粉丝数各自保存；小号与大号的真实归属只在角色内部使用。</p>
     </div> : editCommunity ? <div className={styles.manageScroll}>
       <div className={styles.manageCover}><ManagedImage imageRef={community.bannerUrl} />{imageButton("bannerUrl")}</div>
-      <div className={styles.manageAvatar}><ManagedImage imageRef={community.avatarUrl} />{imageButton("avatarUrl")}</div>
+      <div className={styles.manageAvatar}><span className={styles.manageAvatarPreview}>{community.avatarUrl ? <ManagedImage imageRef={community.avatarUrl} /> : community.name.slice(0, 1) || "社"}</span>{imageButton("avatarUrl")}</div>
       <label>社区名称<input value={community.name} onChange={e => setCommunity({ ...community, name: e.target.value })} placeholder="输入社区名称" /></label>
       <label>粉丝数<input type="number" min="0" value={community.fans} onChange={e => setCommunity({ ...community, fans: numberValue(e.target.value) })} /></label>
       <h3>关联角色（可多选）</h3>{imported.map(char => <label key={char.id} className={styles.manageCheck}><input type="checkbox" checked={community.characterIds.includes(char.id)} onChange={e => setCommunity({ ...community, characterIds: e.target.checked ? [...community.characterIds, char.id] : community.characterIds.filter(id => id !== char.id) })} />{char.name}</label>)}
       <label>关联团体号<select value={community.groupAccountId || ""} onChange={e => setCommunity({ ...community, groupAccountId: e.target.value || undefined })}><option value="">不关联</option>{groups.map(id => <option key={id} value={id}>{state.accounts[id].name}</option>)}</select></label>
       <label className={styles.manageCheck}><input type="checkbox" checked={community.includeUserPersona} onChange={e => setCommunity({ ...community, includeUserPersona: e.target.checked })} />关联我的人设</label>
       <p>创建社区不会自动将你显示为主持人，也不会公开关联角色的小号。</p>
-    </div> : <><div className={styles.manageTabs}>{([['accounts','账号'],['characters','引入角色'],['communities','社区'],['world','世界']] as const).map(([key,label]) => <button key={key} className={tab === key ? styles.selected : ""} onClick={() => setTab(key)}>{label}</button>)}</div><div className={styles.manageScroll}>
+    </div> : <><div className={styles.manageScroll}>
       {tab === "accounts" && <>
-        <h3>我的账号</h3>{(["user", ...(state.accounts["user:alt"] ? ["user:alt"] : [])]).map(id => <div key={id} className={styles.manageRow}><span>{getProfile(id)?.name || "我的账号"}<small>@{getProfile(id)?.handle || "my_twitter"} · {id.endsWith(":alt") ? "小号" : "大号"}</small></span><button onClick={() => onUserAccount(id)}>使用</button><button onClick={() => startProfile(id)}>设置</button></div>)}
-        {!state.accounts["user:alt"] && <button className={styles.manageCreate} onClick={() => startProfile("user:alt")}><Plus size={18} />创建我的小号</button>}
+        {!onlyCharacters && <><h3>我的账号</h3>{(["user", ...(state.accounts["user:alt"] ? ["user:alt"] : [])]).map(id => <div key={id} className={styles.manageRow}><span>{getProfile(id)?.name || "我的账号"}<small>@{getProfile(id)?.handle || "my_twitter"} · {id.endsWith(":alt") ? "小号" : "大号"}</small></span><button onClick={() => onUserAccount(id)}>使用</button><button onClick={() => startProfile(id)}>设置</button></div>)}
+        {!state.accounts["user:alt"] && <button className={styles.manageCreate} onClick={() => startProfile("user:alt")}><Plus size={18} />创建我的小号</button>}</>}
         <h3>角色账号</h3>{imported.map(char => <div key={char.id}><div className={styles.manageRow}><span>{getProfile(char.id)?.name || char.name}<small>大号 · 跟随角色人设</small></span><button onClick={() => startProfile(char.id)}>设置</button></div><div className={styles.manageRow}><span>{getProfile(`${char.id}:alt`)?.name || "未创建小号"}<small>小号 · 独立对外身份</small></span><button onClick={() => startProfile(`${char.id}:alt`)}>{state.accounts[`${char.id}:alt`] ? "设置" : "创建"}</button></div></div>)}
         <h3>团体号</h3>{groups.map(id => <div key={id} className={styles.manageRow}><span>{state.accounts[id].name}<small>@{state.accounts[id].handle}</small></span><button onClick={() => onUserAccount(id)}>使用</button><button onClick={() => startProfile(id)}>设置</button></div>)}<button className={styles.manageCreate} onClick={() => { const id = `group:${createTwitterId()}`; setDraft(blankProfile("团体号", "group")); setEditAccount(id); }}><Plus size={18} />创建团体号</button>
       </>}

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
-  ArrowLeft, Bell, Bookmark, Heart, Home, ImagePlus, Mail, MessageCircle,
-  MoreHorizontal, Phone, Reply, Repeat2, Search, Send, Sparkles, Trash2, Video, X,
+  ArrowLeft, Bell, Bookmark, Heart, Home, ImagePlus, MessageCircle,
+  MoreHorizontal, Phone, Plus, RefreshCw, Reply, Repeat2, Search, Send, Settings2, Sparkles, Trash2, UserRoundPlus, Video, X,
 } from "lucide-react";
 import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -95,6 +95,15 @@ export function TwitterApp({ onClose, onNotice }: Props) {
   const [feedMode, setFeedMode] = useState<"forYou" | "following">("forYou");
   const [activeAccount, setActiveAccount] = useState("user");
   const [manageOpen, setManageOpen] = useState(false);
+  const [managementOptions, setManagementOptions] = useState<{ initialTab?: "accounts" | "characters" | "communities" | "world"; initialAccountId?: string; createCommunity?: boolean; closeOnSave?: boolean; onlyCharacters?: boolean }>({});
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [followPageOpen, setFollowPageOpen] = useState(false);
+  const [importPickerOpen, setImportPickerOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profileFeedTab, setProfileFeedTab] = useState<"posts" | "replies">("posts");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [homeCommunityId, setHomeCommunityId] = useState<string | null>(null);
+  const pullStartRef = useRef<number | null>(null);
   const [communityId, setCommunityId] = useState<string | null>(null);
   const [composeCommunityId, setComposeCommunityId] = useState<string | null>(null);
   const [trendScope, setTrendScope] = useState<"world" | "region">("world");
@@ -119,6 +128,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
   const userIdentity = resolveUserIdentity(undefined, "twitter");
   const user = { ...state.profile, name: state.profile.name === "我" ? userIdentity?.name || "我" : state.profile.name, avatarUrl: state.profile.avatarUrl || userIdentity?.avatarUrl || "" };
   const currentUserAccount = state.accounts[activeAccount] || user;
+  const openManagement = (options: typeof managementOptions = {}) => { setManagementOptions(options); setManageOpen(true); };
 
   const commit = useCallback((change: (current: TwitterState) => TwitterState) => {
     const next = change(stateRef.current);
@@ -247,7 +257,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       const created = convo;
       commit(current => ({ ...current, conversations: [created, ...current.conversations] }));
     }
-    setConversationId(convo.id); setReplyingToId(null); setPicker(null); setProfileId(null); setTab("messages");
+    setConversationId(convo.id); setReplyingToId(null); setPicker(null); setProfileId(null); setFollowPageOpen(false); setTab("messages");
   };
   const sendMessage = () => {
     const text = messageDraft.trim();
@@ -266,7 +276,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       if (kind === "reply" && !thread) throw new Error("先选择一条帖子。");
       if (kind === "dm" && !convo) throw new Error("先进入一段私信。");
       const speakingAccountId = kind === "dm" ? convo?.recipientAccountId || characterId : postAccountId;
-      const lines = await generateTwitterText({ characterId, state: snapshot, kind, targetPost: thread, conversation: convo?.messages, replyToMessage: convo?.messages.find(msg => msg.id === requestedReplyId), anonymous: convo?.mode === "anonymous", senderName: snapshot.accounts[convo?.userAccountId || ""]?.name, accountProfile: snapshot.accounts[speakingAccountId], accountKind: speakingAccountId.endsWith(":alt") ? "alternate" : speakingAccountId.startsWith("group:") ? "group" : undefined, communityName: snapshot.communities.find(c => c.id === communityId)?.name, withComments: kind === "post" && snapshot.accounts[postAccountId]?.visibility !== "protected" && snapshot.characterProfiles[postAccountId]?.visibility !== "protected" });
+      const lines = await generateTwitterText({ characterId, state: snapshot, kind, targetPost: thread, conversation: convo?.messages, replyToMessage: convo?.messages.find(msg => msg.id === requestedReplyId), anonymous: convo?.mode === "anonymous", senderName: snapshot.accounts[convo?.userAccountId || ""]?.name, accountProfile: snapshot.accounts[speakingAccountId], accountKind: speakingAccountId.endsWith(":alt") ? "alternate" : speakingAccountId.startsWith("group:") ? "group" : undefined, communityName: snapshot.communities.find(c => c.id === (communityId || homeCommunityId))?.name, withComments: kind === "post" && snapshot.accounts[postAccountId]?.visibility !== "protected" && snapshot.characterProfiles[postAccountId]?.visibility !== "protected" });
       if (kind === "post" && postAccountId.endsWith(":alt")) {
         const main = snapshot.characterProfiles[characterId] || characters.find(c => c.id === characterId);
         const publicName = main?.name?.trim() || "";
@@ -282,7 +292,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       } else {
         const id = createTwitterId();
         const actorId = kind === "post" ? postAccountId : characterId;
-        const created: TwitterPost = { id, authorId: actorId, original: lines[0].original, translated: lines[0].translated, communityId: kind === "post" ? communityId || undefined : undefined, replyToId: kind === "reply" ? commentTargetId || threadId || undefined : undefined, createdAt: now, engagement: kind === "post" ? engagementFor(id, (snapshot.accounts[actorId] || snapshot.characterProfiles[actorId])?.followers, lines.comments?.length || 0) : undefined, commentsGenerated: kind === "post" };
+        const created: TwitterPost = { id, authorId: actorId, original: lines[0].original, translated: lines[0].translated, communityId: kind === "post" ? communityId || homeCommunityId || undefined : undefined, replyToId: kind === "reply" ? commentTargetId || threadId || undefined : undefined, createdAt: now, engagement: kind === "post" ? engagementFor(id, (snapshot.accounts[actorId] || snapshot.characterProfiles[actorId])?.followers, lines.comments?.length || 0) : undefined, commentsGenerated: kind === "post" };
         const protectedPost = snapshot.accounts[actorId]?.visibility === "protected" || snapshot.characterProfiles[actorId]?.visibility === "protected";
         let initialComments = lines.comments || [];
         if (kind === "post" && !protectedPost && !initialComments.length) {
@@ -306,9 +316,9 @@ export function TwitterApp({ onClose, onNotice }: Props) {
     const translated = !!post.translated && post.translated !== post.original;
     const showOriginal = !!originalShown[post.id];
     return <article className={`${styles.post} ${post.replyToId ? styles.commentPost : ""}`} key={post.id}>
-      <button className={styles.avatarButton} onClick={() => { setProfileId(post.authorId); setThreadId(null); }}><Avatar image={author.avatarUrl} label={author.name} /></button>
+      <button className={styles.avatarButton} onClick={() => { setProfileId(post.authorId); setProfileFeedTab("posts"); setProfileMenuOpen(false); setThreadId(null); }}><Avatar image={author.avatarUrl} label={author.name} /></button>
       <div className={styles.postBody}>
-        <div className={styles.postHeader}><button onClick={() => { setProfileId(post.authorId); setThreadId(null); }}><b>{author.name}</b> <span>@{author.handle} · {timestamp(post.createdAt)}</span></button>{(post.authorId === "user" || post.authorId === "user:alt" || post.authorId.startsWith("group:")) && <button aria-label="删除帖子" onClick={() => deletePost(post.id)}><Trash2 size={16} /></button>}</div>
+        <div className={styles.postHeader}><button onClick={() => { setProfileId(post.authorId); setProfileFeedTab("posts"); setProfileMenuOpen(false); setThreadId(null); }}><b>{author.name}</b> <span>@{author.handle} · {timestamp(post.createdAt)}</span></button>{(post.authorId === "user" || post.authorId === "user:alt" || post.authorId.startsWith("group:")) && <button aria-label="删除帖子" onClick={() => deletePost(post.id)}><Trash2 size={16} /></button>}</div>
         {translated && <button className={styles.postTranslationToggle} onClick={() => setOriginalShown(current => ({ ...current, [post.id]: !current[post.id] }))}>已翻译 · {showOriginal ? "显示译文" : "显示原文"}</button>}
         <button className={styles.postText} onClick={() => { if (!compact) { setThreadId(post.replyToId || post.id); setCommentTargetId(null); setVisibleComments(4); } }}>{translated && !showOriginal ? post.translated : post.original}</button>
         {post.imageRef && <div className={styles.postImage}><StoredImage imageRef={post.imageRef} /></div>}
@@ -324,23 +334,29 @@ export function TwitterApp({ onClose, onNotice }: Props) {
   };
 
   const profile = profileId ? display(profileId) : null;
-  const filtered = posts.filter(post => (feedMode !== "following" || post.authorId.startsWith("user") || state.importedCharacterIds.some(id => post.authorId === id || post.authorId === `${id}:alt`)) && !post.communityId && (!search.trim() || `${post.original} ${display(post.authorId).name}`.toLowerCase().includes(search.toLowerCase())));
-  const selectedCommunity = state.communities.find(c => c.id === communityId);
-  const pickerCharacters = characters.filter(char => state.importedCharacterIds.includes(char.id) && (picker !== "post" || !selectedCommunity || selectedCommunity.characterIds.includes(char.id) || !!state.accounts[selectedCommunity.groupAccountId || ""]?.characterIds?.includes(char.id)));
+  const profileCharacterId = profileId ? state.importedCharacterIds.find(id => id === profileId || `${id}:alt` === profileId) : undefined;
+  const filtered = posts.filter(post => {
+    if (homeCommunityId) return post.communityId === homeCommunityId;
+    if (post.communityId) return false;
+    const mine = post.authorId.startsWith("user") || post.authorId.startsWith("group:");
+    if (feedMode === "following") return mine || (state.importedCharacterIds.includes(post.authorId) && state.following.includes(post.authorId));
+    return mine || !state.importedCharacterIds.includes(post.authorId);
+  });
+  const selectedCommunity = state.communities.find(c => c.id === (communityId || homeCommunityId));
+  const pickerCharacters = characters.filter(char => state.importedCharacterIds.includes(char.id) && (picker !== "post" || !!selectedCommunity || feedMode !== "following" || state.following.includes(char.id)) && (picker !== "post" || !selectedCommunity || selectedCommunity.characterIds.includes(char.id) || !!state.accounts[selectedCommunity.groupAccountId || ""]?.characterIds?.includes(char.id)));
 
   return <div className={styles.app}>
     <header className={styles.header}>
-      <button className={styles.headerAvatar} onClick={() => setManageOpen(true)} aria-label="账号与社区设置"><Avatar image={currentUserAccount.avatarUrl} label={currentUserAccount.name} /></button>
-      <strong>{tab === "home" ? "推特" : tab === "explore" ? "探索" : tab === "notices" ? "通知" : "私信"}</strong>
-      <button className={styles.close} onClick={onClose} aria-label="返回桌面"><X size={20} /></button>
+      <button className={styles.headerAvatar} onClick={() => setDrawerOpen(true)} aria-label="打开我的菜单"><Avatar image={currentUserAccount.avatarUrl} label={currentUserAccount.name} /></button>
+      <strong className={tab === "home" ? styles.xMark : ""}>{tab === "home" ? "𝕏" : tab === "explore" ? "搜索" : tab === "notices" ? "通知" : "私信"}</strong>
+      <button className={styles.headerPeople} onClick={() => setFollowPageOpen(true)} aria-label="已引入角色"><UserRoundPlus size={27} strokeWidth={2.2} /></button>
     </header>
 
-    <main className={styles.main}>
-      {tab === "home" && <><div className={styles.feedTabs}><button className={feedMode === "forYou" ? styles.selected : ""} onClick={() => setFeedMode("forYou")}>为你推荐</button><button className={feedMode === "following" ? styles.selected : ""} onClick={() => setFeedMode("following")}>已引入角色</button></div>
-        <div className={styles.feedTools}><span>{currentUserAccount.name} · @{currentUserAccount.handle}</span><button onClick={() => setManageOpen(true)}>账号 / 社区</button></div>
-        <div className={styles.feedGeneration}><input value={feedHint} onChange={e => setFeedHint(e.target.value)} placeholder="这次想看什么？留空随机混合" /><button onClick={() => { void refreshWorld(); }} disabled={busy}><Sparkles size={16} />{busy ? "生成中" : "刷新动态"}</button></div>
-        <div className={styles.feedTools}><button onClick={() => setPicker("post")} disabled={busy}>让角色发帖＋评论</button><button onClick={() => setManageOpen(true)}>引入已有角色</button></div>
-        {filtered.length ? filtered.map(post => renderPost(post)) : <div className={styles.empty}><b>这里还没有帖子</b><p>写下第一条动态，或让一个角色先发帖。</p></div>}
+    <main className={styles.main} onTouchStart={event => { pullStartRef.current = tab === "home" && feedMode === "forYou" && !homeCommunityId && event.currentTarget.scrollTop <= 0 ? event.touches[0].clientY : null; }} onTouchEnd={event => { const start = pullStartRef.current; pullStartRef.current = null; if (start !== null && event.changedTouches[0].clientY - start > 85) void refreshWorld(); }}>
+      {tab === "home" && <><div className={styles.homeTabs}><div className={styles.homeTabScroll}><button className={!homeCommunityId && feedMode === "forYou" ? styles.homeTabSelected : ""} onClick={() => { setHomeCommunityId(null); setFeedMode("forYou"); }}>为你推荐</button><button className={styles.tabRefresh} onClick={() => { void refreshWorld(); }} disabled={busy} title="刷新世界动态" aria-label="刷新为你推荐"><RefreshCw size={16} className={busy ? styles.spinning : ""} /></button><button className={!homeCommunityId && feedMode === "following" ? styles.homeTabSelected : ""} onClick={() => { setHomeCommunityId(null); setFeedMode("following"); }}>正在关注</button>{state.communities.map(community => <button key={community.id} className={homeCommunityId === community.id ? styles.homeTabSelected : ""} onClick={() => setHomeCommunityId(community.id)}>{community.name}</button>)}</div><button className={styles.communityAdd} aria-label="创建社群" title="创建社群" onClick={() => openManagement({ initialTab: "communities", createCommunity: true, closeOnSave: true })}><Plus size={23} /></button></div>
+        {homeCommunityId && <div className={styles.communityFeedHeading}><span>{state.communities.find(c => c.id === homeCommunityId)?.name}</span><button onClick={() => { void refreshWorld(homeCommunityId); }} disabled={busy}>刷新社群</button></div>}
+        {filtered.length ? filtered.map(post => renderPost(post)) : <div className={styles.empty}><b>{homeCommunityId ? "社群里还没有帖子" : feedMode === "following" ? "还没有关注角色的动态" : "这里还没有动态"}</b><p>{homeCommunityId ? "可以发帖或刷新社群动态。" : feedMode === "following" ? "点右上角头像＋，关注已引入的角色。" : "点“为你推荐”旁的刷新按钮，生成世界动态。"}</p></div>}
+        {!homeCommunityId && feedMode === "following" && <button className={styles.feedGenerateAction} onClick={() => setPicker("post")} disabled={busy}><Sparkles size={17} />让已引入角色发帖</button>}
       </>}
       {tab === "explore" && <><div className={styles.searchBox}><Search size={19} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索帖子、角色或话题" /></div>
         <div className={styles.feedTabs}><button className={trendScope === "world" ? styles.selected : ""} onClick={() => setTrendScope("world")}>世界趋势</button><button className={trendScope === "region" ? styles.selected : ""} onClick={() => setTrendScope("region")}>{state.regionName || "地区"}趋势</button></div>
@@ -356,14 +372,56 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       </>}
     </main>
 
-    {tab === "home" && <button className={styles.fab} onClick={() => { setComposeCommunityId(null); setCompose(true); }} aria-label="发帖">＋</button>}
+    {tab === "home" && <button className={styles.fab} onClick={() => { setComposeCommunityId(homeCommunityId); setCompose(true); }} aria-label="发帖">＋</button>}
     <nav className={styles.nav}>
-      {([["home", Home, "主页"], ["explore", Search, "探索"], ["notices", Bell, "通知"], ["messages", Mail, "私信"]] as const).map(([key, Icon, label]) => <button key={key} className={tab === key ? styles.navActive : ""} onClick={() => { setTab(key); setThreadId(null); setProfileId(null); setConversationId(null); }} aria-label={label}><Icon size={23} fill={tab === key && key !== "explore" ? "currentColor" : "none"} />{key === "notices" && state.notices.some(n => !n.read) && <span className={styles.navDot} />}</button>)}
+      {([["home", Home, "主页"], ["explore", Search, "搜索"], ["notices", Bell, "通知"], ["messages", MessageCircle, "私信"]] as const).map(([key, Icon, label]) => <button key={key} className={tab === key ? styles.navActive : ""} onClick={() => { setTab(key); setThreadId(null); setProfileId(null); setConversationId(null); }} aria-label={label}><Icon size={23} fill={tab === key && key !== "explore" ? "currentColor" : "none"} />{key === "notices" && state.notices.some(n => !n.read) && <span className={styles.navDot} />}</button>)}
     </nav>
+
+    {drawerOpen && <div className={styles.drawerScrim} onClick={() => setDrawerOpen(false)}><aside className={styles.drawer} onClick={event => event.stopPropagation()}>
+      <button className={styles.drawerIdentity} onClick={() => { setDrawerOpen(false); setProfileId(activeAccount === "user:alt" ? "user:alt" : "user"); }}><Avatar image={currentUserAccount.avatarUrl} label={currentUserAccount.name} size="large" /><b>{currentUserAccount.name}</b><span>@{currentUserAccount.handle}</span><small>{(currentUserAccount.followingCount || 0).toLocaleString()} 正在关注　{(currentUserAccount.followers || 0).toLocaleString()} 关注者</small></button>
+      <div className={styles.drawerLinks}>
+        <button onClick={() => { setDrawerOpen(false); setProfileId(activeAccount === "user:alt" ? "user:alt" : "user"); }}><Home size={22} />个人资料</button>
+        <button onClick={() => { setDrawerOpen(false); openManagement({ initialTab: "accounts", onlyCharacters: true }); }}><UserRoundPlus size={22} />角色资料</button>
+        <button onClick={() => { setDrawerOpen(false); openManagement({ initialTab: "world" }); }}><Sparkles size={22} />世界观</button>
+        <button onClick={() => { setDrawerOpen(false); setSettingsOpen(true); }}><Settings2 size={22} />设置</button>
+      </div>
+      <button className={styles.drawerExit} onClick={onClose}>退出推特</button>
+    </aside></div>}
+
+    {followPageOpen && <div className={`${styles.page} ${styles.followPage}`}><div className={styles.pageHeader}><button onClick={() => setFollowPageOpen(false)} aria-label="返回"><ArrowLeft size={23} /></button><b>关注</b><button onClick={() => setImportPickerOpen(true)} aria-label="引入角色"><UserRoundPlus size={22} /></button></div><div className={styles.followList}>
+      {characters.filter(char => state.importedCharacterIds.includes(char.id)).map(char => { const info = display(char.id); const followed = state.following.includes(char.id); return <div className={styles.followRow} key={char.id}><button className={styles.followPerson} onClick={() => { setProfileId(char.id); setProfileFeedTab("posts"); setProfileMenuOpen(false); }}><Avatar image={info.avatarUrl} label={info.name} size="large" /><span><b>{info.name}</b><small>@{info.handle}</small>{info.bio && <span className={styles.followBio}>{info.bio}</span>}</span></button><button className={followed ? styles.followingButton : styles.followButton} onClick={() => commit(current => ({ ...current, following: followed ? current.following.filter(id => id !== char.id) : [...current.following, char.id] }))}>{followed ? "正在关注" : "关注"}</button></div>; })}
+      {!state.importedCharacterIds.length && <div className={styles.empty}><b>还没有引入角色</b><p>先从小手机已有角色里选人，他们会显示在这个列表。</p></div>}
+      <button className={styles.importCharacters} onClick={() => setImportPickerOpen(true)}><Plus size={18} />引入角色</button>
+    </div></div>}
+
+    {importPickerOpen && <div className={styles.overlay} onClick={() => setImportPickerOpen(false)}><div className={styles.sheet} onClick={event => event.stopPropagation()}><div className={styles.sheetHeader}><b>从小手机引入角色</b><button onClick={() => setImportPickerOpen(false)} aria-label="关闭"><X size={20} /></button></div><div className={styles.sheetList}>{characters.filter(char => !state.importedCharacterIds.includes(char.id)).map(char => <div className={styles.importRow} key={char.id}><Avatar image={char.avatar} label={char.name} /><b>{char.name}</b><button onClick={() => commit(current => ({ ...current, importedCharacterIds: [...current.importedCharacterIds, char.id] }))}>引入</button></div>)}{characters.every(char => state.importedCharacterIds.includes(char.id)) && <p className={styles.importEmpty}>所有已有角色都已引入。</p>}</div></div></div>}
+
+    {settingsOpen && <div className={`${styles.page} ${styles.topPage}`}><div className={styles.pageHeader}><button onClick={() => setSettingsOpen(false)} aria-label="返回"><ArrowLeft size={21} /></button><b>设置</b></div><div className={styles.settingsPlaceholder}><h3>语言与翻译</h3><p>之后在这里管理翻译偏好。</p><h3>图片生成</h3><p>之后在这里管理发图方式。</p></div></div>}
 
     {threadId && <div className={`${styles.page} ${styles.topPage}`}><div className={styles.pageHeader}><button onClick={() => setThreadId(null)} aria-label="返回"><ArrowLeft size={21} /></button><b>帖子</b></div><div className={styles.pageScroll}>{currentThread && renderPost(currentThread, true)}{currentThread && <div className={styles.postMeta}>{new Date(currentThread.createdAt).toLocaleString("zh-CN")} · {countLabel(currentThread.engagement?.views || 0)} 次查看</div>}<h3 className={styles.heading}>评论</h3>{threadReplies.slice(0, visibleComments).map(({ post, depth }) => <div key={post.id} className={depth ? styles.nestedComment : ""}>{renderPost(post, true)}</div>)}{threadReplies.length > visibleComments && <button className={styles.aiReply} onClick={() => setVisibleComments(count => count + 8)}>查看更多评论</button>}<button className={styles.aiReply} onClick={() => { if (currentThread) void refreshComments(currentThread); }} disabled={busy}><Sparkles size={16} />{busy ? "刷新中" : "刷新新评论"}</button></div><form className={styles.bottomComposer} onSubmit={event => { event.preventDefault(); reply(); }}>{commentTargetId && <button type="button" className={styles.replyingTo} onClick={() => setCommentTargetId(null)}>回复 @{display(state.posts.find(p => p.id === commentTargetId)?.authorId || "user").handle} ×</button>}<input value={replyDraft} onChange={event => setReplyDraft(event.target.value)} placeholder="发布回复" /><button disabled={!replyDraft.trim()} aria-label="发送回复"><Send size={19} /></button></form></div>}
 
-    {profileId && profile && <div className={`${styles.page} ${styles.topPage}`}><div className={styles.pageHeader}><button onClick={() => setProfileId(null)} aria-label="返回"><ArrowLeft size={21} /></button><b>个人主页</b></div><div className={styles.pageScroll}><div className={styles.banner}>{profile.bannerUrl && <StoredImage imageRef={profile.bannerUrl} />}</div><div className={styles.profileIntro}><Avatar label={profile.name} image={profile.avatarUrl} size="large" />{(profileId === "user" || profileId === "user:alt" || profileId.startsWith("group:")) && <button onClick={() => setManageOpen(true)}>编辑资料</button>}</div><h2>{profile.name}</h2><div className={styles.handle}>@{profile.handle}{profile.visibility === "protected" ? " · 私密" : ""}</div><p>{profile.bio}</p><div className={styles.profileCounts}><b>{(profile.followingCount || 0).toLocaleString()}</b> 正在关注 <b>{(profile.followers || 0).toLocaleString()}</b> 关注者</div>{(characters.some(c => c.id === profileId) || (profileId.endsWith(":alt") && characters.some(c => `${c.id}:alt` === profileId))) && <button className={styles.rulesButton} onClick={() => openConversation(profileId!.replace(/:alt$/, ""), "real", profileId!)}><Mail size={16} />私信</button>}<h3 className={styles.heading}>帖子</h3>{posts.filter(p => p.authorId === profileId).map(p => renderPost(p))}</div></div>}
+    {profileId && profile && <div className={`${styles.page} ${styles.topPage}`}>
+      <div className={styles.profileTopBar}><button onClick={() => { setProfileId(null); setProfileMenuOpen(false); }} aria-label="返回"><ArrowLeft size={23} /></button><b>{profile.name}</b>{(profileCharacterId || profileId === "user" || profileId === "user:alt" || profileId.startsWith("group:")) && <button onClick={() => setProfileMenuOpen(open => !open)} aria-label="主页设置"><Settings2 size={22} /></button>}</div>
+      {profileMenuOpen && <div className={styles.profileMenu}>
+        <button onClick={() => { setProfileMenuOpen(false); openManagement({ initialAccountId: profileId, closeOnSave: true }); }}>编辑主页</button>
+        {profileCharacterId && !profileId.endsWith(":alt") && <button onClick={() => { setProfileMenuOpen(false); openManagement({ initialAccountId: `${profileCharacterId}:alt`, closeOnSave: true }); }}>设置该角色小号</button>}
+        {(profileId === "user" || profileId === "user:alt") && <button onClick={() => { setProfileMenuOpen(false); openManagement({ initialAccountId: "user:alt", closeOnSave: true }); }}>设置我的小号</button>}
+      </div>}
+      <div className={styles.pageScroll}>
+        <div className={styles.profileBanner}>{profile.bannerUrl && <StoredImage imageRef={profile.bannerUrl} />}</div>
+        <div className={styles.profileIdentity}>
+          <div className={styles.profilePortrait}><Avatar label={profile.name} image={profile.avatarUrl} size="large" /></div>
+          <h2>{profile.name}</h2>
+          <div className={styles.profileHandle}>@{profile.handle}{profile.visibility === "protected" ? " · 私密账号" : ""}</div>
+          {profile.bio && <p className={styles.profileBio}>{profile.bio}</p>}
+          {profile.createdAt && <p className={styles.profileJoined}>加入于 {new Date(profile.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "long" })}</p>}
+          <div className={styles.profileCounts}><b>{(profile.followingCount || 0).toLocaleString()}</b> 正在关注 <b>{(profile.followers || 0).toLocaleString()}</b> 关注者</div>
+          {profileCharacterId && !profileId.endsWith(":alt") ? <div className={styles.profileControls}><button className={styles.profileDm} onClick={() => openConversation(profileCharacterId, "real", profileId)}>私信</button><button className={state.following.includes(profileCharacterId) ? styles.profileFollowing : styles.profileFollow} onClick={() => commit(current => ({ ...current, following: current.following.includes(profileCharacterId) ? current.following.filter(id => id !== profileCharacterId) : [...current.following, profileCharacterId] }))}>{state.following.includes(profileCharacterId) ? "正在关注" : "关注"}</button></div> : (profileId === "user" || profileId === "user:alt" || profileId.startsWith("group:")) ? <button className={styles.profileEdit} onClick={() => openManagement({ initialAccountId: profileId, closeOnSave: true })}>编辑个人资料</button> : null}
+        </div>
+        <div className={styles.profileTabs}><button className={profileFeedTab === "posts" ? styles.profileTabSelected : ""} onClick={() => setProfileFeedTab("posts")}>帖子</button><button className={profileFeedTab === "replies" ? styles.profileTabSelected : ""} onClick={() => setProfileFeedTab("replies")}>回复</button></div>
+        {state.posts.filter(p => p.authorId === profileId && (profileFeedTab === "posts" ? !p.replyToId : !!p.replyToId)).sort((a, b) => b.createdAt - a.createdAt).map(p => renderPost(p))}
+      </div>
+    </div>}
 
     {conversationId && currentConversation && <div className={`${styles.page} ${styles.topPage}`}><div className={styles.pageHeader}><button onClick={() => { setConversationId(null); setReplyingToId(null); }} aria-label="返回"><ArrowLeft size={21} /></button><Avatar label={display(currentConversation.recipientAccountId || currentConversation.characterId).name} image={display(currentConversation.recipientAccountId || currentConversation.characterId).avatarUrl} /><b>{display(currentConversation.recipientAccountId || currentConversation.characterId).name}{currentConversation.mode === "anonymous" && <span className={styles.anon}> · 匿名</span>}</b><span className={styles.dmHeaderDecoration} aria-label="通话功能暂未接入"><Phone size={21} /><Video size={23} /></span><button onClick={() => commit(current => ({ ...current, conversations: current.conversations.map(c => c.id === conversationId ? { ...c, blocked: !c.blocked } : c) }))} title="切换屏蔽状态"><MoreHorizontal size={21} /></button></div><div className={styles.messages}>
       {currentConversation.messages.map((msg, index) => <div key={msg.id} className={styles.messageGroup}>
@@ -373,7 +431,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       {busy && <div className={styles.typing}>正在输入…</div>}
     </div>{replyingToId && currentConversation.messages.some(msg => msg.id === replyingToId) && <div className={styles.dmReplyPreview}><span>回复 {currentConversation.messages.find(msg => msg.id === replyingToId)?.role === "user" ? "你" : display(currentConversation.recipientAccountId || currentConversation.characterId).name}<small>{currentConversation.messages.find(msg => msg.id === replyingToId)?.original}</small></span><button type="button" onClick={() => setReplyingToId(null)} aria-label="取消回复"><X size={18} /></button></div>}<div className={styles.dmBottom}><button onClick={() => aiGenerate(currentConversation.characterId, "dm")} disabled={busy || currentConversation.blocked} aria-label="召唤回复" title="召唤回复"><Sparkles size={19} /></button><form onSubmit={event => { event.preventDefault(); sendMessage(); }}><input value={messageDraft} onChange={event => setMessageDraft(event.target.value)} placeholder={currentConversation.blocked ? "已屏蔽此会话" : "发送私信"} disabled={currentConversation.blocked} /><button disabled={!messageDraft.trim() || currentConversation.blocked} aria-label="发送私信"><Send size={19} /></button></form></div></div>}
 
-    {communityId && state.communities.some(c => c.id === communityId) && <div className={styles.page}><div className={styles.pageHeader}><button onClick={() => setCommunityId(null)} aria-label="返回"><ArrowLeft size={21} /></button><b>社区</b><button onClick={() => setManageOpen(true)}>设置</button></div><div className={styles.pageScroll}>{state.communities.filter(c => c.id === communityId).map(c => <div key={c.id}><div className={styles.banner}>{c.bannerUrl && <StoredImage imageRef={c.bannerUrl} />}</div><div className={styles.communityInfo}><Avatar image={c.avatarUrl} label={c.name} size="large" /><h2>{c.name}</h2><span>{c.fans.toLocaleString()} 位粉丝 · {c.characterIds.length} 位关联角色</span><p>{c.characterIds.map(id => display(id).name).join("、")}{c.groupAccountId ? ` · ${display(c.groupAccountId).name}` : ""}</p></div></div>)}<div className={styles.feedTools}><button onClick={() => { setComposeCommunityId(communityId); setCompose(true); }}>在社区发帖</button><button onClick={() => setPicker("post")} disabled={busy}>生成角色帖子＋评论</button><button onClick={() => { void refreshWorld(communityId || undefined); }} disabled={busy}>刷新社区</button></div>{posts.filter(p => p.communityId === communityId).map(p => renderPost(p))}</div></div>}
+    {communityId && state.communities.some(c => c.id === communityId) && <div className={styles.page}><div className={styles.pageHeader}><button onClick={() => setCommunityId(null)} aria-label="返回"><ArrowLeft size={21} /></button><b>社群</b><button onClick={() => openManagement({ initialTab: "communities" })}>设置</button></div><div className={styles.pageScroll}>{state.communities.filter(c => c.id === communityId).map(c => <div key={c.id}><div className={styles.banner}>{c.bannerUrl && <StoredImage imageRef={c.bannerUrl} />}</div><div className={styles.communityInfo}><Avatar image={c.avatarUrl} label={c.name} size="large" /><h2>{c.name}</h2><span>{c.fans.toLocaleString()} 位粉丝 · {c.characterIds.length} 位关联角色</span><p>{c.characterIds.map(id => display(id).name).join("、")}{c.groupAccountId ? ` · ${display(c.groupAccountId).name}` : ""}</p></div></div>)}<div className={styles.feedTools}><button onClick={() => { setComposeCommunityId(communityId); setCompose(true); }}>在社群发帖</button><button onClick={() => setPicker("post")} disabled={busy}>生成角色帖子＋评论</button><button onClick={() => { void refreshWorld(communityId || undefined); }} disabled={busy}>刷新社群</button></div>{posts.filter(p => p.communityId === communityId).map(p => renderPost(p))}</div></div>}
 
     {compose && <div className={`${styles.page} ${styles.composePage}`}><div className={styles.pageHeader}><button onClick={() => { setCompose(false); setComposeCommunityId(null); }} aria-label="取消"><X size={22} /></button><b>{composeCommunityId ? "社区发帖" : "发帖"} · {currentUserAccount.name}</b><button className={styles.publish} onClick={publish} disabled={!draft.trim() && !imageRef}>发布</button></div><div className={styles.composeBody}><Avatar image={currentUserAccount.avatarUrl} label={currentUserAccount.name} /><textarea autoFocus value={draft} onChange={event => setDraft(event.target.value)} placeholder="有什么新鲜事？" maxLength={1200} /></div>{imageRef && <div className={styles.imagePreview}><StoredImage imageRef={imageRef} /><button onClick={() => setImageRef("")} aria-label="移除图片"><X size={17} /></button></div>}<div className={styles.composeTools}><button onClick={() => fileInputRef.current?.click()}><ImagePlus size={21} />添加照片</button><input ref={fileInputRef} type="file" accept="image/*" hidden onChange={event => { void uploadImage(event); }} /></div></div>}
 
@@ -386,9 +444,9 @@ export function TwitterApp({ onClose, onNotice }: Props) {
           {!selectedCommunity && state.accounts[`${char.id}:alt`] && <button onClick={() => { void aiGenerate(char.id, "post", `${char.id}:alt`); }} disabled={busy}>小号</button>}
           {selectedCommunity?.groupAccountId && state.accounts[selectedCommunity.groupAccountId]?.characterIds?.includes(char.id) && <button onClick={() => { void aiGenerate(char.id, "post", selectedCommunity.groupAccountId!); }} disabled={busy}>团体号</button>}
         </> : <button onClick={() => { void aiGenerate(char.id, "reply"); }} disabled={busy}>选择</button>}
-      </div>) : <p>先在“账号 / 社区”里引入角色；社区帖子需要先关联该角色。</p>}</div>
+      </div>) : <p>{picker === "post" && feedMode === "following" && !selectedCommunity ? "先点右上角头像＋关注已引入的角色。" : "先在右上角头像＋里引入角色；社群帖子需要关联相应角色。"}</p>}</div>
     </div></div>}
 
-    {manageOpen && <TwitterManagement state={state} characters={characters} onChange={commit} onClose={() => setManageOpen(false)} onNotice={alert} onUserAccount={id => { setActiveAccount(id); setManageOpen(false); setProfileId(null); }} onCommunity={id => { setThreadId(null); setProfileId(null); setConversationId(null); setCommunityId(id); setManageOpen(false); }} />}
+    {manageOpen && <TwitterManagement key={`${managementOptions.initialTab || "accounts"}-${managementOptions.initialAccountId || ""}-${managementOptions.createCommunity || ""}`} {...managementOptions} state={state} characters={characters} onChange={commit} onClose={() => setManageOpen(false)} onNotice={alert} onUserAccount={id => { setActiveAccount(id); setManageOpen(false); setProfileId(null); }} onCommunity={id => { setThreadId(null); setProfileId(null); setConversationId(null); setHomeCommunityId(id); setTab("home"); setManageOpen(false); }} />}
   </div>;
 }
