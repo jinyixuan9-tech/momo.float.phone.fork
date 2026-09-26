@@ -70,7 +70,7 @@ export async function generateTwitterText(input: {
   });
   const publicRule = "推特的帖子和回复是公开的。你可以有私下记忆，但不得随意公开地下关系、私人聊天内容、昵称或未公开身份。";
   const stateRule = input.state.worldRules.trim() ? `补充世界观：${input.state.worldRules.slice(0, 2500)}` : "";
-  const shared = "以角色平常使用的语言写 original；如果不是中文，translated 给准确自然的简体中文译文，中文原文则两字段相同。只输出 JSON，不要解释。";
+  const shared = "以角色平常使用的语言写 original；如果不是中文，translated 给准确自然的简体中文译文，中文原文则两字段相同。原文中的 #话题标签保留原文，不翻译、不改写标签。只输出 JSON，不要解释。";
   let instruction: string;
   if (input.kind === "post") {
     const recent = input.state.posts.filter(p => !p.replyToId && isPublicTwitterPost(input.state, p)).slice(-10).map(p => `${p.authorId === "user" ? input.state.profile.name : p.authorId === character.id ? character.name : "其他账号"}：${p.original}`).join("\n");

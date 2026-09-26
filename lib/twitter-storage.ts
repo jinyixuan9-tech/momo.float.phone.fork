@@ -16,6 +16,7 @@ export type TwitterTrend = { id: string; label: string; scope: "world" | "region
 export type TwitterCommunity = {
   id: string; name: string; avatarUrl?: string; bannerUrl?: string;
   fans: number; characterIds: string[]; groupAccountId?: string;
+  description?: string; manualCharacters?: string[];
   includeUserPersona: boolean; createdAt: number;
 };
 export type TwitterEngagement = { likes: number; reposts: number; views: number; comments: number };
@@ -45,6 +46,7 @@ export type TwitterConversation = {
   messages: TwitterMessage[];
   createdAt: number;
   blocked?: boolean;
+  stranger?: boolean;
 };
 export type TwitterNotice = {
   id: string;
