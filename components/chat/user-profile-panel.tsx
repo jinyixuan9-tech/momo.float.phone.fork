@@ -38,7 +38,7 @@ import { loadTimedWakeSchedules, makeTimedWakeId, removeTimedWakeSchedule, saveT
 import { IDLE_RECONNECT_MAX_CONSECUTIVE, loadIdleReconnectRules, removeIdleReconnectRule, upsertIdleReconnectRule, type IdleReconnectRule } from "@/lib/idle-reconnect-storage";
 import { addChatContact, createOrGetSession } from "@/lib/chat-storage";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
-import { formatWalletAmount, getWalletBalance, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
+import { formatCurrencyAmount, getWalletAssetEstimate, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
     Loader2,
@@ -175,8 +175,8 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     const [walletSummary, setWalletSummary] = useState(() => {
         const wallet = loadWalletState();
         return {
-            totalLabel: formatWalletAmount(getWalletBalance(wallet)),
-            cardCount: wallet.cards.length,
+            totalLabel: formatCurrencyAmount(getWalletAssetEstimate(wallet), wallet.displayCurrency),
+            cardCount: 1 + Number(Boolean(wallet.creditEnabled)),
         };
     });
 
@@ -192,8 +192,8 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
         }
         const wallet = loadWalletState();
         setWalletSummary({
-            totalLabel: formatWalletAmount(getWalletBalance(wallet)),
-            cardCount: wallet.cards.length,
+            totalLabel: formatCurrencyAmount(getWalletAssetEstimate(wallet), wallet.displayCurrency),
+            cardCount: 1 + Number(Boolean(wallet.creditEnabled)),
         });
 
         // Fetch dynamic user stats
@@ -237,8 +237,8 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
         const syncWallet = () => {
             const wallet = loadWalletState();
             setWalletSummary({
-                totalLabel: formatWalletAmount(getWalletBalance(wallet)),
-                cardCount: wallet.cards.length,
+                totalLabel: formatCurrencyAmount(getWalletAssetEstimate(wallet), wallet.displayCurrency),
+                cardCount: 1 + Number(Boolean(wallet.creditEnabled)),
             });
         };
         window.addEventListener(WALLET_UPDATED_EVENT, syncWallet);

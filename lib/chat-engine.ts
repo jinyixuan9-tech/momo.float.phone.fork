@@ -3,6 +3,7 @@
 import { createSseJsonParser } from "./sse-json";
 import { maybeAppendShortcutCapability } from "./offline-shortcut-capability";
 import { loadCharacters } from "./character-storage";
+import { loadWalletState, formatCurrencyAmount, getWalletCurrencyBalance, getWalletVisibleCurrencies } from "./wallet-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
 import { emitChatPluginEvent, runChatPluginTransform } from "./chat-plugin-hooks";
 import { buildChatPluginPromptFragments } from "./chat-plugin-storage";
@@ -1982,6 +1983,8 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
+    const senderWallet = loadWalletState(character.id);
+    llmMessages.push({ role: "system", content: `如果自然聊天中发送转账或红包，使用角色的钱包设定：默认结算币种 ${senderWallet.primaryCurrency}，其他常用币种 ${(senderWallet.commonCurrencies || []).join("、") || "无"}。发送时务必在富媒体金额中写出实际币种 ISO（例如 [转账:KRW 1000:留言]），金额与币种必须对应真实扣款，绝不省略 ISO 或默认假定人民币。角色当前可用资金：${getWalletVisibleCurrencies(senderWallet).map(currency => `${currency} ${formatCurrencyAmount(getWalletCurrencyBalance(senderWallet, currency), currency)}`).join("；")}。币种随人物所在地和场景选择，不得超过可用余额。` });
     if (options?.callFormatInstruction) {
         llmMessages.push({ role: "system", content: options.callFormatInstruction });
     }

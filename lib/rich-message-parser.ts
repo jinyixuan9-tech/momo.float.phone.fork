@@ -56,9 +56,9 @@ export function isInvisibleOrWhitespaceOnly(text: string): boolean {
 }
 
 const C = "\\s*[：:]\\s*"; // half-width or full-width colon, allowing surrounding spaces
-const MONEY = "((?:CNY|KRW|JPY|USD|[¥￥₩$])?\\s*[\\d,]+(?:\\.\\d+)?)";
+const MONEY = "((?:CNY|KRW|JPY|USD|EUR|HKD|TWD|AUD|HK\\$|NT\\$|A\\$|[¥￥₩$€])?\\s*[\\d,]+(?:\\.\\d+)?)";
 function parseMoneyMarker(value: string) {
-    const currency = /KRW|₩/i.test(value) ? "KRW" : /JPY/i.test(value) ? "JPY" : /USD|\$/i.test(value) ? "USD" : "CNY";
+    const currency = /KRW|₩/i.test(value) ? "KRW" : /JPY/i.test(value) ? "JPY" : /EUR|€/i.test(value) ? "EUR" : /HKD|HK\$/i.test(value) ? "HKD" : /TWD|NT\$/i.test(value) ? "TWD" : /AUD|A\$/i.test(value) ? "AUD" : /USD|\$/i.test(value) ? "USD" : "CNY";
     return { amount: Number(value.replace(/[^\d.]/g, "")), currency } as const;
 }
 

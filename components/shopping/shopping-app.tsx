@@ -53,6 +53,7 @@ import {
   formatWalletAmount,
   getWalletBalance,
   loadWalletState,
+  WALLET_CURRENCIES,
   payWithWalletAccount,
   WALLET_BALANCE_ACCOUNT_ID,
   WALLET_UPDATED_EVENT,
@@ -521,7 +522,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     const syncWallet = () => {
       const next = loadWalletState();
       setWalletState(next);
-      setSelectedPaymentSourceId(current => current === WALLET_BALANCE_ACCOUNT_ID || next.cards.some(card => card.id === current)
+      setSelectedPaymentSourceId(current => current === WALLET_BALANCE_ACCOUNT_ID || (current === "wallet_credit_card" && next.creditEnabled)
         ? current
         : WALLET_BALANCE_ACCOUNT_ID);
     };
@@ -565,30 +566,13 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   const shippingFee = deliveryEstimate ? exchangeWalletAmount(deliveryEstimate.fee, "CNY", cartCurrency) : 0;
   const checkoutTotal = cartTotals.totalPayment + shippingFee;
   const warehouseGifts = selectedTab === "items" ? loadDeliveredShoppingGifts() : [];
-  const selectedPaymentSource = useMemo(
-    () => selectedPaymentSourceId === WALLET_BALANCE_ACCOUNT_ID
-      ? {
-          id: WALLET_BALANCE_ACCOUNT_ID,
-          title: "余额支付",
-          balance: getWalletBalance(walletState),
-          description: "红包、转账也默认使用余额",
-        }
-      : (() => {
-          const card = walletState.cards.find(item => item.id === selectedPaymentSourceId) ?? walletState.cards[0];
-          return card
-            ? {
-                id: card.id,
-                title: card.title,
-                balance: card.balance,
-                description: `${getWalletCardDisplayNumber(card.maskedNumber)} · 银行卡`,
-              }
-            : null;
-        })(),
-    [selectedPaymentSourceId, walletState],
-  );
-  const selectedPaymentSourceCanPay = Boolean(selectedPaymentSource && (selectedPaymentSource.id === WALLET_BALANCE_ACCOUNT_ID
-    ? (cartCurrency === "CNY" ? walletState.balance : getWalletCurrencyBalance(walletState, cartCurrency)) >= checkoutTotal || (walletState.primaryCurrency === "CNY" ? walletState.balance : getWalletCurrencyBalance(walletState, walletState.primaryCurrency)) >= exchangeWalletAmount(checkoutTotal, cartCurrency, walletState.primaryCurrency)
-    : selectedPaymentSource.balance >= exchangeWalletAmount(checkoutTotal, cartCurrency, "CNY")));
+  const selectedPaymentSource = useMemo(() => selectedPaymentSourceId === "wallet_credit_card" && walletState.creditEnabled
+    ? { id: "wallet_credit_card", title: "信用卡", balance: 0, description: "跨币种消费，之后从储蓄卡还款" }
+    : { id: WALLET_BALANCE_ACCOUNT_ID, title: "储蓄卡", balance: getWalletCurrencyBalance(walletState, cartCurrency), description: `${walletState.cards[0]?.bankLabel || "储蓄卡"} · ${walletState.cards[0]?.maskedNumber || ""}` },
+  [selectedPaymentSourceId, walletState, cartCurrency]);
+  const selectedPaymentSourceCanPay = selectedPaymentSource.id === "wallet_credit_card" ||
+    getWalletCurrencyBalance(walletState, cartCurrency) >= checkoutTotal ||
+    WALLET_CURRENCIES.some(currency => getWalletCurrencyBalance(walletState, currency) >= exchangeWalletAmount(checkoutTotal, cartCurrency, currency));
 
   const savedIds = useMemo(() => new Set(state.savedItems.map(item => item.id)), [state.savedItems]);
   const cartIds = useMemo(() => new Set(state.cartItems.map(item => item.id)), [state.cartItems]);
@@ -1051,7 +1035,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
       accountId: paymentSource.id,
       amount: checkoutTotal,
       currency: cartCurrency,
-      sourceCurrency: paymentSource.id === WALLET_BALANCE_ACCOUNT_ID ? undefined : "CNY",
+      credit: paymentSource.id === "wallet_credit_card",
       title: "购物付款",
       detail: `购物订单：${order.summary}`,
       category: "购物",
@@ -1066,7 +1050,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     const paidOrder: ShoppingOrder = {
       ...order,
       paymentCardId: paymentSource.id,
-      paymentCardLabel: paymentSource.id === WALLET_BALANCE_ACCOUNT_ID ? "余额支付" : `${paymentSource.title}（${paymentSource.description.replace(" · 银行卡", "")}）`,
+      paymentCardLabel: paymentSource.title,
       paymentTransactionId: paymentResult.transaction.id,
       paidAt: paymentResult.transaction.createdAt,
     };
@@ -2018,13 +2002,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
               <CreditCard size={24} color="#ff6b00" />
             </div>
 
-            {selectedPaymentSource && cartCurrency !== "CNY" && <p style={{ fontSize: 11, color: "#777", margin: "-4px 2px 12px" }}>
-              {selectedPaymentSource.id !== WALLET_BALANCE_ACCOUNT_ID
-                ? `银行卡实际扣款约 ${formatCurrencyAmount(exchangeWalletAmount(checkoutTotal, cartCurrency, "CNY"), "CNY")}`
-                : getWalletCurrencyBalance(walletState, cartCurrency) >= checkoutTotal
-                  ? `优先使用 ${cartCurrency} 余额付款`
-                  : `余额不足，按参考汇率从主币种 ${walletState.primaryCurrency} 扣约 ${formatCurrencyAmount(exchangeWalletAmount(checkoutTotal, cartCurrency, walletState.primaryCurrency), walletState.primaryCurrency)}`}
-            </p>}
+            {selectedPaymentSource.id !== "wallet_credit_card" && cartCurrency !== walletState.primaryCurrency && <p style={{ fontSize: 11, color: "#777", margin: "-4px 2px 12px" }}>优先扣除 {cartCurrency}，不足时按参考汇率由默认币种 {walletState.primaryCurrency} 支付。</p>}
 
             <div style={{ display: "grid", gap: 9, marginBottom: 14, fontSize: 12 }}>
               <label>购买给谁<select className="ui-input" value={recipientId} onChange={event => { setRecipientId(event.target.value); setRecipientAddressId(""); }}><option value="">买给自己（到货后进入我的物品）</option>{loadCharacters().map(person => <option key={person.id} value={person.id}>直接寄给 {person.name}</option>)}</select></label>
@@ -2035,24 +2013,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
 
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "42vh", overflowY: "auto", paddingRight: "2px" }}>
               {[
-                {
-                  id: WALLET_BALANCE_ACCOUNT_ID,
-                  title: "余额支付",
-                  description: "红包、转账默认使用余额",
-                  balance: cartCurrency === "CNY" ? walletState.balance : getWalletCurrencyBalance(walletState, cartCurrency),
-                  icon: <CreditCard size={20} />,
-                },
-                ...walletState.cards.map(card => ({
-                  id: card.id,
-                  title: card.title,
-                  description: `${getWalletCardDisplayNumber(card.maskedNumber)} · 银行卡`,
-                  balance: card.balance,
-                  icon: <WalletCards size={20} />,
-                })),
+                { id: WALLET_BALANCE_ACCOUNT_ID, title: "储蓄卡", description: `${walletState.cards[0]?.bankLabel || "储蓄卡"} · ${walletState.cards[0]?.maskedNumber || ""}`, balance: getWalletCurrencyBalance(walletState, cartCurrency), icon: <WalletCards size={20} /> },
+                ...(walletState.creditEnabled ? [{ id: "wallet_credit_card", title: "信用卡", description: "跨币种消费，之后还款", balance: 0, icon: <CreditCard size={20} /> }] : []),
               ].map(source => {
                 const active = selectedPaymentSource?.id === source.id;
-                const required = source.id === WALLET_BALANCE_ACCOUNT_ID ? checkoutTotal : exchangeWalletAmount(checkoutTotal, cartCurrency, "CNY");
-                const insufficient = source.balance < required && !(source.id === WALLET_BALANCE_ACCOUNT_ID && (walletState.primaryCurrency === "CNY" ? walletState.balance : getWalletCurrencyBalance(walletState, walletState.primaryCurrency)) >= exchangeWalletAmount(checkoutTotal, cartCurrency, walletState.primaryCurrency));
+                const insufficient = source.id !== "wallet_credit_card" && !selectedPaymentSourceCanPay;
                 return (
                   <button
                     key={source.id}
@@ -2079,7 +2044,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                     </div>
                     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "3px" }}>
                       <strong style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "#222" }}>{source.title}</strong>
-                      <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "#888" }}>{source.description} · 可用 {formatCurrencyAmount(source.balance, source.id === WALLET_BALANCE_ACCOUNT_ID ? cartCurrency : "CNY")}</span>
+                      <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "#888" }}>{source.description} · 可用 {source.id === "wallet_credit_card" ? "按币种记欠款" : formatCurrencyAmount(source.balance, cartCurrency)}</span>
                     </div>
                     {insufficient ? (
                       <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "#ef4444", fontWeight: 700, whiteSpace: "nowrap" }}>余额不足</span>

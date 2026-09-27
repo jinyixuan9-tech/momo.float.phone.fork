@@ -1,3 +1,4 @@
+import type { WalletCurrency } from "./wallet-types";
 // lib/chat-storage.ts
 
 import {
@@ -163,7 +164,7 @@ export type ChatMessage = {
         walletTransactionId?: string; // 发送红包/转账时扣款流水
         walletRefundTransactionId?: string; // 被拒收/退回时退款流水
         walletDepositTransactionId?: string; // 领取红包/转账时入账流水
-        currency?: "CNY" | "KRW" | "JPY" | "USD";
+        currency?: WalletCurrency;
         shoppingGiftId?: string; // 购物订单中的可送礼物实例 ID
         giftOrderId?: string;    // 礼物来源订单 ID
         giftItemId?: string;     // 礼物来源商品 ID

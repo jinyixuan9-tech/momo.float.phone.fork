@@ -1,5 +1,7 @@
 "use client";
 
+import type { WalletCurrency } from "@/lib/wallet-types";
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
 import { isAndroidBrowser } from "./voice-input-platform";
@@ -96,7 +98,7 @@ export function PhotoInputModal({ onSend, onClose }: PhotoInputModalProps) {
 interface RedPacketModalProps {
     mode: "red_packet" | "transfer";
     isGroup?: boolean;
-    onSend: (amount: number, label: string, count?: number, currency?: "CNY" | "KRW" | "JPY" | "USD") => void;
+    onSend: (amount: number, label: string, count?: number, currency?: WalletCurrency) => void;
     onClose: () => void;
 }
 
@@ -104,7 +106,7 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
     const [amount, setAmount] = useState("");
     const [label, setLabel] = useState("");
     const [count, setCount] = useState("1");
-    const [currency, setCurrency] = useState<"CNY" | "KRW" | "JPY" | "USD">(() => loadWalletState().primaryCurrency);
+    const [currency, setCurrency] = useState<WalletCurrency>(() => loadWalletState().primaryCurrency);
 
     const isRedPacket = mode === "red_packet";
     const title = isRedPacket ? "发红包" : "转账";
@@ -137,7 +139,7 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
                 <div className="p-5 flex flex-col gap-3.5">
                     <label className="flex items-center justify-between ts-12">币种
                         <select className="ui-input" value={currency} onChange={e => setCurrency(e.target.value as typeof currency)}>
-                            <option value="CNY">人民币 CNY</option><option value="KRW">韩元 KRW</option><option value="JPY">日元 JPY</option><option value="USD">美元 USD</option>
+                            <option value="CNY">人民币 CNY</option><option value="KRW">韩元 KRW</option><option value="JPY">日元 JPY</option><option value="USD">美元 USD</option><option value="EUR">欧元 EUR</option><option value="HKD">港币 HKD</option><option value="TWD">新台币 TWD</option><option value="AUD">澳元 AUD</option>
                         </select>
                     </label>
                     <div>
@@ -146,7 +148,7 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
                             <span
                                 className="ts-24 font-bold"
                                 style={{ color }}
-                            >{{ CNY: "¥", KRW: "₩", JPY: "¥", USD: "$" }[currency]}</span>
+                            >{{ CNY: "¥", KRW: "₩", JPY: "¥", USD: "$", EUR: "€", HKD: "HK$", TWD: "NT$", AUD: "A$" }[currency]}</span>
                             <input
                                 value={amount}
                                 onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}

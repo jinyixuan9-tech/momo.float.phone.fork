@@ -1,3 +1,4 @@
+import type { WalletCurrency } from "./wallet-types";
 export type CheckPhoneAppId =
   | "phone"
   | "messages"
@@ -271,7 +272,7 @@ export type CheckPhoneShoppingProduct = {
   detail: string;
   previewIcon: string;
   tone: CheckPhoneShoppingTone;
-  currency?: "CNY" | "KRW" | "JPY" | "USD";
+  currency?: WalletCurrency;
 };
 
 export type CheckPhoneShoppingCartItem = CheckPhoneShoppingProduct & {
@@ -320,7 +321,7 @@ export type CheckPhoneShoppingOrder = {
   paymentRequestedAt?: string;
   paymentDeclinedAt?: string;
   characterPaidAt?: string;
-  currency?: "CNY" | "KRW" | "JPY" | "USD";
+  currency?: WalletCurrency;
   recipientCharacterId?: string;
   recipientAddressId?: string;
   recipientName?: string;
