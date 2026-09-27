@@ -90,3 +90,10 @@ export function togglePhoneFavorite(callId: string): void {
   call.favorite = !call.favorite;
   savePhoneState(state);
 }
+export function removePhoneCall(callId: string): void {
+  const state = loadPhoneState();
+  const nextCalls = state.calls.filter(c => c.id !== callId);
+  if (nextCalls.length === state.calls.length) return;
+  state.calls = nextCalls;
+  savePhoneState(state);
+}
