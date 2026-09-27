@@ -65,6 +65,7 @@ export type CheckPhoneNotesPayload = {
 export type CheckPhoneMessageBubble = {
   id: string;
   text: string;
+  translated?: string;
   timeLabel: string;
   direction: "incoming" | "outgoing";
 };
@@ -270,6 +271,7 @@ export type CheckPhoneShoppingProduct = {
   detail: string;
   previewIcon: string;
   tone: CheckPhoneShoppingTone;
+  currency?: "CNY" | "KRW" | "JPY" | "USD";
 };
 
 export type CheckPhoneShoppingCartItem = CheckPhoneShoppingProduct & {
@@ -318,6 +320,13 @@ export type CheckPhoneShoppingOrder = {
   paymentRequestedAt?: string;
   paymentDeclinedAt?: string;
   characterPaidAt?: string;
+  currency?: "CNY" | "KRW" | "JPY" | "USD";
+  recipientCharacterId?: string;
+  recipientAddressId?: string;
+  recipientName?: string;
+  recipientAddressLabel?: string;
+  notifyRecipient?: boolean;
+  deliveryNoticeSentAt?: string;
 };
 
 export type CheckPhoneShoppingPayload = {

@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
 import { isAndroidBrowser } from "./voice-input-platform";
+import { loadWalletState } from "@/lib/wallet-storage";
 
 // ── Photo Input Modal ─────────────────────────────
 
@@ -95,7 +96,7 @@ export function PhotoInputModal({ onSend, onClose }: PhotoInputModalProps) {
 interface RedPacketModalProps {
     mode: "red_packet" | "transfer";
     isGroup?: boolean;
-    onSend: (amount: number, label: string, count?: number) => void;
+    onSend: (amount: number, label: string, count?: number, currency?: "CNY" | "KRW" | "JPY" | "USD") => void;
     onClose: () => void;
 }
 
@@ -103,6 +104,7 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
     const [amount, setAmount] = useState("");
     const [label, setLabel] = useState("");
     const [count, setCount] = useState("1");
+    const [currency, setCurrency] = useState<"CNY" | "KRW" | "JPY" | "USD">(() => loadWalletState().primaryCurrency);
 
     const isRedPacket = mode === "red_packet";
     const title = isRedPacket ? "发红包" : "转账";
@@ -111,10 +113,11 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
     const color = isRedPacket ? "var(--c-redpacket)" : "var(--c-transfer)";
 
     const handleSend = () => {
-        const num = parseFloat(amount);
+        const parsed = parseFloat(amount);
+        const num = currency === "KRW" || currency === "JPY" ? Math.round(parsed) : Math.round(parsed * 100) / 100;
         if (!num || num <= 0) return;
         const cnt = isRedPacket ? (isGroup ? Math.max(1, parseInt(count, 10) || 1) : 1) : undefined;
-        onSend(num, label.trim() || defaultLabel, cnt);
+        onSend(num, label.trim() || defaultLabel, cnt, currency);
     };
 
     return (
@@ -132,13 +135,18 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
                     <div className="text-white ts-16 font-semibold">{title}</div>
                 </div>
                 <div className="p-5 flex flex-col gap-3.5">
+                    <label className="flex items-center justify-between ts-12">币种
+                        <select className="ui-input" value={currency} onChange={e => setCurrency(e.target.value as typeof currency)}>
+                            <option value="CNY">人民币 CNY</option><option value="KRW">韩元 KRW</option><option value="JPY">日元 JPY</option><option value="USD">美元 USD</option>
+                        </select>
+                    </label>
                     <div>
                         <div className="ts-12 text-[var(--c-icon)] mb-1.5">金额</div>
                         <div className="flex items-center gap-2">
                             <span
                                 className="ts-24 font-bold"
                                 style={{ color }}
-                            >¥</span>
+                            >{{ CNY: "¥", KRW: "₩", JPY: "¥", USD: "$" }[currency]}</span>
                             <input
                                 value={amount}
                                 onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}

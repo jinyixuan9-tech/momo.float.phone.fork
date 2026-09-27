@@ -39,7 +39,7 @@ function ManagedImage({ imageRef }: { imageRef?: string }) {
   }, [imageRef]);
   return url ? <img src={url} alt="" /> : null;
 }
-function AccountPortrait({ imageRef, name }: { imageRef?: string; name: string }) {
+function AccountPortrait({ imageRef, name }: { imageRef?: string | null; name: string }) {
   return <span className={styles.manageRowAvatar}>{imageRef ? <ManagedImage imageRef={imageRef} /> : name.slice(0, 1) || "?"}</span>;
 }
 

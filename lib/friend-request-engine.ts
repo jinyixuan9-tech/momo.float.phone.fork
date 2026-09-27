@@ -55,6 +55,13 @@ export async function triggerDeleteFriendReaction(characterId: string): Promise<
     await generateAndStoreFriendRequest(session, characterId, 1);
 }
 
+export async function triggerBlacklistReaction(characterId: string): Promise<void> {
+    const character = loadCharacters().find(item => item.id === characterId);
+    const session = loadChatSessions().find(item => !item.isGroup && item.contactId === characterId);
+    if (!character || !session || !session.isBlacklisted) return;
+    await generateAndStoreFriendRequest(session, characterId, 1);
+}
+
 /**
  * Trigger AI reaction after user rejects a friend request.
  * If round < MAX_ROUNDS, the AI gets another chance.

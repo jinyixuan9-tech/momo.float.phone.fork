@@ -56,6 +56,11 @@ export function isInvisibleOrWhitespaceOnly(text: string): boolean {
 }
 
 const C = "\\s*[：:]\\s*"; // half-width or full-width colon, allowing surrounding spaces
+const MONEY = "((?:CNY|KRW|JPY|USD|[¥￥₩$])?\\s*[\\d,]+(?:\\.\\d+)?)";
+function parseMoneyMarker(value: string) {
+    const currency = /KRW|₩/i.test(value) ? "KRW" : /JPY/i.test(value) ? "JPY" : /USD|\$/i.test(value) ? "USD" : "CNY";
+    return { amount: Number(value.replace(/[^\d.]/g, "")), currency } as const;
+}
 
 function parseMuteMinutes(num?: string, unit?: string): number {
     const n = parseInt(num || "", 10);
@@ -71,30 +76,30 @@ const RICH_PATTERNS: {
 }[] = [
     {
         // 3段格式：[红包:金额:个数:留言]
-        regex: new RegExp(`\\[红包${C}(\\d+(?:\\.\\d+)?)${C}(\\d+)${C}([^\\]]*)\\]`),
+        regex: new RegExp(`\\[红包${C}${MONEY}${C}(\\d+)${C}([^\\]]*)\\]`),
         build: (m) => ({
             content: "",
             mediaType: "red_packet",
-            mediaData: { amount: parseFloat(m[1]), count: parseInt(m[2], 10), label: m[3] || "恭喜发财", status: "pending" },
+            mediaData: { ...parseMoneyMarker(m[1]), count: parseInt(m[2], 10), label: m[3] || "恭喜发财", status: "pending" },
         }),
     },
     {
         // 2段格式（向后兼容）：[红包:金额:留言]
-        regex: new RegExp(`\\[红包${C}(\\d+(?:\\.\\d+)?)${C}([^\\]]*)\\]`),
+        regex: new RegExp(`\\[红包${C}${MONEY}${C}([^\\]]*)\\]`),
         build: (m) => ({
             content: "",
             mediaType: "red_packet",
-            mediaData: { amount: parseFloat(m[1]), count: 1, label: m[2] || "恭喜发财", status: "pending" },
+            mediaData: { ...parseMoneyMarker(m[1]), count: 1, label: m[2] || "恭喜发财", status: "pending" },
         }),
     },
     {
         // 兼容两种格式：[转账:金额:留言] (1:1) 和 [转账:金额:留言:转账人:收款人] (群聊)
-        regex: /\[转账[：:](\d+(?:\.\d+)?)[：:]([^\]：:]*?)(?:[：:]([^\]：:]*?)[：:]([^\]]*?))?\]/,
+        regex: new RegExp(`\\[转账${C}${MONEY}${C}([^\\]：:]*?)(?:${C}([^\\]：:]*?)${C}([^\\]]*?))?\\]`),
         build: (m) => ({
             content: "",
             mediaType: "transfer",
             mediaData: {
-                amount: parseFloat(m[1]),
+                ...parseMoneyMarker(m[1]),
                 label: m[2]?.trim() || "转账",
                 status: "pending" as const,
                 senderName: m[3]?.trim() || "",

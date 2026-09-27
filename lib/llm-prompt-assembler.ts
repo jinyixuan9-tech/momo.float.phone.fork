@@ -1147,19 +1147,20 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
 /** Format a rich-media message as bracket text for LLM context. */
 export function formatRichMediaForHistory(msg: ChatMessage, userName: string, charName: string, isGroup?: boolean): string {
     const d = msg.mediaData;
+    const money = `${d?.currency && d.currency !== "CNY" ? `${d.currency} ` : ""}${d?.amount ?? 0}`;
     switch (msg.mediaType) {
         case "red_packet": {
             const cnt = d?.count;
             return isGroup && cnt && cnt > 1
-                ? `[红包:${d?.amount ?? 0}:${cnt}:${d?.label ?? "恭喜发财"}]`
-                : `[红包:${d?.amount ?? 0}:${d?.label ?? "恭喜发财"}]`;
+                ? `[红包:${money}:${cnt}:${d?.label ?? "恭喜发财"}]`
+                : `[红包:${money}:${d?.label ?? "恭喜发财"}]`;
         }
         case "transfer": {
             const sn = d?.senderName;
             const rn = d?.recipientName;
             return isGroup && sn && rn
-                ? `[转账:${d?.amount ?? 0}:${d?.label ?? "转账"}:${sn}:${rn}]`
-                : `[转账:${d?.amount ?? 0}:${d?.label ?? "转账"}]`;
+                ? `[转账:${money}:${d?.label ?? "转账"}:${sn}:${rn}]`
+                : `[转账:${money}:${d?.label ?? "转账"}]`;
         }
         case "gift": {
             const giftName = d?.giftName || d?.label || "礼物";

@@ -1,15 +1,34 @@
-import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import type { WalletAccountType, WalletCard, WalletPaymentInput, WalletPaymentResult, WalletState, WalletTransaction } from "./wallet-types";
+import { kvGet, kvSet, registerDynamicPrefix, registerKvMigration } from "./kv-db";
+import type { WalletAccountType, WalletCard, WalletCurrency, WalletPaymentInput, WalletPaymentResult, WalletState, WalletTransaction } from "./wallet-types";
 
 const WALLET_STATE_KEY = "ai_phone_wallet_state_v1";
 const LEGACY_DEFAULT_WALLET_CARD_ID = "wallet_default_balance_card";
 const DEFAULT_WALLET_BANK_CARD_ID = "wallet_default_bank_card";
 const DEFAULT_WALLET_BALANCE = 10000;
+const CHARACTER_WALLET_PREFIX = "ai_phone_character_wallet_v1_";
+export const WALLET_CURRENCIES: WalletCurrency[] = ["CNY", "KRW", "JPY", "USD"];
+// Reference rates in CNY, deliberately fixed and shown as estimates in the UI.
+export const WALLET_REFERENCE_RATES: Record<WalletCurrency, number> = { CNY: 1, KRW: 0.0052, JPY: 0.047, USD: 7.1 };
+export function walletCurrency(value: unknown): WalletCurrency {
+  return WALLET_CURRENCIES.includes(value as WalletCurrency) ? value as WalletCurrency : "CNY";
+}
+export function roundWalletMoney(value: number, currency: WalletCurrency): number {
+  return Math.round(value * (currency === "KRW" || currency === "JPY" ? 1 : 100)) / (currency === "KRW" || currency === "JPY" ? 1 : 100);
+}
+export function exchangeWalletAmount(amount: number, from: WalletCurrency, to: WalletCurrency): number {
+  return roundWalletMoney(amount * WALLET_REFERENCE_RATES[from] / WALLET_REFERENCE_RATES[to], to);
+}
+export function formatCurrencyAmount(amount: number, currency: WalletCurrency): string {
+  const symbol = { CNY: "¥", KRW: "₩", JPY: "¥", USD: "$" }[currency];
+  const formatted = Math.abs(amount).toLocaleString("zh-CN", { minimumFractionDigits: currency === "CNY" || currency === "USD" ? 2 : 0, maximumFractionDigits: currency === "CNY" || currency === "USD" ? 2 : 0 });
+  return `${amount < 0 ? "-" : ""}${symbol}${formatted}${currency === "JPY" ? " JPY" : ""}`;
+}
 
 export const WALLET_BALANCE_ACCOUNT_ID = "wallet_balance_account";
 export const WALLET_UPDATED_EVENT = "wallet-state-updated";
 
 registerKvMigration(WALLET_STATE_KEY);
+registerDynamicPrefix(CHARACTER_WALLET_PREFIX);
 
 function cleanText(value: unknown, maxLength: number): string {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, maxLength);
@@ -105,6 +124,11 @@ function normalizeTransaction(value: unknown): WalletTransaction | null {
     detail: cleanText(record.detail, 400),
     balanceAfter: normalizeMoney(record.balanceAfter),
     relatedOrderId: cleanText(record.relatedOrderId, 120) || undefined,
+    currency: walletCurrency(record.currency),
+    originalCurrency: record.originalCurrency ? walletCurrency(record.originalCurrency) : undefined,
+    originalAmount: record.originalAmount == null ? undefined : normalizeMoney(record.originalAmount),
+    exchangeRate: typeof record.exchangeRate === "number" && Number.isFinite(record.exchangeRate) ? record.exchangeRate : undefined,
+    relatedMessageId: cleanText(record.relatedMessageId, 120) || undefined,
   };
 }
 
@@ -119,9 +143,16 @@ function normalizeWalletState(state: WalletState): WalletState {
       isDefault: card.id === defaultCardId,
       balance: normalizeMoney(card.balance),
     })),
-    transactions: state.transactions.slice(0, 300),
+    transactions: state.transactions,
     defaultCardId,
     updatedAt: state.updatedAt || now,
+    currencyBalances: Object.fromEntries(WALLET_CURRENCIES.filter(currency => currency !== "CNY").map(currency => [currency, roundWalletMoney(Math.max(0, Number(state.currencyBalances?.[currency]) || 0), currency)])),
+    primaryCurrency: walletCurrency(state.primaryCurrency),
+    displayCurrency: walletCurrency(state.displayCurrency),
+    autoConvertReceived: state.autoConvertReceived === true,
+    wealthLevel: cleanText(state.wealthLevel, 120),
+    incomeSources: cleanText(state.incomeSources, 500),
+    generateLivingTransactions: state.generateLivingTransactions === true,
   };
 }
 
@@ -145,6 +176,10 @@ export function createDefaultWalletState(): WalletState {
     }],
     defaultCardId: card.id,
     updatedAt: now,
+    currencyBalances: {},
+    primaryCurrency: "CNY",
+    displayCurrency: "CNY",
+    autoConvertReceived: false,
   };
 }
 
@@ -170,34 +205,43 @@ function migrateLegacyParsedState(parsed: Record<string, unknown>): WalletState 
     transactions,
     defaultCardId: normalizedCards.some(card => card.id === defaultCardId) ? defaultCardId : normalizedCards[0].id,
     updatedAt: cleanText(parsed.updatedAt, 80) || now,
+    currencyBalances: parsed.currencyBalances && typeof parsed.currencyBalances === "object" ? parsed.currencyBalances as WalletState["currencyBalances"] : {},
+    primaryCurrency: walletCurrency(parsed.primaryCurrency),
+    displayCurrency: walletCurrency(parsed.displayCurrency),
+    autoConvertReceived: parsed.autoConvertReceived === true,
+    wealthLevel: cleanText(parsed.wealthLevel, 120),
+    incomeSources: cleanText(parsed.incomeSources, 500),
+    generateLivingTransactions: parsed.generateLivingTransactions === true,
   });
 }
 
-export function loadWalletState(): WalletState {
+export function loadWalletState(ownerId?: string): WalletState {
   if (typeof window === "undefined") return createDefaultWalletState();
   try {
-    const raw = kvGet(WALLET_STATE_KEY);
+    const raw = kvGet(ownerId ? `${CHARACTER_WALLET_PREFIX}${ownerId}` : WALLET_STATE_KEY);
     if (!raw) {
       const next = createDefaultWalletState();
-      saveWalletState(next);
+      if (ownerId) { next.balance = 0; next.transactions = []; next.primaryCurrency = "KRW"; next.displayCurrency = "KRW"; }
+      saveWalletState(next, ownerId);
       return next;
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const next = migrateLegacyParsedState(parsed);
-    if (!("balance" in parsed) || next.cards.length === 0) saveWalletState(next);
+    if (!("balance" in parsed) || next.cards.length === 0) saveWalletState(next, ownerId);
     return next;
   } catch {
     const next = createDefaultWalletState();
-    saveWalletState(next);
+    if (ownerId) { next.balance = 0; next.transactions = []; }
+    saveWalletState(next, ownerId);
     return next;
   }
 }
 
-export function saveWalletState(state: WalletState): WalletState {
+export function saveWalletState(state: WalletState, ownerId?: string): WalletState {
   const next = normalizeWalletState({ ...state, updatedAt: new Date().toISOString() });
-  kvSet(WALLET_STATE_KEY, JSON.stringify(next));
+  kvSet(ownerId ? `${CHARACTER_WALLET_PREFIX}${ownerId}` : WALLET_STATE_KEY, JSON.stringify(next));
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(WALLET_UPDATED_EVENT, { detail: next }));
+    window.dispatchEvent(new CustomEvent(WALLET_UPDATED_EVENT, { detail: { ownerId, state: next } }));
   }
   return next;
 }
@@ -246,6 +290,9 @@ export function deleteWalletCard(cardId: string): { ok: boolean; state: WalletSt
   if (current.cards.length <= 1) {
     return { ok: false, state: current, error: "至少需要保留一张银行卡。" };
   }
+  if ((current.cards.find(card => card.id === cardId)?.balance ?? 0) > 0) {
+    return { ok: false, state: current, error: "请先转出该卡余额，再删除银行卡。" };
+  }
   const nextCards = current.cards.filter(card => card.id !== cardId);
   if (nextCards.length === current.cards.length) return { ok: false, state: current, error: "未找到这张卡。" };
   const defaultCardId = current.defaultCardId === cardId ? nextCards[0].id : current.defaultCardId;
@@ -253,7 +300,7 @@ export function deleteWalletCard(cardId: string): { ok: boolean; state: WalletSt
     ...current,
     cards: nextCards,
     defaultCardId,
-    transactions: current.transactions.filter(transaction => transaction.cardId !== cardId),
+    transactions: current.transactions,
   });
   return { ok: true, state: next };
 }
@@ -491,4 +538,113 @@ export function payWithWalletBalance(input: Omit<WalletPaymentInput, "accountId"
 
 export function payWithWalletCard(input: WalletPaymentInput): WalletPaymentResult {
   return payWithWalletAccount({ ...input, accountId: input.cardId || input.accountId });
+}
+
+export function getWalletCurrencyBalance(state: WalletState, currency: WalletCurrency): number {
+  return currency === "CNY" ? getWalletTotalBalance(state) : state.currencyBalances?.[currency] ?? 0;
+}
+
+export function getWalletAssetEstimate(state: WalletState, currency: WalletCurrency = state.displayCurrency): number {
+  return roundWalletMoney(WALLET_CURRENCIES.reduce((sum, item) => sum + getWalletCurrencyBalance(state, item) * WALLET_REFERENCE_RATES[item] / WALLET_REFERENCE_RATES[currency], 0), currency);
+}
+
+export type WalletLedgerInput = {
+  ownerId?: string;
+  currency: WalletCurrency;
+  amount: number;
+  title: string;
+  detail?: string;
+  category?: string;
+  relatedOrderId?: string;
+  relatedMessageId?: string;
+  sourceCurrency?: WalletCurrency;
+  accountId?: string;
+  kind?: WalletTransaction["kind"];
+};
+
+export function recordWalletPayment(input: WalletLedgerInput): WalletPaymentResult {
+  const state = loadWalletState(input.ownerId);
+  const originalAmount = roundWalletMoney(input.amount, input.currency);
+  if (!Number.isFinite(originalAmount) || originalAmount <= 0) return { ok: false, state, error: "付款金额无效。" };
+  if (input.relatedOrderId) {
+    const existing = state.transactions.find(tx => tx.relatedOrderId === input.relatedOrderId && tx.kind === "payment");
+    if (existing) return { ok: true, state, transaction: existing };
+  }
+  if (input.relatedMessageId) {
+    const existing = state.transactions.find(tx => tx.relatedMessageId === input.relatedMessageId && tx.kind === "payment");
+    if (existing) return { ok: true, state, transaction: existing };
+  }
+  const originalAvailable = input.currency === "CNY" ? state.balance : getWalletCurrencyBalance(state, input.currency);
+  const source = input.sourceCurrency ?? (originalAvailable >= originalAmount ? input.currency : state.primaryCurrency);
+  const charged = source === input.currency ? originalAmount : exchangeWalletAmount(originalAmount, input.currency, source);
+  if (charged <= 0) return { ok: false, state, error: "换算后金额过小，无法扣款。" };
+  const card = source === "CNY" && input.accountId && input.accountId !== WALLET_BALANCE_ACCOUNT_ID ? state.cards.find(item => item.id === input.accountId) : undefined;
+  if (input.accountId && input.accountId !== WALLET_BALANCE_ACCOUNT_ID && !card) return { ok: false, state, error: "未找到付款银行卡。" };
+  const available = card ? card.balance : source === "CNY" ? state.balance : getWalletCurrencyBalance(state, source);
+  if (available < charged) return { ok: false, state, error: `${source} 余额不足。` };
+  const balanceAfter = roundWalletMoney(available - charged, source);
+  const transaction: WalletTransaction = {
+    id: generateWalletId("wallet_tx"), cardId: card?.id || WALLET_BALANCE_ACCOUNT_ID, accountType: card ? "card" : "balance",
+    title: input.title, amount: -charged, currency: source, kind: "payment", category: input.category || "付款",
+    createdAt: new Date().toISOString(), detail: input.detail || "", balanceAfter,
+    relatedOrderId: input.relatedOrderId, relatedMessageId: input.relatedMessageId,
+    ...(source !== input.currency ? { originalCurrency: input.currency, originalAmount, exchangeRate: charged / originalAmount } : {}),
+  };
+  const next = saveWalletState({
+    ...state,
+    balance: source === "CNY" && !card ? balanceAfter : state.balance,
+    cards: card ? state.cards.map(item => item.id === card.id ? { ...item, balance: balanceAfter } : item) : state.cards,
+    currencyBalances: source !== "CNY" ? { ...state.currencyBalances, [source]: balanceAfter } : state.currencyBalances,
+    transactions: [transaction, ...state.transactions],
+  }, input.ownerId);
+  return { ok: true, state: next, transaction };
+}
+
+export function recordWalletCredit(input: WalletLedgerInput): WalletPaymentResult {
+  const state = loadWalletState(input.ownerId);
+  const originalAmount = roundWalletMoney(input.amount, input.currency);
+  if (!Number.isFinite(originalAmount) || originalAmount <= 0) return { ok: false, state, error: "入账金额无效。" };
+  if (input.relatedMessageId) {
+    const existing = state.transactions.find(tx => tx.relatedMessageId === input.relatedMessageId && tx.amount > 0);
+    if (existing) return { ok: true, state, transaction: existing };
+  }
+  const target = input.sourceCurrency ?? (state.autoConvertReceived ? state.primaryCurrency : input.currency);
+  const credited = target === input.currency ? originalAmount : exchangeWalletAmount(originalAmount, input.currency, target);
+  if (credited <= 0) return { ok: false, state, error: "换算后金额过小，无法入账。" };
+  const card = target === "CNY" && input.accountId && input.accountId !== WALLET_BALANCE_ACCOUNT_ID ? state.cards.find(item => item.id === input.accountId) : undefined;
+  const balanceAfter = roundWalletMoney((card ? card.balance : target === "CNY" ? state.balance : getWalletCurrencyBalance(state, target)) + credited, target);
+  const transaction: WalletTransaction = {
+    id: generateWalletId("wallet_tx"), cardId: card?.id || WALLET_BALANCE_ACCOUNT_ID, accountType: card ? "card" : "balance",
+    title: input.title, amount: credited, currency: target, kind: input.kind || "transfer_in", category: input.category || "收入",
+    createdAt: new Date().toISOString(), detail: input.detail || "", balanceAfter,
+    relatedOrderId: input.relatedOrderId, relatedMessageId: input.relatedMessageId,
+    ...(target !== input.currency ? { originalCurrency: input.currency, originalAmount, exchangeRate: credited / originalAmount } : {}),
+  };
+  const next = saveWalletState({
+    ...state,
+    balance: target === "CNY" && !card ? balanceAfter : state.balance,
+    cards: card ? state.cards.map(item => item.id === card.id ? { ...item, balance: balanceAfter } : item) : state.cards,
+    currencyBalances: target !== "CNY" ? { ...state.currencyBalances, [target]: balanceAfter } : state.currencyBalances,
+    transactions: [transaction, ...state.transactions],
+  }, input.ownerId);
+  return { ok: true, state: next, transaction };
+}
+
+export function setWalletCurrencyBalance(currency: WalletCurrency, amount: number, ownerId?: string): WalletPaymentResult {
+  const current = loadWalletState(ownerId);
+  const desired = roundWalletMoney(amount, currency);
+  if (!Number.isFinite(desired) || desired < 0) return { ok: false, state: current, error: "余额不能为负。" };
+  // The CNY balance account is edited separately from legacy bank cards.
+  const before = currency === "CNY" ? current.balance : getWalletCurrencyBalance(current, currency);
+  const delta = roundWalletMoney(desired - before, currency);
+  if (delta === 0) return { ok: true, state: current };
+  const transaction: WalletTransaction = {
+    id: generateWalletId("wallet_tx"), cardId: WALLET_BALANCE_ACCOUNT_ID, accountType: "balance",
+    title: "手动调整余额", amount: delta, currency, kind: "adjustment", category: "账户设置",
+    createdAt: new Date().toISOString(), detail: `${currency} 余额调整`, balanceAfter: desired,
+  };
+  const next = saveWalletState({ ...current, balance: currency === "CNY" ? desired : current.balance,
+    currencyBalances: currency !== "CNY" ? { ...current.currencyBalances, [currency]: desired } : current.currencyBalances,
+    transactions: [transaction, ...current.transactions] }, ownerId);
+  return { ok: true, state: next, transaction };
 }

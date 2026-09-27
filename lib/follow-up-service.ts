@@ -38,6 +38,7 @@ import { loadCharacters } from "./character-storage";
 import { bgSetInterval, bgSetTimeout } from "./bg-timer";
 import { dispatchChatMessageNotice } from "./chat-notification-events";
 import { settleShoppingPaymentRequest } from "./shopping-payment-request";
+import { recordWalletCredit, walletCurrency } from "./wallet-storage";
 import {
     createPendingChatGeneratedImageData,
     generateAndApplyChatGeneratedImage,
@@ -800,12 +801,15 @@ export function handleFollowUpMediaAction(
         newStatus = "paid";
         sysText = `${charName}接受了${userName}的代付请求`;
         rawResponseText = `[${charName}接受了${userName}的代付]`;
-        settleShoppingPaymentRequest({
+        const payerId = targetMsg.mediaData?.paymentPayerId || loadChatSessions().find(session => session.id === sessionId)?.contactId;
+        const settled = settleShoppingPaymentRequest({
             orderId: targetMsg.mediaData?.shoppingOrderId,
             requestId: targetMsg.mediaData?.paymentRequestId,
             accepted: true,
+            payerCharacterId: payerId,
             payerCharacterName: charName,
         });
+        if (!settled || settled.paymentStatus !== "paid_by_character") return;
     } else if (actionType === "decline_payment_request") {
         newStatus = "declined";
         sysText = `${charName}拒绝了${userName}的代付请求`;
@@ -822,6 +826,12 @@ export function handleFollowUpMediaAction(
         rawResponseText = `[${charName}退回了${userName}的转账]`;
     }
 
+    if ((actionType === "accept_red_packet" || actionType === "accept_transfer") && targetMsg.role === "user") {
+        const recipientId = loadChatSessions().find(session => session.id === sessionId)?.contactId;
+        if (recipientId) recordWalletCredit({ ownerId: recipientId, amount: Number(targetMsg.mediaData?.amount || 0),
+            currency: walletCurrency(targetMsg.mediaData?.currency), title: `收到 ${userName}的${actionType === "accept_red_packet" ? "红包" : "转账"}`,
+            category: actionType === "accept_red_packet" ? "红包" : "转账", relatedMessageId: targetMsg.id });
+    }
     if (targetMediaType === "payment_request") {
         updateMessageMediaData(targetMsg.id, {
             ...targetMsg.mediaData,

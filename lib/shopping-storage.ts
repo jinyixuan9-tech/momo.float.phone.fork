@@ -1,5 +1,6 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import type { ShoppingCategory, ShoppingSearchResult, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
+import type { ShoppingAddress, ShoppingCategory, ShoppingRegion, ShoppingSearchResult, ShoppingShipment, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
+import { walletCurrency } from "./wallet-storage";
 import { DEFAULT_SHOPPING_REFRESH_PROMPT, DEFAULT_SHOPPING_SEARCH_PROMPT, SHOPPING_RECOMMENDATION_CATEGORIES } from "./shopping-engine";
 
 const SHOPPING_STATE_KEY = "ai_phone_shopping_state_v1";
@@ -59,6 +60,7 @@ function normalizeProduct(value: unknown): ShoppingState["catalog"]["recommendat
     detail: detail || subtitle || title,
     previewIcon,
     tone,
+    currency: record.currency ? walletCurrency(record.currency) : undefined,
   };
 }
 
@@ -151,6 +153,13 @@ function normalizeOrder(value: unknown): ShoppingState["orders"][number] | null 
     paymentRequestedAt: cleanText(record.paymentRequestedAt, 80) || undefined,
     paymentDeclinedAt: cleanText(record.paymentDeclinedAt, 80) || undefined,
     characterPaidAt: cleanText(record.characterPaidAt, 80) || undefined,
+    currency: record.currency ? walletCurrency(record.currency) : undefined,
+    recipientCharacterId: cleanText(record.recipientCharacterId, 120) || undefined,
+    recipientAddressId: cleanText(record.recipientAddressId, 120) || undefined,
+    recipientName: cleanText(record.recipientName, 120) || undefined,
+    recipientAddressLabel: cleanText(record.recipientAddressLabel, 400) || undefined,
+    notifyRecipient: record.notifyRecipient === true,
+    deliveryNoticeSentAt: cleanText(record.deliveryNoticeSentAt, 80) || undefined,
   };
 }
 
@@ -183,6 +192,10 @@ export function createDefaultShoppingState(): ShoppingState {
       deliveryMaxMinutes: DEFAULT_DELIVERY_MAX_MINUTES,
     },
     updatedAt: new Date().toISOString(),
+    region: "CN",
+    catalogsByRegion: {},
+    addresses: [],
+    shipments: [],
   };
 }
 
@@ -205,6 +218,23 @@ export function loadShoppingState(): ShoppingState {
       : legacyRecommendations;
     const deliveryMinMinutes = normalizeDeliveryMinutes(settingsRaw.deliveryMinMinutes, DEFAULT_DELIVERY_MIN_MINUTES);
     const deliveryMaxMinutes = normalizeDeliveryMinutes(settingsRaw.deliveryMaxMinutes, DEFAULT_DELIVERY_MAX_MINUTES);
+    const region = (["CN", "KR", "JP", "US"].includes(String(parsed.region)) ? parsed.region : "CN") as ShoppingRegion;
+    const catalogsByRegion: ShoppingState["catalogsByRegion"] = {};
+    const cached = parsed.catalogsByRegion && typeof parsed.catalogsByRegion === "object" ? parsed.catalogsByRegion as Record<string, unknown> : {};
+    for (const key of ["CN", "KR", "JP", "US"] as ShoppingRegion[]) {
+      const raw = cached[key] && typeof cached[key] === "object" ? cached[key] as Record<string, unknown> : null;
+      if (raw) { const categories = normalizeArray(raw.categories, normalizeCategory); catalogsByRegion[key] = { categories, recommendations: categories.flatMap(category => category.items) }; }
+    }
+    const addresses: ShoppingAddress[] = Array.isArray(parsed.addresses) ? parsed.addresses.map(value => {
+      const a = value as Partial<ShoppingAddress>;
+      return { id: cleanText(a.id, 120), ownerId: cleanText(a.ownerId, 120) || undefined, name: cleanText(a.name, 80), phone: cleanText(a.phone, 40), country: cleanText(a.country, 80), city: cleanText(a.city, 100), street: cleanText(a.street, 240), isDefault: a.isDefault === true };
+    }).filter(a => a.id && a.name && a.country && a.city && a.street) : [];
+    const shipments: ShoppingShipment[] = Array.isArray(parsed.shipments) ? parsed.shipments.map(value => {
+      const s = value as Partial<ShoppingShipment>;
+      const item = normalizeCartItem(s.item);
+      if (!s.id || !item || !s.recipientCharacterId || !s.recipientAddressId || !s.sentAt || !s.deliverAt) return null;
+      return { ...s, id: s.id, item, recipientCharacterId: s.recipientCharacterId, recipientAddressId: s.recipientAddressId, recipientName: s.recipientName || "收件人", recipientAddressLabel: s.recipientAddressLabel || "", notifyRecipient: s.notifyRecipient === true, sentAt: s.sentAt, deliverAt: s.deliverAt } as ShoppingShipment;
+    }).filter((s): s is ShoppingShipment => Boolean(s)) : [];
     return {
       catalog: {
         categories: categories.length > 0
@@ -222,7 +252,7 @@ export function loadShoppingState(): ShoppingState {
       searchResult: normalizeSearchResult(parsed.searchResult),
       savedItems: normalizeArray(parsed.savedItems, normalizeProduct).slice(0, 80),
       cartItems: normalizeArray(parsed.cartItems, normalizeCartItem).slice(0, 80),
-      orders: normalizeArray(parsed.orders, normalizeOrder).slice(0, 80),
+      orders: normalizeArray(parsed.orders, normalizeOrder),
       settings: {
         refreshPrompt: normalizeRefreshPrompt(settingsRaw.refreshPrompt),
         searchPrompt: normalizeSearchPrompt(settingsRaw.searchPrompt),
@@ -231,6 +261,7 @@ export function loadShoppingState(): ShoppingState {
       },
       generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : undefined,
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+      region, catalogsByRegion, addresses, shipments,
     };
   } catch {
     return createDefaultShoppingState();

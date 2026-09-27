@@ -1,572 +1,153 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, CreditCard, Plus, Trash2, WalletCards, Wifi } from "lucide-react";
-
-import { ConfirmDialog } from "@/components/ui";
-import { PageShell } from "@/components/ui/page-shell";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowDownLeft, ArrowUpRight, ChevronLeft, CreditCard, Landmark, Settings2, WalletCards } from "lucide-react";
+import { loadCharacters } from "@/lib/character-storage";
 import {
-  adjustWalletCardAccount,
-  createWalletCard,
-  deleteWalletCard,
-  formatWalletAmount,
-  getWalletBalance,
-  loadWalletState,
-  transferCardToWalletBalance,
-  transferWalletBalanceToCard,
-  WALLET_UPDATED_EVENT,
+  WALLET_CURRENCIES, WALLET_REFERENCE_RATES, WALLET_UPDATED_EVENT,
+  formatCurrencyAmount, getWalletAssetEstimate, getWalletCurrencyBalance,
+  loadWalletState, saveWalletState, setWalletCurrencyBalance,
+  createWalletCard, deleteWalletCard, transferCardToWalletBalance, transferWalletBalanceToCard, adjustWalletCardAccount, setDefaultWalletCard,
 } from "@/lib/wallet-storage";
-import type { WalletCard, WalletCardStyle, WalletState } from "@/lib/wallet-types";
+import type { WalletCurrency, WalletState } from "@/lib/wallet-types";
 
-type WalletPanelProps = {
-  onBack: () => void;
-};
+type Props = { onBack: () => void; ownerId?: string; ownerName?: string; readOnly?: boolean };
+const surface: React.CSSProperties = { background: "#fbfaf9", color: "#151515", height: "100%", position: "relative", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" };
+const currencyName: Record<WalletCurrency, string> = { CNY: "人民币", KRW: "韩元", JPY: "日元", USD: "美元" };
+const circle: React.CSSProperties = { height: 44, width: 44, borderRadius: 24, border: "1px solid #ededed", background: "white", display: "grid", placeItems: "center", boxShadow: "0 6px 22px #00000008" };
 
-const WALLET_STYLE_OPTIONS: Array<{ id: WalletCardStyle; label: string }> = [
-  { id: "obsidian", label: "黑金" },
-  { id: "graphite", label: "石墨" },
-  { id: "silver", label: "银灰" },
-];
-
-function formatWalletTimeLabel(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "刚刚";
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getDisplayCardNumber(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) return "**** **** **** 0000";
-  const tail = normalized.replace(/\D/g, "").slice(-4);
-  if (!tail) return normalized;
-  return `**** **** **** ${tail}`;
-}
-
-function WalletBankCard({
-  card,
-  active,
-}: {
-  card: WalletCard;
-  active: boolean;
-}) {
-  return (
-    <div
-      data-account-id={card.id}
-      className={`cp-premium-bank-card cp-premium-bank-card--${card.cardStyle} ${active ? "is-active" : ""}`}
-      aria-current={active ? "true" : undefined}
-    >
-      <div className="cp-card-texture"></div>
-      <div className="cp-card-dots"></div>
-      <div className="cp-card-overlay-shine"></div>
-
-      <div className="cp-card-top-row">
-        <div className="cp-card-bank-header">
-          <div className="cp-card-logo-mark">
-            <WalletCards size={20} strokeWidth={1.5} />
-          </div>
-          <div className="cp-card-bank-text">
-            <span className="cp-card-bank-name">{card.bankLabel}</span>
-            <span className="cp-card-bank-sub">REAL BALANCE</span>
-          </div>
-        </div>
-        <div className="cp-card-top-right">
-          <span className="cp-card-custom-label">{card.accentLabel}</span>
-        </div>
-      </div>
-
-      <div className="cp-card-mid-row">
-        <div className="cp-card-chip">
-          <div className="cp-chip-line cp-chip-line-1"></div>
-          <div className="cp-chip-line cp-chip-line-2"></div>
-          <div className="cp-chip-line cp-chip-line-3"></div>
-          <div className="cp-chip-line cp-chip-line-4"></div>
-          <div className="cp-chip-line-center"></div>
-        </div>
-        <Wifi size={22} className="cp-card-nfc" />
-      </div>
-
-      <div className="cp-card-number">{getDisplayCardNumber(card.maskedNumber)}</div>
-
-      <div className="cp-card-bottom-row">
-        <div className="cp-card-holder-group">
-          <div className="cp-card-holder">
-            <span>CARD NAME</span>
-            <strong>{card.title}</strong>
-          </div>
-          <div className="cp-card-expiry">
-            <span>BALANCE</span>
-            <strong>{formatWalletAmount(card.balance)}</strong>
-          </div>
-        </div>
-        <div className="cp-card-brand-box">
-          <div className="cp-card-brand-label">BANK</div>
-          <strong>PAY</strong>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function WalletPanel({ onBack }: WalletPanelProps) {
-  const [wallet, setWallet] = useState<WalletState>(() => loadWalletState());
-  const [activeCardId, setActiveCardId] = useState(() => wallet.defaultCardId || wallet.cards[0]?.id || "");
-  const [balanceTransferMode, setBalanceTransferMode] = useState<"deposit" | "withdraw" | null>(null);
-  const [transferScope, setTransferScope] = useState<"balance" | "card">("balance");
-  const [transferCardId, setTransferCardId] = useState(() => wallet.defaultCardId || wallet.cards[0]?.id || "");
-  const [transferLockedCardId, setTransferLockedCardId] = useState<string | null>(null);
-  const [transferAmount, setTransferAmount] = useState("100");
-  const [addOpen, setAddOpen] = useState(false);
-  const [newCardTitle, setNewCardTitle] = useState("储蓄卡");
-  const [newCardTail, setNewCardTail] = useState("");
+export function WalletPanel({ onBack, ownerId, ownerName, readOnly = false }: Props) {
+  const [selectedOwnerId, setSelectedOwnerId] = useState(ownerId || "");
+  const [wallet, setWallet] = useState<WalletState>(() => loadWalletState(ownerId));
+  const [filter, setFilter] = useState<"all" | "income" | "expense">("all");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cardOpen, setCardOpen] = useState(false);
+  const [editCurrency, setEditCurrency] = useState<WalletCurrency | null>(null);
+  const [editAmount, setEditAmount] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [error, setError] = useState("");
+  const [newCardTitle, setNewCardTitle] = useState("");
   const [newCardBalance, setNewCardBalance] = useState("0");
-  const [newCardStyle, setNewCardStyle] = useState<WalletCardStyle>("graphite");
-  const [deleteCardId, setDeleteCardId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const cardStackRef = useRef<HTMLDivElement | null>(null);
-
+  const [cardAmount, setCardAmount] = useState("");
+  const [cardAction, setCardAction] = useState<"deposit" | "withdraw" | "credit" | "debit">("deposit");
+  const [selectedCardId, setSelectedCardId] = useState("");
+  const actualOwnerId = ownerId || selectedOwnerId || undefined;
+  const characters = useMemo(() => loadCharacters(), []);
+  const displayName = ownerName || characters.find(item => item.id === actualOwnerId)?.name || "我的";
   useEffect(() => {
-    const syncWallet = () => {
-      const next = loadWalletState();
-      setWallet(next);
-      setActiveCardId(current => next.cards.some(card => card.id === current)
-        ? current
-        : next.defaultCardId || next.cards[0]?.id || "");
-      setTransferCardId(current => next.cards.some(card => card.id === current)
-        ? current
-        : next.defaultCardId || next.cards[0]?.id || "");
-      setTransferLockedCardId(current => current && next.cards.some(card => card.id === current) ? current : null);
-    };
-    window.addEventListener(WALLET_UPDATED_EVENT, syncWallet);
-    return () => window.removeEventListener(WALLET_UPDATED_EVENT, syncWallet);
-  }, []);
-
-  const activeCard = useMemo(
-    () => wallet.cards.find(card => card.id === activeCardId) ?? wallet.cards[0],
-    [activeCardId, wallet.cards],
-  );
-  const selectedTransferCard = useMemo(
-    () => wallet.cards.find(card => card.id === transferCardId) ?? wallet.cards[0],
-    [transferCardId, wallet.cards],
-  );
-  const walletBalance = useMemo(() => getWalletBalance(wallet), [wallet]);
-  const recentTransactions = useMemo(
-    () => wallet.transactions.slice(0, 60),
-    [wallet.transactions],
-  );
-
-  useEffect(() => {
-    const container = cardStackRef.current;
-    if (!container) return;
-
-    let ticking = false;
-    const syncActiveCardFromScroll = () => {
-      ticking = false;
-      const cards = Array.from(container.querySelectorAll<HTMLElement>(".cp-premium-bank-card"));
-      if (cards.length === 0) return;
-
-      const containerCenter = container.scrollLeft + container.clientWidth / 2;
-      let nearestId = "";
-      let nearestDistance = Number.POSITIVE_INFINITY;
-
-      for (const card of cards) {
-        const cardCenter = card.offsetLeft + card.offsetWidth / 2;
-        const distance = Math.abs(cardCenter - containerCenter);
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearestId = card.dataset.accountId ?? "";
-        }
-      }
-
-      if (nearestId) {
-        setActiveCardId(current => current === nearestId ? current : nearestId);
-      }
-    };
-
-    const handleScroll = () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(syncActiveCardFromScroll);
-    };
-
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    syncActiveCardFromScroll();
-    return () => {
-      container.removeEventListener("scroll", handleScroll);
-    };
-  }, [wallet.cards.length]);
-
-  function refresh(next: WalletState) {
-    setWallet(next);
-    setActiveCardId(current => next.cards.some(card => card.id === current)
-      ? current
-      : next.defaultCardId || next.cards[0]?.id || "");
-    setTransferCardId(current => next.cards.some(card => card.id === current)
-      ? current
-      : next.defaultCardId || next.cards[0]?.id || "");
-    setTransferLockedCardId(current => current && next.cards.some(card => card.id === current) ? current : null);
+    setWallet(loadWalletState(actualOwnerId));
+    const sync = () => setWallet(loadWalletState(actualOwnerId));
+    window.addEventListener(WALLET_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(WALLET_UPDATED_EVENT, sync);
+  }, [actualOwnerId]);
+  const currentCurrency = wallet.primaryCurrency;
+  const recent = wallet.transactions
+    .filter(tx => filter === "all" || (filter === "income" ? tx.amount >= 0 : tx.amount < 0))
+    .slice(0, showAll ? undefined : 8);
+  function update(settings: Partial<WalletState>) {
+    setWallet(saveWalletState({ ...wallet, ...settings }, actualOwnerId));
   }
-
-  function openBalanceTransfer(mode: "deposit" | "withdraw", options?: { scope?: "balance" | "card" }) {
-    const nextCardId = activeCard?.id || wallet.defaultCardId || wallet.cards[0]?.id || "";
-    setTransferCardId(nextCardId);
-    setTransferScope(options?.scope ?? "balance");
-    setTransferLockedCardId(options?.scope === "card" ? nextCardId : null);
-    setTransferAmount("100");
-    setError(null);
-    setBalanceTransferMode(mode);
+  function saveAmount() {
+    if (!editCurrency) return;
+    const result = setWalletCurrencyBalance(editCurrency, Number(editAmount), actualOwnerId);
+    if (!result.ok) { setError(result.error || "调整失败"); return; }
+    setWallet(result.state);
+    setError("");
+    setEditCurrency(null);
   }
-
-  function closeBalanceTransfer() {
-    setBalanceTransferMode(null);
-    setTransferScope("balance");
-    setTransferLockedCardId(null);
+  function createCard() {
+    if (actualOwnerId) return;
+    const next = createWalletCard({ title: newCardTitle || "储蓄卡", bankLabel: newCardTitle || "我的银行卡", balance: Number(newCardBalance) });
+    setWallet(next); setNewCardTitle(""); setNewCardBalance("0");
   }
-
-  function handleBalanceTransfer() {
-    if (!selectedTransferCard || !balanceTransferMode) return;
-    const result = transferScope === "card"
-      ? adjustWalletCardAccount(selectedTransferCard.id, Number(transferAmount), balanceTransferMode === "deposit" ? "in" : "out")
-      : balanceTransferMode === "deposit"
-        ? transferCardToWalletBalance(selectedTransferCard.id, Number(transferAmount))
-        : transferWalletBalanceToCard(selectedTransferCard.id, Number(transferAmount));
-    if (!result.ok) {
-      setError(result.error ?? (
-        transferScope === "card"
-          ? balanceTransferMode === "deposit" ? "转入账户失败。" : "转出账户失败。"
-          : balanceTransferMode === "deposit" ? "转入失败。" : "提现失败。"
-      ));
-      return;
-    }
-    setError(null);
-    refresh(result.state);
-    closeBalanceTransfer();
+  function moveCardMoney() {
+    if (actualOwnerId || !selectedCardId) return;
+    const amount = Number(cardAmount);
+    const result = cardAction === "deposit" ? transferCardToWalletBalance(selectedCardId, amount)
+      : cardAction === "withdraw" ? transferWalletBalanceToCard(selectedCardId, amount)
+      : adjustWalletCardAccount(selectedCardId, amount, cardAction === "credit" ? "in" : "out");
+    if (!result.ok) { setError(result.error || "操作失败"); return; }
+    setWallet(result.state); setError(""); setCardAmount("");
   }
-
-  function handleAddCard() {
-    const tail = newCardTail.replace(/\D/g, "").slice(-4);
-    const next = createWalletCard({
-      title: newCardTitle,
-      maskedNumber: tail ? `**** **** **** ${tail}` : undefined,
-      balance: Number(newCardBalance),
-      cardStyle: newCardStyle,
-      bankLabel: "CHAT WALLET",
-      accentLabel: "储蓄",
-      note: "用户手动添加的银行卡",
-    });
-    setError(null);
-    setWallet(next);
-    setActiveCardId(next.cards[0]?.id ?? next.defaultCardId);
-    setTransferCardId(next.cards[0]?.id ?? next.defaultCardId);
-    setAddOpen(false);
-    setNewCardTitle("储蓄卡");
-    setNewCardTail("");
-    setNewCardBalance("0");
-    setNewCardStyle("graphite");
-  }
-
-  function handleDeleteCard() {
-    if (!deleteCardId) return;
-    const result = deleteWalletCard(deleteCardId);
-    if (!result.ok) {
-      setError(result.error ?? "删除失败。");
-      setDeleteCardId(null);
-      return;
-    }
-    setError(null);
-    refresh(result.state);
-    setDeleteCardId(null);
-  }
-
-  const transferCardLocked = transferScope === "card" || Boolean(transferLockedCardId);
-  const transferTitle = transferScope === "card"
-    ? balanceTransferMode === "withdraw" ? "转出账户" : "转入账户"
-    : balanceTransferMode === "withdraw" ? "提现到银行卡" : "银行卡转入余额";
-  const transferInputLabel = transferScope === "card"
-    ? "金额"
-    : balanceTransferMode === "withdraw" ? "提现金额" : "转入金额";
-  const transferConfirmLabel = transferScope === "card"
-    ? balanceTransferMode === "withdraw" ? "确认转出" : "确认转入"
-    : balanceTransferMode === "withdraw" ? "确认提现" : "确认转入";
-  const transferLimit = transferScope === "card"
-    ? balanceTransferMode === "withdraw" ? selectedTransferCard?.balance : undefined
-    : balanceTransferMode === "withdraw" ? walletBalance : selectedTransferCard?.balance;
-
+  const panelButton: React.CSSProperties = { background: "#fff", color: "#151515", border: "1px solid #eaeaea", borderRadius: 12, padding: "10px 13px", fontSize: 12, fontWeight: 600 };
   return (
-    <PageShell title="余额管理" onBack={onBack} className="wallet-page-root">
-      <style>{`
-        .wallet-page-root {
-          background: var(--c-page-body-bg) !important;
-        }
-        .wallet-page-root .page-body {
-          overflow-y: auto;
-        }
-        .wallet-card-stack {
-          padding-inline: 7%;
-          scroll-padding-inline: 7%;
-        }
-        .wallet-card-stack .cp-premium-bank-card {
-          flex: 0 0 86%;
-          min-width: 0;
-          cursor: grab;
-          box-shadow: 0 16px 34px rgba(0, 0, 0, 0.26), inset 0 1px 1px rgba(255, 255, 255, 0.1);
-        }
-        .wallet-card-stack .cp-premium-bank-card:active {
-          cursor: grabbing;
-        }
-        .wallet-card-stack .cp-premium-bank-card.is-active {
-          opacity: 1;
-        }
-        .wallet-balance-action {
-          min-height: 34px;
-          padding: 0 12px;
-          border-radius: 999px;
-          background: rgba(255,255,255,0.72);
-          border: 1px solid rgba(255,255,255,0.82);
-          color: #246bfd;
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          font-size: calc(12px*var(--app-text-scale,1));
-          font-weight: 700;
-        }
-        .wallet-bank-action {
-          min-height: 42px;
-          border-radius: 16px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          font-size: calc(12px*var(--app-text-scale,1));
-          font-weight: 700;
-        }
-      `}</style>
-
-      <div className="p-4 flex flex-col gap-4 pb-24">
-        <section className="rounded-2xl p-5 overflow-hidden relative min-h-[156px] flex flex-col justify-between" style={{ background: "#eaf5ff", boxShadow: "0 8px 24px rgba(0,0,0,0.025)", border: "1px solid rgba(255,255,255,0.72)", color: "#172033" }}>
-          <div className="relative flex items-start justify-between gap-4">
-            <div>
-              <div className="ts-11 font-semibold opacity-70 tracking-[0.18em] uppercase">Real Balance</div>
-              <div className="ts-34 font-semibold mt-2" style={{ fontFamily: "Georgia, serif" }}>{formatWalletAmount(walletBalance)}</div>
-              <div className="ts-12 opacity-70 mt-1">红包、转账与余额支付默认使用这里</div>
-            </div>
-            <span className="ts-11 font-semibold opacity-70 tracking-[0.18em] shrink-0">{wallet.cards.length}张银行卡</span>
+    <div className="wallet-page-root" style={surface}>
+      <div style={{ overflowY: "auto", flex: 1, padding: "calc(env(safe-area-inset-top, 0px) + 22px) 22px calc(env(safe-area-inset-bottom, 0px) + 32px)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <button type="button" onClick={onBack} aria-label="返回" style={circle}><ChevronLeft size={22} /></button>
+          <button type="button" onClick={() => setSettingsOpen(true)} aria-label="钱包设置" style={circle}><Settings2 size={21} /></button>
+        </div>
+        <div style={{ marginTop: 35, marginBottom: 33 }}>
+          <div style={{ color: "#999", fontSize: 11, letterSpacing: 4, fontWeight: 750 }}>PAY · WALLET</div>
+          <h1 style={{ fontSize: 38, lineHeight: 1.15, letterSpacing: -2, margin: "10px 0 0", fontWeight: 850 }}>{displayName}资产</h1>
+          {!ownerId && <p style={{ fontSize: 12, color: "#999", marginTop: 9 }}>总资产 ≈ {formatCurrencyAmount(getWalletAssetEstimate(wallet), wallet.displayCurrency)} · 参考汇率</p>}
+        </div>
+        <div style={{ background: "#1c1c1e", color: "#fff", borderRadius: 32, padding: "25px 27px", minHeight: 245, display: "flex", flexDirection: "column", boxShadow: "0 22px 38px #00000016", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", width: 180, height: 180, borderRadius: "50%", border: "34px solid #ffffff08", right: -80, bottom: -100 }} />
+          <div style={{ display: "flex", justifyContent: "space-between", color: "#a6a6aa", letterSpacing: 2, fontSize: 11, fontWeight: 700 }}>
+            <span>当前账户 · CURRENT</span><span>{currencyName[currentCurrency]}</span>
           </div>
-          <div className="relative flex items-end justify-between gap-3">
-            <span className="ts-12 opacity-70">{wallet.transactions.length} 条流水</span>
-            <div className="flex items-center gap-2">
-              <button type="button" className="wallet-balance-action" onClick={() => openBalanceTransfer("deposit")}>
-                <ArrowDownToLine size={14} />
-                转入
-              </button>
-              <button type="button" className="wallet-balance-action" onClick={() => openBalanceTransfer("withdraw")}>
-                <ArrowUpFromLine size={14} />
-                提现
-              </button>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 20 }}>
+            <Landmark size={22} color="#bbb" /><strong style={{ fontSize: 19 }}>{wallet.cards.find(card => card.id === wallet.defaultCardId)?.bankLabel || "我的钱包"}</strong>
           </div>
+          <span style={{ fontSize: 12, color: "#999", marginTop: 2 }}>储蓄卡 · {currentCurrency}</span>
+          <div style={{ flex: 1 }} />
+          <div style={{ color: "#aaa", fontSize: 12, fontWeight: 700 }}>可用余额</div>
+          <strong style={{ fontSize: 37, letterSpacing: -1.5, marginTop: 7 }}>{formatCurrencyAmount(getWalletCurrencyBalance(wallet, currentCurrency), currentCurrency)}</strong>
+          <div style={{ color: "#aaa", letterSpacing: 4, fontSize: 14, marginTop: 21 }}>{wallet.cards.find(card => card.id === wallet.defaultCardId)?.maskedNumber || "**** **** **** 8888"}</div>
+        </div>
+        <section style={{ marginTop: 30 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}><h2 style={{ fontSize: 22, margin: 0 }}>币种余额</h2><span style={{ fontSize: 11, color: "#999" }}>ACCOUNTS</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginTop: 14 }}>
+            {WALLET_CURRENCIES.map(currency => <button type="button" key={currency} onClick={() => { if (readOnly) return; setEditCurrency(currency); setEditAmount(String(currency === "CNY" ? wallet.balance : getWalletCurrencyBalance(wallet, currency))); }} style={{ ...panelButton, padding: "14px", textAlign: "left", minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 11, color: "#999" }}>{currencyName[currency]} · {currency}</span>
+              <strong style={{ display: "block", marginTop: 7, fontSize: 16, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formatCurrencyAmount(getWalletCurrencyBalance(wallet, currency), currency)}</strong>
+            </button>)}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontSize: 12, color: "#888" }}>
+            <span>总资产折算 · 仅供展示</span><b style={{ color: "#333" }}>≈ {formatCurrencyAmount(getWalletAssetEstimate(wallet), wallet.displayCurrency)}</b>
+          </div>
+          {!readOnly && <button type="button" onClick={() => setCardOpen(!cardOpen)} style={{ ...panelButton, width: "100%", textAlign: "left", marginTop: 16, display: "flex", justifyContent: "space-between" }}><span><WalletCards size={15} style={{ display: "inline", verticalAlign: "middle", marginRight: 8 }} />银行卡 · {wallet.cards.length} 张</span><span>{cardOpen ? "收起" : "查看"}</span></button>}
+          {cardOpen && wallet.cards.map(card => <div key={card.id} style={{ ...panelButton, marginTop: 7, display: "flex", justifyContent: "space-between" }}><span>{card.bankLabel} · {card.title}</span><span>{formatCurrencyAmount(card.balance, "CNY")}</span></div>)}
         </section>
-
-        <section className="flex flex-col gap-3">
-          <div className="flex items-center justify-between px-1">
-            <h2 className="ts-15 font-bold text-[var(--c-text-title)]">银行卡</h2>
-            <button type="button" onClick={() => setAddOpen(true)} className="min-h-[36px] px-3 rounded-full flex items-center gap-1.5 ts-12 font-semibold" style={{ background: "var(--c-icon-active)", color: "#fff" }}>
-              <Plus size={15} />
-              新增卡
-            </button>
+        <section style={{ marginTop: 34 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end" }}><div><span style={{ fontSize: 10, color: "#999", letterSpacing: 3, fontWeight: 750 }}>RECENT</span><h2 style={{ fontSize: 23, margin: "4px 0 0" }}>最近账单</h2></div><button type="button" onClick={() => setShowAll(!showAll)} style={{ border: 0, color: "#888", background: "transparent", fontSize: 12 }}>{showAll ? "收起" : "交易明细"}</button></div>
+          <div style={{ display: "flex", border: "1px solid #e8e8e8", background: "#fff", borderRadius: 30, padding: 4, width: "fit-content", margin: "18px 0" }}>
+            {(["all", "income", "expense"] as const).map((value, i) => <button type="button" key={value} onClick={() => setFilter(value)} style={{ border: 0, background: filter === value ? "#111" : "transparent", color: filter === value ? "#fff" : "#222", borderRadius: 22, padding: "9px 19px", fontWeight: 700 }}>{["全部", "收入", "支出"][i]}</button>)}
           </div>
-
-          <div className="cp-premium-card-stack wallet-card-stack" aria-label="银行卡" ref={cardStackRef}>
-            {wallet.cards.map(card => (
-              <WalletBankCard
-                key={card.id}
-                card={card}
-                active={activeCard?.id === card.id}
-              />
-            ))}
+          <div style={{ background: "#fff", border: "1px solid #e9e9e9", borderRadius: 25, minHeight: 110, overflow: "hidden" }}>
+            {recent.length === 0 ? <div style={{ textAlign: "center", color: "#999", padding: "48px 0", fontSize: 13 }}>暂无交易记录</div> : recent.map(tx => <div key={tx.id} style={{ display: "flex", gap: 12, alignItems: "center", padding: "14px", borderBottom: "1px solid #f5f5f5" }}>
+              <div style={{ background: "#f6f6f6", borderRadius: 12, padding: 8 }}>{tx.amount < 0 ? <ArrowUpRight size={17} /> : <ArrowDownLeft size={17} />}</div>
+              <div style={{ flex: 1, minWidth: 0 }}><strong style={{ fontSize: 13 }}>{tx.title}</strong><div style={{ fontSize: 11, color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{new Date(tx.createdAt).toLocaleString("zh-CN")} · {tx.detail}</div></div>
+              <div style={{ textAlign: "right", whiteSpace: "nowrap" }}><strong style={{ fontSize: 13 }}>{tx.amount > 0 ? "+" : ""}{formatCurrencyAmount(tx.amount, tx.currency || "CNY")}</strong>{tx.originalCurrency && <div style={{ fontSize: 10, color: "#999" }}>原价 {formatCurrencyAmount(tx.originalAmount || 0, tx.originalCurrency)}</div>}</div>
+            </div>)}
           </div>
-        </section>
-
-        {activeCard ? (
-          <section className="rounded-2xl bg-[var(--c-card)] p-4 flex flex-col gap-4" style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.025)" }}>
-            <div className="min-w-0">
-              <div className="ts-11 text-[var(--c-text)] opacity-60">当前银行卡余额</div>
-              <div className="ts-26 font-bold text-[var(--c-text-title)] mt-1">{formatWalletAmount(activeCard.balance)}</div>
-              <div className="ts-12 text-[var(--c-text)] opacity-65 mt-1">{activeCard.title} · {getDisplayCardNumber(activeCard.maskedNumber)}</div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => openBalanceTransfer("deposit", { scope: "card" })}
-                className="wallet-bank-action text-[var(--c-success)]"
-                style={{ background: "color-mix(in srgb, var(--c-success) 10%, var(--c-card))" }}
-              >
-                <ArrowDownToLine size={15} />
-                转入账户
-              </button>
-              <button
-                type="button"
-                onClick={() => openBalanceTransfer("withdraw", { scope: "card" })}
-                className="wallet-bank-action text-[var(--c-icon-active)]"
-                style={{ background: "color-mix(in srgb, var(--c-icon-active) 10%, var(--c-card))" }}
-              >
-                <ArrowUpFromLine size={15} />
-                转出账户
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteCardId(activeCard.id)}
-                className="wallet-bank-action text-[var(--c-danger)]"
-                style={{ background: "color-mix(in srgb, var(--c-danger) 10%, var(--c-card))" }}
-              >
-                <Trash2 size={15} />
-                删除
-              </button>
-            </div>
-
-            {error ? <div className="ts-12 text-[var(--c-danger)]">{error}</div> : null}
-          </section>
-        ) : null}
-
-        <section className="rounded-2xl bg-[var(--c-card)] px-4 py-2 flex flex-col" style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.025)" }}>
-          <div className="py-3 flex items-center justify-between">
-            <h2 className="ts-15 font-bold text-[var(--c-text-title)]">流水</h2>
-            <span className="ts-11 text-[var(--c-text)] opacity-55">余额、银行卡与购物付款实时同步</span>
-          </div>
-          {recentTransactions.length === 0 ? (
-            <div className="py-8 text-center ts-12 text-[var(--c-text)] opacity-60">暂无流水</div>
-          ) : (
-            recentTransactions.map(transaction => {
-              const outgoing = transaction.amount < 0;
-              const TransactionIcon = transaction.kind === "payment"
-                ? CreditCard
-                : transaction.kind === "transfer_out"
-                  ? ArrowUpFromLine
-                  : ArrowDownToLine;
-              return (
-                <div key={transaction.id} className="py-3 flex items-center gap-3 border-t border-[color-mix(in_srgb,var(--c-card-border)_22%,transparent)]">
-                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0" style={{ background: outgoing ? "color-mix(in srgb, var(--c-danger) 12%, var(--c-card))" : "color-mix(in srgb, var(--c-success) 12%, var(--c-card))", color: outgoing ? "var(--c-danger)" : "var(--c-success)" }}>
-                    <TransactionIcon size={18} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="ts-13 font-semibold text-[var(--c-text-title)] truncate">{transaction.title}</div>
-                    <div className="ts-11 text-[var(--c-text)] opacity-60 truncate">{formatWalletTimeLabel(transaction.createdAt)} · {transaction.detail}</div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className={`ts-13 font-bold ${outgoing ? "text-[var(--c-danger)]" : "text-[var(--c-success)]"}`}>
-                      {outgoing ? "-" : "+"}{formatWalletAmount(Math.abs(transaction.amount))}
-                    </div>
-                    <div className="ts-10 text-[var(--c-text)] opacity-50">余 {formatWalletAmount(transaction.balanceAfter)}</div>
-                  </div>
-                </div>
-              );
-            })
-          )}
         </section>
       </div>
-
-      {balanceTransferMode && selectedTransferCard ? (
-        <div className="absolute inset-0 z-[80] flex items-end" style={{ background: "rgba(0,0,0,0.35)" }} role="presentation" onClick={closeBalanceTransfer}>
-          <div className="w-full rounded-t-[24px] bg-[var(--c-page-body-bg)] p-4 flex flex-col gap-4" style={{ paddingBottom: "calc(18px + env(safe-area-inset-bottom, 0px))" }} role="dialog" aria-modal="true" aria-label={transferTitle} onClick={event => event.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <strong className="ts-16 text-[var(--c-text-title)]">{transferTitle}</strong>
-              <span className="ts-12 text-[var(--c-text)] opacity-60">
-                {transferScope === "card" ? `当前卡 ${formatWalletAmount(selectedTransferCard.balance)}` : `余额 ${formatWalletAmount(walletBalance)}`}
-              </span>
-            </div>
-            {transferCardLocked ? (
-              <div className="min-h-[58px] rounded-2xl px-3 flex items-center gap-3 text-left border border-[var(--c-card-border)] bg-[var(--c-card)]">
-                <WalletCards size={18} className="text-[var(--c-icon)]" />
-                <span className="flex-1 min-w-0">
-                  <span className="block ts-12 text-[var(--c-text)] opacity-60">当前银行卡</span>
-                  <span className="block ts-13 font-semibold text-[var(--c-text-title)] truncate">{selectedTransferCard.title}</span>
-                  <span className="block ts-11 text-[var(--c-text)] opacity-60 truncate">{getDisplayCardNumber(selectedTransferCard.maskedNumber)} · {formatWalletAmount(selectedTransferCard.balance)}</span>
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <span className="ts-12 font-semibold text-[var(--c-text-title)]">选择银行卡</span>
-                <div className="grid gap-2 max-h-[28vh] overflow-y-auto">
-                  {wallet.cards.map(card => {
-                    const active = selectedTransferCard.id === card.id;
-                    return (
-                      <button
-                        key={card.id}
-                        type="button"
-                        onClick={() => setTransferCardId(card.id)}
-                        className="min-h-[54px] rounded-2xl px-3 flex items-center gap-3 text-left"
-                        style={{ border: active ? "1px solid var(--c-icon-active)" : "1px solid var(--c-card-border)", background: active ? "color-mix(in srgb, var(--c-icon-active) 8%, var(--c-card))" : "var(--c-card)" }}
-                      >
-                        <WalletCards size={18} className="text-[var(--c-icon)]" />
-                        <span className="flex-1 min-w-0">
-                          <span className="block ts-13 font-semibold text-[var(--c-text-title)] truncate">{card.title}</span>
-                          <span className="block ts-11 text-[var(--c-text)] opacity-60 truncate">{getDisplayCardNumber(card.maskedNumber)} · {formatWalletAmount(card.balance)}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            <label className="flex flex-col gap-2">
-              <span className="ts-12 font-semibold text-[var(--c-text-title)]">{transferInputLabel}</span>
-              <input className="ui-input" type="number" min={0.01} max={transferLimit} step={0.01} value={transferAmount} onChange={event => setTransferAmount(event.target.value)} />
-            </label>
-            {error ? <div className="ts-12 text-[var(--c-danger)]">{error}</div> : null}
-            <button type="button" onClick={handleBalanceTransfer} className="h-12 rounded-2xl text-white ts-14 font-bold" style={{ background: "var(--c-icon-active)" }}>{transferConfirmLabel}</button>
-          </div>
-        </div>
-      ) : null}
-
-      {addOpen ? (
-        <div className="absolute inset-0 z-[80] flex items-end" style={{ background: "rgba(0,0,0,0.35)" }} role="presentation" onClick={() => setAddOpen(false)}>
-          <div className="w-full rounded-t-[24px] bg-[var(--c-page-body-bg)] p-4 flex flex-col gap-4" style={{ paddingBottom: "calc(18px + env(safe-area-inset-bottom, 0px))" }} role="dialog" aria-modal="true" aria-label="新增银行卡" onClick={event => event.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <strong className="ts-16 text-[var(--c-text-title)]">新增银行卡</strong>
-              <span className="ts-12 text-[var(--c-text)] opacity-60">余额不能为负</span>
-            </div>
-            <label className="flex flex-col gap-2">
-              <span className="ts-12 font-semibold text-[var(--c-text-title)]">卡片名称</span>
-              <input className="ui-input" value={newCardTitle} onChange={event => setNewCardTitle(event.target.value)} />
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="flex flex-col gap-2 min-w-0">
-                <span className="ts-12 font-semibold text-[var(--c-text-title)]">尾号</span>
-                <input className="ui-input" inputMode="numeric" maxLength={4} value={newCardTail} onChange={event => setNewCardTail(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="0000" />
-              </label>
-              <label className="flex flex-col gap-2 min-w-0">
-                <span className="ts-12 font-semibold text-[var(--c-text-title)]">初始余额</span>
-                <input className="ui-input" type="number" min={0} step={0.01} value={newCardBalance} onChange={event => setNewCardBalance(event.target.value)} />
-              </label>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {WALLET_STYLE_OPTIONS.map(option => (
-                <button key={option.id} type="button" onClick={() => setNewCardStyle(option.id)} className="h-10 rounded-2xl ts-12 font-semibold" style={{ border: newCardStyle === option.id ? "none" : "1px solid var(--c-card-border)", background: newCardStyle === option.id ? "var(--c-icon-active)" : "var(--c-card)", color: newCardStyle === option.id ? "#fff" : "var(--c-text-title)" }}>
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={handleAddCard} className="h-12 rounded-2xl text-white ts-14 font-bold" style={{ background: "var(--c-icon-active)" }}>添加银行卡</button>
-          </div>
-        </div>
-      ) : null}
-
-      {deleteCardId ? (
-        <ConfirmDialog
-          title="删除这张银行卡？"
-          message="删除后该卡余额和流水都会从余额管理中移除。"
-          variant="danger"
-          confirmLabel="删除"
-          cancelLabel="取消"
-          onConfirm={handleDeleteCard}
-          onCancel={() => setDeleteCardId(null)}
-        />
-      ) : null}
-    </PageShell>
+      {settingsOpen && <div style={{ position: "absolute", inset: 0, background: "#0007", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={() => setSettingsOpen(false)}><div role="dialog" aria-label="钱包设置" onClick={event => event.stopPropagation()} style={{ width: "100%", maxHeight: "82%", overflowY: "auto", padding: "23px", borderRadius: "25px 25px 0 0", background: "#fff" }}>
+        <h2 style={{ margin: "0 0 20px" }}>钱包设置</h2>
+        {!ownerId && !readOnly && <label style={{ display: "block", marginBottom: 17 }}>查看账户<select className="ui-input" value={selectedOwnerId} onChange={event => setSelectedOwnerId(event.target.value)}><option value="">我自己</option>{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
+        <label style={{ display: "block", marginBottom: 17 }}>主使用币种<select className="ui-input" value={wallet.primaryCurrency} onChange={event => update({ primaryCurrency: event.target.value as WalletCurrency })} disabled={readOnly}>{WALLET_CURRENCIES.map(c => <option key={c} value={c}>{currencyName[c]} · {c}</option>)}</select></label>
+        <label style={{ display: "block", marginBottom: 17 }}>总资产显示币种<select className="ui-input" value={wallet.displayCurrency} onChange={event => update({ displayCurrency: event.target.value as WalletCurrency })} disabled={readOnly}>{WALLET_CURRENCIES.map(c => <option key={c} value={c}>{currencyName[c]} · {c}</option>)}</select></label>
+        <label style={{ display: "flex", justifyContent: "space-between", marginBottom: 17 }}>收到外币时自动换成主币种<input type="checkbox" checked={wallet.autoConvertReceived} onChange={event => update({ autoConvertReceived: event.target.checked })} disabled={readOnly} /></label>
+        {actualOwnerId && !readOnly && <><label style={{ display: "block", marginBottom: 14 }}>财富水平<input className="ui-input" value={wallet.wealthLevel || ""} onChange={event => update({ wealthLevel: event.target.value })} /></label><label style={{ display: "block", marginBottom: 14 }}>收入来源<input className="ui-input" value={wallet.incomeSources || ""} onChange={event => update({ incomeSources: event.target.value })} /></label><label style={{ display: "flex", justifyContent: "space-between", marginBottom: 17 }}>允许生成生活流水<input type="checkbox" checked={wallet.generateLivingTransactions || false} onChange={event => update({ generateLivingTransactions: event.target.checked })} /></label></>}
+        {!actualOwnerId && !readOnly && <div style={{ borderTop: "1px solid #eee", paddingTop: 15, marginBottom: 18, display: "grid", gap: 9 }}>
+          <strong>银行卡管理 · 人民币</strong>
+          {wallet.cards.map(card => <div key={card.id} style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 12 }}><span style={{ flex: 1 }}>{card.title} · {formatCurrencyAmount(card.balance, "CNY")}</span><button type="button" onClick={() => setWallet(setDefaultWalletCard(card.id))} style={panelButton}>{wallet.defaultCardId === card.id ? "默认" : "设默认"}</button><button type="button" onClick={() => { const result = deleteWalletCard(card.id); if (result.ok) setWallet(result.state); else setError(result.error || "删除失败"); }} style={panelButton}>删除</button></div>)}
+          <input className="ui-input" placeholder="新卡名称" value={newCardTitle} onChange={event => setNewCardTitle(event.target.value)} /><input className="ui-input" type="number" min="0" placeholder="初始余额" value={newCardBalance} onChange={event => setNewCardBalance(event.target.value)} /><button type="button" onClick={createCard} style={panelButton}>添加银行卡</button>
+          <select className="ui-input" value={selectedCardId} onChange={event => setSelectedCardId(event.target.value)}><option value="">选择银行卡</option>{wallet.cards.map(card => <option value={card.id} key={card.id}>{card.title}</option>)}</select>
+          <select className="ui-input" value={cardAction} onChange={event => setCardAction(event.target.value as typeof cardAction)}><option value="deposit">卡 → 钱包余额</option><option value="withdraw">钱包余额 → 卡</option><option value="credit">银行卡入账</option><option value="debit">银行卡转出</option></select>
+          <input className="ui-input" type="number" min="0.01" step="0.01" placeholder="金额" value={cardAmount} onChange={event => setCardAmount(event.target.value)} /><button type="button" onClick={moveCardMoney} style={panelButton}>确认操作</button>
+          {error && <span style={{ color: "#c22", fontSize: 12 }}>{error}</span>}
+        </div>}
+        <p style={{ color: "#888", fontSize: 11 }}>参考汇率（非实时）：1 KRW ≈ ¥{WALLET_REFERENCE_RATES.KRW}，1 JPY ≈ ¥{WALLET_REFERENCE_RATES.JPY}，1 USD ≈ ¥{WALLET_REFERENCE_RATES.USD}。换汇流水保留原币金额。</p>
+        <button type="button" onClick={() => setSettingsOpen(false)} style={{ ...panelButton, width: "100%", background: "#111", color: "#fff" }}>完成</button>
+      </div></div>}
+      {editCurrency && <div style={{ position: "absolute", inset: 0, background: "#0007", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={() => setEditCurrency(null)}><div role="dialog" aria-label="调整余额" onClick={event => event.stopPropagation()} style={{ background: "#fff", borderRadius: "25px 25px 0 0", width: "100%", padding: 23 }}>
+        <h2>{currencyName[editCurrency]}余额</h2><p style={{ color: "#888", fontSize: 12 }}>{editCurrency === "CNY" ? "这里调整钱包余额；已有银行卡余额单独保留。" : "修改会记入账户调整流水。"}</p>
+        <input className="ui-input" type="number" min="0" step={editCurrency === "CNY" || editCurrency === "USD" ? "0.01" : "1"} value={editAmount} onChange={event => setEditAmount(event.target.value)} />
+        {error && <p style={{ color: "#c22" }}>{error}</p>}<button type="button" onClick={saveAmount} style={{ ...panelButton, background: "#111", color: "#fff", width: "100%", marginTop: 16 }}>保存</button>
+      </div></div>}
+    </div>
   );
 }

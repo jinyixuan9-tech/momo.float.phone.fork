@@ -11,6 +11,7 @@ import { resolveUserIdentity } from "./settings-storage";
 import { loadCharacters } from "./character-storage";
 import { updateChatCharacterProfile } from "./chat-profile-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { recordWalletPayment, walletCurrency } from "./wallet-storage";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
 import { extractTextToolDirectiveText } from "./text-tool-protocol";
@@ -162,6 +163,7 @@ export type ChatMessage = {
         walletTransactionId?: string; // 发送红包/转账时扣款流水
         walletRefundTransactionId?: string; // 被拒收/退回时退款流水
         walletDepositTransactionId?: string; // 领取红包/转账时入账流水
+        currency?: "CNY" | "KRW" | "JPY" | "USD";
         shoppingGiftId?: string; // 购物订单中的可送礼物实例 ID
         giftOrderId?: string;    // 礼物来源订单 ID
         giftItemId?: string;     // 礼物来源商品 ID
@@ -1362,6 +1364,25 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
         const sessionForBlock = _sessionsCache.find(s => s.id === newMsg.sessionId);
         if (sessionForBlock && !sessionForBlock.isGroup && sessionForBlock.isBlacklisted) {
             newMsg.status = "rejected";
+        }
+    }
+
+    // AI-created money cards use the same ledger as user-initiated transfers.
+    if (typeof window !== "undefined" && newMsg.role === "assistant" && newMsg.status !== "rejected"
+        && (newMsg.mediaType === "red_packet" || newMsg.mediaType === "transfer") && !newMsg.mediaData?.walletTransactionId) {
+        const senderId = newMsg.senderCharacterId || _sessionsCache.find(item => item.id === newMsg.sessionId)?.contactId;
+        const amount = Number(newMsg.mediaData?.amount);
+        if (senderId && Number.isFinite(amount) && amount > 0) {
+            const result = recordWalletPayment({ ownerId: senderId, amount, currency: walletCurrency(newMsg.mediaData?.currency),
+                title: newMsg.mediaType === "red_packet" ? "发红包" : "发转账", category: newMsg.mediaType === "red_packet" ? "红包" : "转账",
+                detail: `Chat 发给用户 ${amount}`, relatedMessageId: newMsg.id });
+            if (result.ok && result.transaction) {
+                newMsg.mediaData = { ...newMsg.mediaData, walletTransactionId: result.transaction.id };
+            } else {
+                newMsg.content = `${newMsg.content ? `${newMsg.content}\n` : ""}${newMsg.mediaType === "red_packet" ? "红包" : "转账"}未成功：${result.error || "钱包余额不足"}`;
+                newMsg.mediaType = undefined;
+                newMsg.mediaData = undefined;
+            }
         }
     }
 

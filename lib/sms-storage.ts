@@ -62,3 +62,17 @@ export function phoneFromPersona(persona: string): string {
   const match = persona.match(/(?:韩国电话|手机号码|手机(?:号|电话)|联系电话|phone\s*number|전화번호)\s*[：:]\s*(\+?\d[\d\s-]{7,19}\d)/i);
   return match?.[1]?.trim() ?? "";
 }
+
+/** Compact shared-memory view. Keep full threads and virtual-number identity in SMS storage. */
+export function loadSmsProjectionEntries(characterId: string, options: { afterTimestamp?: string; userName?: string; charName?: string; excludeThreadId?: string } = {}): Array<{ id: string; timestamp: string; content: string }> {
+  const state = loadSms();
+  const threads = new Map(state.threads.filter(thread => thread.characterId === characterId && thread.id !== options.excludeThreadId).map(thread => [thread.id, thread]));
+  const after = options.afterTimestamp ? Date.parse(options.afterTimestamp) : 0;
+  return state.messages.flatMap(message => {
+    const thread = threads.get(message.threadId);
+    if (!thread || !message.delivered || (Number.isFinite(after) && message.createdAt <= after)) return [];
+    const name = message.direction === "incoming" ? (options.charName || "对方")
+      : message.awarenessAt === "confirmed" || thread.identityId === "real" ? (options.userName || "用户") : "未确认身份的号码";
+    return [{ id: message.id, timestamp: new Date(message.createdAt).toISOString(), content: `[短信] ${name}：${message.original}` }];
+  });
+}

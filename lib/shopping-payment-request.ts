@@ -1,5 +1,6 @@
 import { loadShoppingState, saveShoppingState } from "./shopping-storage";
 import type { ShoppingOrder, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
+import { recordWalletPayment } from "./wallet-storage";
 
 export type ShoppingPaymentStatus =
   | "paid_by_user"
@@ -170,6 +171,11 @@ export function settleShoppingPaymentRequest(input: {
     if (!matches) return order;
 
     if (input.accepted) {
+      const payerId = input.payerCharacterId || order.payerCharacterId;
+      const amount = Number(order.totalLabel.replace(/[,，\s]/g, "").match(/\d+(?:\.\d+)?/)?.[0] || 0);
+      if (!payerId || amount <= 0) return order;
+      const payment = recordWalletPayment({ ownerId: payerId, amount, currency: order.currency || "CNY", title: "购物代付", detail: order.summary, category: "购物", relatedOrderId: order.id });
+      if (!payment.ok) return order;
       const paidOrder: ShoppingOrder = {
         ...order,
         statusLabel: "待发货",
@@ -177,6 +183,7 @@ export function settleShoppingPaymentRequest(input: {
         payerCharacterId: input.payerCharacterId || order.payerCharacterId,
         payerCharacterName: input.payerCharacterName || order.payerCharacterName,
         paymentCardLabel: input.payerCharacterName ? `${input.payerCharacterName}代付` : "TA代付",
+        paymentTransactionId: payment.transaction?.id,
         paidAt: now.toISOString(),
         characterPaidAt: now.toISOString(),
         shippingTimeline: buildShoppingShippingTimeline(order.id, now, state.settings),

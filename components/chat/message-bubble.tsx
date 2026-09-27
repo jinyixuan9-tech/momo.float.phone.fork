@@ -26,7 +26,7 @@ import { retryChatGeneratedImage, saveChatImageDescription } from "@/lib/generat
 import { hasCharacterReferenceImage } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
-import { payWithWalletBalance } from "@/lib/wallet-storage";
+import { recordWalletPayment, formatCurrencyAmount, walletCurrency } from "@/lib/wallet-storage";
 import { formatShoppingPaymentRequestHistory } from "@/lib/shopping-payment-request";
 import { toCustomAppIconId } from "@/lib/custom-app-types";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
@@ -681,7 +681,7 @@ function RedPacketBubble({ msg, charName, userName, groupSize, onShowDetail }: {
                         {d?.label || "恭喜发财，大吉大利"}
                     </div>
                     {userShare != null && (
-                        <div className="ts-20 font-bold mt-1 ui-text-white-85">¥{userShare.toFixed(2)}</div>
+                        <div className="ts-20 font-bold mt-1 ui-text-white-85">{formatCurrencyAmount(userShare, walletCurrency(d?.currency))}</div>
                     )}
                     {isDeclined && <div className="ts-12 mt-1 ui-text-white-70">已退回</div>}
                 </div>
@@ -718,7 +718,7 @@ function TransferBubble({ msg, charName, userName, onShowDetail }: {
             <div className={`chat-transfer-body p-4 flex items-center gap-3 ${bgClass}`}>
                 <div className="ts-28 shrink-0">💰</div>
                 <div className="flex-1">
-                    <div className="text-white ts-24 font-bold">¥{d?.amount?.toFixed(2)}</div>
+                    <div className="text-white ts-24 font-bold">{formatCurrencyAmount(d?.amount ?? 0, walletCurrency(d?.currency))}</div>
                     <div className="ts-13 mt-0.5 ui-text-white-85">{d?.label || "转账"}</div>
                 </div>
             </div>
@@ -765,7 +765,7 @@ function PaymentRequestBubble({ msg, charName, userName, onShowDetail }: {
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="text-white ts-12 ui-text-white-85">{requester}发起代付请求</div>
-                    <div className="text-white ts-24 font-bold mt-1">¥{amount}</div>
+                    <div className="text-white ts-24 font-bold mt-1">{formatCurrencyAmount(Number(d?.amount ?? amount), walletCurrency(d?.currency))}</div>
                     <div className="ts-12 mt-1 ui-text-white-85 line-clamp-2">{itemsText || "商品订单"}</div>
                 </div>
             </div>
@@ -1766,7 +1766,7 @@ export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }
         const newStatus = newAllClaimed ? "opened" as const : "pending" as const;
         const updatedData = { ...d, status: newStatus, claimedBy: newClaimedBy, claimedAmounts: newClaimedAmounts };
         updateMessageMediaData(msg.id, updatedData);
-        onAccept({ ...msg, mediaData: updatedData }, `${userName}领取了${senderDisplay}的红包，金额:${share}元`, "accept_red_packet");
+        onAccept({ ...msg, mediaData: updatedData }, `${userName}领取了${senderDisplay}的红包，金额:${formatCurrencyAmount(share, walletCurrency(d?.currency))}`, "accept_red_packet");
     };
 
     const handleRedPacketDecline = () => {
@@ -1794,8 +1794,9 @@ export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }
             setPaymentError("金额无效，无法代付。");
             return;
         }
-        const result = payWithWalletBalance({
+        const result = recordWalletPayment({
             amount: safeAmount,
+            currency: walletCurrency(d?.currency),
             title: "代付",
             detail: formatShoppingPaymentRequestHistory({
                 amount: safeAmount,
@@ -1868,7 +1869,7 @@ export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }
                 {/* Header with gradient */}
                 <div className={`media-modal-header ${gradientClass}`}>
                     <div className="media-modal-emoji">{isRedPacket ? "🧧" : isTransfer ? "💰" : "🧾"}</div>
-                    <div className="media-modal-amount">¥{modalAmountText}</div>
+                    <div className="media-modal-amount">{formatCurrencyAmount(Number(d?.amount ?? modalAmountText), walletCurrency(d?.currency))}</div>
                     <div className="media-modal-label">
                         {isRedPacket ? (d?.label || "恭喜发财，大吉大利") : isTransfer ? (d?.label || "转账") : "代付请求"}
                     </div>

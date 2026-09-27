@@ -68,8 +68,9 @@ import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
-import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
+import { creditWalletBalance, payWithWalletBalance, loadWalletState, recordWalletPayment, recordWalletCredit, formatCurrencyAmount, walletCurrency } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
+import { syncShoppingDeliveries } from "@/lib/shopping-delivery";
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
 import type { RegexConfig } from "@/lib/settings-types";
 import { MacroEngine } from "@/lib/macro-engine";
@@ -732,7 +733,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>, label: "视频通话", onClick: onStartVideoCall },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
-        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><text x="12" y="16" textAnchor="middle" fontSize="12" fill="var(--c-text)" stroke="none">¥</text></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
+        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M7 14h10m-4-4 4 4-4 4" /></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
         { icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
@@ -1417,6 +1418,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const syncMessagesFromStorage = useCallback(() => {
         applyStoredMessageWindow(loadChatMessages(session.id));
     }, [applyStoredMessageWindow, session.id]);
+
+    useEffect(() => {
+        syncShoppingDeliveries();
+    }, [session.id]);
 
     const closeContextMenu = () => {
         setActiveMessageId(null);
@@ -2188,13 +2193,17 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             newStatus = "paid";
             sysText = `${charN}接受了${userN}的代付请求`;
             rawResponseText = `[${charN}接受了${userN}的代付]`;
-            settleShoppingPaymentRequest({
+            const settled = settleShoppingPaymentRequest({
                 orderId: targetMsg.mediaData?.shoppingOrderId,
                 requestId: targetMsg.mediaData?.paymentRequestId,
                 accepted: true,
                 payerCharacterId: session.contactId,
                 payerCharacterName: charN,
             });
+            if (!settled || settled.paymentStatus !== "paid_by_character") {
+                showChatToast(`${charN}的钱包余额不足，代付未完成`);
+                return;
+            }
         } else if (actionType === "decline_payment_request") {
             newStatus = "declined";
             sysText = `${charN}拒绝了${userN}的代付请求`;
@@ -2222,6 +2231,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 paymentPayerName: charN,
             } : {}),
         };
+        if ((actionType === "accept_red_packet" || actionType === "accept_transfer") && session.contactId) {
+            recordWalletCredit({ ownerId: session.contactId, amount: getMoneyMediaAmount(targetMsg.mediaData),
+                currency: walletCurrency(targetMsg.mediaData?.currency), title: `收到 ${userN}的${actionType === "accept_red_packet" ? "红包" : "转账"}`,
+                category: actionType === "accept_red_packet" ? "红包" : "转账", relatedMessageId: targetMsg.id });
+        }
         updateMessageMediaData(targetMsg.id, updatedMediaData);
         setMessages(prev => prev.map(m =>
             m.id === targetMsg.id ? { ...m, mediaData: updatedMediaData } : m
@@ -2283,6 +2297,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (action === "accept") {
             const prevAmounts = targetMsg.mediaData?.claimedAmounts || {};
             const share = calcRedPacketShare(targetMsg.mediaData?.amount || 0, prevAmounts, totalRecipients);
+            const recipientCharacter = groupCharacters.find(item => item.name === claimerName);
+            if (recipientCharacter && targetMsg.role === "user") recordWalletCredit({ ownerId: recipientCharacter.id, amount: share,
+                currency: walletCurrency(targetMsg.mediaData?.currency), title: `收到 ${ownerDisplay}的红包`, category: "红包",
+                relatedMessageId: `${targetMsg.id}:${recipientCharacter.id}` });
             const claimedBy = [...(targetMsg.mediaData?.claimedBy || []), claimerName];
             const claimedAmounts = { ...prevAmounts, [claimerName]: share };
             // 所有人都领完才标记 opened，否则保持 pending 让其他人继续领
@@ -2331,6 +2349,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const owner = ownerName || targetMsg.mediaData?.senderName || getMsgSender(targetMsg);
         const ownerDisplay = owner === (userIdentity?.name) ? "你" : owner;
         const newStatus = action === "accept" ? "received" as const : "declined" as const;
+        if (action === "accept" && targetMsg.role === "user") {
+            const recipientCharacter = groupCharacters.find(item => item.id === targetMsg.mediaData?.recipientId || item.name === claimerName);
+            if (recipientCharacter) recordWalletCredit({ ownerId: recipientCharacter.id, amount: getMoneyMediaAmount(targetMsg.mediaData),
+                currency: walletCurrency(targetMsg.mediaData?.currency), title: `收到 ${ownerDisplay}的转账`, category: "转账", relatedMessageId: targetMsg.id });
+        }
         const refundData = action === "decline" && targetMsg.role === "user"
             ? refundOutgoingMoneyMessage(targetMsg, "转账退回")
             : targetMsg.mediaData;
@@ -2376,12 +2399,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             paymentPayerName: claimerName,
         };
         if (targetMsg.role === "user") {
-            settleShoppingPaymentRequest({
+            const payer = groupCharacters.find(item => item.name === claimerName);
+            const settled = settleShoppingPaymentRequest({
                 orderId: targetMsg.mediaData?.shoppingOrderId,
                 requestId: targetMsg.mediaData?.paymentRequestId,
                 accepted: isAccept,
+                payerCharacterId: payer?.id,
                 payerCharacterName: claimerName,
             });
+            if (isAccept && (!settled || settled.paymentStatus !== "paid_by_character")) {
+                showChatToast(`${claimerName}的钱包余额不足，代付未完成`);
+                return;
+            }
         }
         updateMessageMediaData(targetMsg.id, updatedData);
         setMessages(prev => prev.map(m => m.id === targetMsg.id ? { ...m, mediaData: updatedData } : m));
@@ -3417,10 +3446,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return { ok: false };
         }
         const isRedPacket = mediaType === "red_packet";
-        const result = payWithWalletBalance({
-            amount,
+        const currency = walletCurrency(mediaData?.currency);
+        const result = recordWalletPayment({
+            amount, currency,
             title: isRedPacket ? "发红包" : "发转账",
-            detail: `${session.isGroup ? session.groupName || "群聊" : character?.name || "聊天"}：${isRedPacket ? "发红包" : "发转账"} ${amount.toFixed(2)} 元`,
+            detail: `${session.isGroup ? session.groupName || "群聊" : character?.name || "聊天"}：${isRedPacket ? "发红包" : "发转账"} ${formatCurrencyAmount(amount, currency)}`,
             category: isRedPacket ? "红包" : "转账",
         });
         if (!result.ok || !result.transaction) {
@@ -3441,7 +3471,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (!data?.walletTransactionId || data.walletRefundTransactionId) return data;
         const amount = getMoneyMediaAmount(data);
         if (amount <= 0) return data;
-        const result = creditWalletBalance(amount, reason, `${reason}：${data.label || msg.content || "聊天款项"}`, "聊天退款");
+        const debit = loadWalletState().transactions.find(tx => tx.id === data.walletTransactionId);
+        const result = recordWalletCredit({ amount: Math.abs(debit?.amount ?? amount), currency: debit?.currency ?? walletCurrency(data.currency), sourceCurrency: debit?.currency ?? walletCurrency(data.currency), title: reason, detail: `${reason}：${data.label || msg.content || "聊天款项"}`, category: "聊天退款", relatedMessageId: `${msg.id}:refund`, kind: "refund" });
         if (!result.ok || !result.transaction) return data;
         return {
             ...data,
@@ -3459,17 +3490,31 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             : Number(data?.amount ?? 0);
         const safeAmount = Number.isFinite(amount) ? Math.max(0, Math.round(amount * 100) / 100) : 0;
         if (safeAmount <= 0) return msg;
-        const result = creditWalletBalance(
-            safeAmount,
-            actionType === "accept_red_packet" ? "领取红包" : "收款",
-            `${actionType === "accept_red_packet" ? "领取红包" : "收款"}：${data?.label || msg.content || "聊天款项"}`,
-            actionType === "accept_red_packet" ? "红包" : "转账",
-        );
+        const result = recordWalletCredit({ amount: safeAmount, currency: walletCurrency(data?.currency),
+            title: actionType === "accept_red_packet" ? "领取红包" : "收款",
+            detail: `${actionType === "accept_red_packet" ? "领取红包" : "收款"}：${data?.label || msg.content || "聊天款项"}`,
+            category: actionType === "accept_red_packet" ? "红包" : "转账", relatedMessageId: msg.id });
         if (!result.ok || !result.transaction) return msg;
         const updatedData = {
             ...data,
             walletDepositTransactionId: result.transaction.id,
         };
+        updateMessageMediaData(msg.id, updatedData);
+        return { ...msg, mediaData: updatedData };
+    };
+
+    const refundIncomingMoneyMessage = (msg: ChatMessage, actionType: string): ChatMessage => {
+        if (actionType !== "decline_red_packet" && actionType !== "decline_transfer") return msg;
+        const data = msg.mediaData;
+        if (!data?.walletTransactionId || data.walletRefundTransactionId || (session.isGroup && (data.count || 1) > 1)) return msg;
+        const ownerId = msg.senderCharacterId || session.contactId;
+        if (!ownerId) return msg;
+        const debit = loadWalletState(ownerId).transactions.find(tx => tx.id === data.walletTransactionId);
+        if (!debit) return msg;
+        const result = recordWalletCredit({ ownerId, amount: Math.abs(debit.amount), currency: debit.currency || "CNY", sourceCurrency: debit.currency || "CNY",
+            title: actionType === "decline_red_packet" ? "红包退回" : "转账退回", category: "聊天退款", relatedMessageId: `${msg.id}:refund`, kind: "refund" });
+        if (!result.ok || !result.transaction) return msg;
+        const updatedData = { ...data, walletRefundTransactionId: result.transaction.id };
         updateMessageMediaData(msg.id, updatedData);
         return { ...msg, mediaData: updatedData };
     };
@@ -5154,6 +5199,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const seen = new Set<string>();
         return displayMessages.filter(m => {
             if (isReadingDiscussMessage(m)) return false;
+            if (m.role === "system" && m.mediaData?.label === "__shopping_delivery__") return false;
             if (seen.has(m.id)) return false;
             seen.add(m.id);
             return true;
@@ -6580,8 +6626,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <RedPacketModal
                     mode="red_packet"
                     isGroup={session.isGroup}
-                    onSend={(amount, label, count) => {
-                        const sent = sendRichMessage("red_packet", { amount, label, status: "pending", count: count || 1 });
+                    onSend={(amount, label, count, currency) => {
+                        const sent = sendRichMessage("red_packet", { amount, label, currency, status: "pending", count: count || 1 });
                         if (sent) setRichModal(null);
                     }}
                     onClose={() => setRichModal(null)}
@@ -6600,10 +6646,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             {richModal === "transfer" && (
                 <RedPacketModal
                     mode="transfer"
-                    onSend={(amount, label) => {
+                    onSend={(amount, label, _count, currency) => {
                         if (session.isGroup && transferTarget) {
                             const sent = sendRichMessage("transfer", {
-                                amount, label, status: "pending",
+                                amount, label, currency, status: "pending",
                                 senderName: userIdentity?.name || "你",
                                 recipientId: transferTarget.id,
                                 recipientName: transferTarget.name,
@@ -6613,7 +6659,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 setTransferTarget(null);
                             }
                         } else {
-                            const sent = sendRichMessage("transfer", { amount, label, status: "pending" });
+                            const sent = sendRichMessage("transfer", { amount, label, currency, status: "pending" });
                             if (sent) setRichModal(null);
                         }
                     }}
@@ -6708,7 +6754,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
                     onAccept={(updatedMsg, sysText, actionType) => {
                         const walletUpdatedMsg = updatedMsg.role === "assistant"
-                            ? creditIncomingMoneyMessage(updatedMsg, actionType)
+                            ? refundIncomingMoneyMessage(creditIncomingMoneyMessage(updatedMsg, actionType), actionType)
                             : updatedMsg;
                         setMessages(prev => prev.map(m => m.id === walletUpdatedMsg.id ? walletUpdatedMsg : m));
                         setMediaDetailMsg(null);

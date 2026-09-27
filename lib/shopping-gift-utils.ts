@@ -19,6 +19,7 @@ export type ShoppingGiftCandidate = {
   deliveredAt?: string;
   deliveredTimeLabel?: string;
   orderTimeLabel: string;
+  source?: "order" | "character";
 };
 
 type LoadShoppingGiftOptions = {
@@ -68,9 +69,11 @@ export function loadDeliveredShoppingGifts(options: LoadShoppingGiftOptions = {}
   const nowMs = options.nowMs ?? Date.now();
   const sentIds = options.includeSent ? new Set<string>() : loadSentShoppingGiftIds();
   const state = loadShoppingState();
+  if (!options.includeSent) for (const shipment of state.shipments) if (shipment.giftId) sentIds.add(shipment.giftId);
   const gifts: ShoppingGiftCandidate[] = [];
 
   for (const order of state.orders) {
+    if (order.recipientCharacterId) continue;
     if (!isOrderDelivered(order, nowMs)) continue;
     const deliveredEvent = getDeliveredEvent(order);
 
@@ -95,8 +98,24 @@ export function loadDeliveredShoppingGifts(options: LoadShoppingGiftOptions = {}
           deliveredAt: deliveredEvent?.timestamp,
           deliveredTimeLabel: deliveredEvent?.timeLabel,
           orderTimeLabel: order.timeLabel,
+          source: "order",
         });
       }
+    });
+  }
+
+  // Role-created Chat gifts are received possessions too. They have no delivery
+  // event in older data, so their card timestamp serves as the receipt time.
+  for (const session of loadChatSessions()) for (const message of loadChatMessages(session.id)) {
+    if (message.role !== "assistant" || message.mediaType !== "gift") continue;
+    const id = `character-gift::${message.id}`;
+    if (sentIds.has(id)) continue;
+    const data = message.mediaData;
+    gifts.push({ id, orderId: message.id, itemId: message.id, unitIndex: 1,
+      productName: data?.giftName || data?.label || "礼物", merchantLabel: data?.giftMerchantLabel || "角色赠礼",
+      priceLabel: data?.giftPriceLabel || "心意礼物", quantityLabel: "× 1", subtitle: "角色赠礼", detail: "聊天中收到的礼物",
+      previewIcon: data?.giftPreviewIcon || "🎁", tone: data?.giftTone || "ivory", deliveredAt: message.createdAt,
+      orderTimeLabel: new Date(message.createdAt).toLocaleDateString("zh-CN"), source: "character",
     });
   }
 

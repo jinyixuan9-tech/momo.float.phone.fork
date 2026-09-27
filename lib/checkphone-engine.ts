@@ -1,5 +1,6 @@
 import { mergeSmsIntoCheckPhone } from "./sms-checkphone";
 import { loadCharacters } from "./character-storage";
+import { formatCurrencyAmount, getWalletCurrencyBalance, loadWalletState, WALLET_CURRENCIES } from "./wallet-storage";
 import { normalizeBilingualTextInput, splitBilingualText } from "./bilingual-text";
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
 import { getChatMessagePreview, loadChatMessages, loadChatSessions, type ChatMessage, type ChatSession } from "./chat-storage";
@@ -5494,6 +5495,8 @@ export async function generateCheckPhoneAssets(
       snapshotSummary: previousPayload ? formatSnapshotSummary(previousPayload) : "",
       lastRefreshAt: previousUpdatedAt ?? "",
     });
+    const wallet = loadWalletState(characterId);
+    messages.push({ role: "system", content: `真实钱包当前余额：${WALLET_CURRENCIES.map(currency => `${currency} ${formatCurrencyAmount(getWalletCurrencyBalance(wallet, currency), currency)}`).join("；")}。财富水平：${wallet.wealthLevel || "未设置"}。收入来源：${wallet.incomeSources || "未设置"}。刷新只生成上次刷新之后的新收入和消费流水，原余额不得重新随机生成。账户余额字段需在原余额基础上按新流水加减；禁止重复生成此前的流水。` });
     const rawOutput = await sendLLMRequest(
       apiConfig,
       preset,

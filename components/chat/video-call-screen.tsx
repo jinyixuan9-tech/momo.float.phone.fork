@@ -497,7 +497,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 blob = await synthesizeSpeech(originalCallSpeech(subtitle.text), voiceConfig) || undefined;
                 if (blob) subtitleAudioCacheRef.current.set(subtitle.id, blob);
             }
-            if (!blob || stateRef.current === "ENDED" || minimizedRef.current || isSpeakerMutedRef.current) return;
+            if (!blob || (stateRef.current as string) === "ENDED" || minimizedRef.current || isSpeakerMutedRef.current) return;
             const { promise, abort } = playCallAudio(blob);
             audioAbortRef.current = abort;
             await promise;
@@ -505,7 +505,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
         finally {
             audioAbortRef.current = null;
             setPlayingSubtitleId(null);
-            if (stateRef.current !== "ENDED") setCallState("IDLE");
+            if ((stateRef.current as string) !== "ENDED") setCallState("IDLE");
         }
     }, [session.contactId, playCallAudio, playingSubtitleId]);
 

@@ -5,6 +5,16 @@ import type {
   CheckPhoneShoppingPayload,
   CheckPhoneShoppingProduct,
 } from "./checkphone-config";
+import type { WalletCurrency } from "./wallet-types";
+
+export type ShoppingRegion = "CN" | "KR" | "JP" | "US";
+export type ShoppingAddress = { id: string; ownerId?: string; name: string; phone: string; country: string; city: string; street: string; isDefault?: boolean };
+export type ShoppingShipment = {
+  id: string; sourceOrderId?: string; giftId?: string; item: ShoppingCartItem;
+  senderAddressId?: string; recipientCharacterId: string; recipientAddressId: string;
+  recipientName: string; recipientAddressLabel: string; notifyRecipient: boolean;
+  sentAt: string; deliverAt: string; noticeSentAt?: string;
+};
 
 export type ShoppingProduct = CheckPhoneShoppingProduct;
 export type ShoppingCartItem = CheckPhoneShoppingCartItem;
@@ -45,6 +55,10 @@ export type ShoppingState = {
   settings: ShoppingSettings;
   generatedAt?: string;
   updatedAt: string;
+  region: ShoppingRegion;
+  catalogsByRegion: Partial<Record<ShoppingRegion, ShoppingCatalog>>;
+  addresses: ShoppingAddress[];
+  shipments: ShoppingShipment[];
 };
 
 export type ShoppingRefreshResult = {

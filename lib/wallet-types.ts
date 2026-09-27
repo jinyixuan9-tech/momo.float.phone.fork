@@ -1,4 +1,5 @@
 export type WalletCardStyle = "obsidian" | "graphite" | "silver";
+export type WalletCurrency = "CNY" | "KRW" | "JPY" | "USD";
 
 export type WalletCard = {
   id: string;
@@ -30,6 +31,11 @@ export type WalletTransaction = {
   detail: string;
   balanceAfter: number;
   relatedOrderId?: string;
+  currency?: WalletCurrency;
+  originalCurrency?: WalletCurrency;
+  originalAmount?: number;
+  exchangeRate?: number;
+  relatedMessageId?: string;
 };
 
 export type WalletState = {
@@ -38,6 +44,13 @@ export type WalletState = {
   transactions: WalletTransaction[];
   defaultCardId: string;
   updatedAt: string;
+  currencyBalances: Partial<Record<WalletCurrency, number>>;
+  primaryCurrency: WalletCurrency;
+  displayCurrency: WalletCurrency;
+  autoConvertReceived: boolean;
+  wealthLevel?: string;
+  incomeSources?: string;
+  generateLivingTransactions?: boolean;
 };
 
 export type WalletPaymentInput = {
