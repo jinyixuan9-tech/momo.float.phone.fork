@@ -1,6 +1,6 @@
 import { sendLLMRequest } from "./chat-engine";
 import { loadApiConfigs, loadBindingConfig, loadPresets, resolveBinding } from "./settings-storage";
-import { twitterPublicAddress, type TwitterState, type TwitterPost, type TwitterCommunityCharacter } from "./twitter-storage";
+import { twitterClueGuidance, twitterPublicAddress, type TwitterState, type TwitterPost, type TwitterCommunityCharacter } from "./twitter-storage";
 import { twitterWorldBookText } from "./twitter-worldbooks";
 
 export type TwitterWorldComment = { name: string; handle: string; original: string; translated?: string };
@@ -110,7 +110,12 @@ export async function translateTwitterLegacy(entries: Array<{ id: string; origin
 
 export async function generateTwitterComments(state: TwitterState, post: TwitterPost, author: string, previous: string[]): Promise<TwitterWorldComment[]> {
   const publicAuthor = post.authorId.startsWith("user") ? twitterPublicAddress(state, post.authorId) : author;
-  const request = `请给以下虚构社交平台帖子生成 5 至 10 条新的自然路人评论。帖子作者：${publicAuthor}。帖子内容：“${post.original.slice(0, 800)}”。既有评论：“${previous.slice(-15).join("；").slice(0, 1300)}”。世界公开背景：${publicWorld(state, 1000)}。禁止真实时事与现实新闻、外链、曝光私密关系或角色主副账号之间的幕后联系。角色为副账号时，仅按该账号公开表现理解其身份。不要复述既有评论或已被删除的评论。原文可用自然的交流语言，外语另给中文译文。只输出 JSON：{"comments":[{"name":"虚构昵称","handle":"英文账号","original":"评论原文","translated":"中文译文"}]}。`;
+  const clueRule = twitterClueGuidance(state, post.authorId);
+  const recentPublicPosts = clueRule && state.accounts[post.authorId]?.allowClueProgression
+    ? state.posts.filter(item => item.authorId === post.authorId && item.id !== post.id && !item.replyToId).slice(-6).map(item => item.original.slice(0, 180)).join("；").slice(0, 800)
+    : "";
+  const priorDiscussion = recentPublicPosts ? state.posts.filter(item => item.replyToId && state.posts.some(parent => parent.id === item.replyToId && parent.authorId === post.authorId)).slice(-8).map(item => item.original.slice(0, 120)).join("；").slice(0, 700) : "";
+  const request = `请给以下虚构社交平台帖子生成 5 至 10 条新的自然路人评论。帖子作者：${publicAuthor}。帖子内容：“${post.original.slice(0, 800)}”。既有评论：“${previous.slice(-15).join("；").slice(0, 1300)}”。世界公开背景：${publicWorld(state, 1000)}。禁止真实时事与现实新闻、外链、曝光私密关系。${clueRule || "不要凭后台信息猜出其他账号的隐藏归属。"}${recentPublicPosts ? `此账号以前公开发过的内容：“${recentPublicPosts}”。此前网友公开讨论：“${priorDiscussion || "暂无"}”。只能在本帖确实提供新证据时谨慎推进猜测。` : ""}不要复述既有评论或已被删除的评论，不要求每批评论都有身份猜测。原文可用自然的交流语言，外语另给中文译文。只输出 JSON：{"comments":[{"name":"虚构昵称","handle":"英文账号","original":"评论原文","translated":"中文译文"}]}。`;
   const row = await ask(request);
   const comments = commentsFrom(row.comments);
   if (!comments.length) throw new Error("本次没有生成评论，请重试。");

@@ -149,7 +149,16 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
       <label>生日（可选）<input type="date" value={draft.birthday || ""} onChange={e => setDraft({ ...draft, birthday: e.target.value || undefined })} /></label>
       <label>加入时间（可选）<input type="month" value={draft.createdAt ? new Date(draft.createdAt).toISOString().slice(0, 7) : ""} onChange={e => setDraft({ ...draft, createdAt: e.target.value ? new Date(`${e.target.value}-01T00:00:00`).getTime() : undefined })} /></label>
       <label>认证标识<select value={draft.verification || "none"} onChange={e => setDraft({ ...draft, verification: e.target.value as TwitterProfile["verification"] })}><option value="none">无</option><option value="blue">蓝标 · 已认证账号</option><option value="gold">金标 · 组织账号</option><option value="grey">灰标 · 官方或多边组织</option></select></label>
-      {editAccount.endsWith(":alt") && <><label>对外身份与活动方式<textarea value={draft.identity || ""} onChange={e => setDraft({ ...draft, identity: e.target.value })} placeholder="例：不露脸的游戏博主，直播风格、日常行为等" /></label><label>与主账号关联<select value={draft.disclosure || "independent"} onChange={e => setDraft({ ...draft, disclosure: e.target.value as TwitterProfile["disclosure"] })}><option value="independent">独立身份 · 默认不披露</option><option value="full">完全披露</option><option value="clues">有线索披露</option></select></label>{draft.disclosure === "clues" && <label>可被发现的线索<textarea value={draft.disclosureClues || ""} onChange={e => setDraft({ ...draft, disclosureClues: e.target.value })} placeholder="只有网友从公开内容看到的线索" /></label>}</>}
+      {editAccount.endsWith(":alt") && <>
+        <label>对外身份与活动方式<textarea value={draft.identity || ""} onChange={e => setDraft({ ...draft, identity: e.target.value })} placeholder="例：不露脸的游戏博主，直播风格、日常行为等" /></label>
+        <h3>副账号披露设置</h3>
+        <label>与主账号关联<select value={draft.disclosure || "independent"} onChange={e => setDraft({ ...draft, disclosure: e.target.value as TwitterProfile["disclosure"] })}><option value="independent">独立身份 · 默认不披露</option><option value="full">完全披露</option><option value="clues">有线索披露</option></select></label>
+        <p>选择「有线索披露」后，可设置网友目前知道什么，以及之后是否继续猜测。</p>
+        {draft.disclosure === "clues" && <>
+          <label>可被发现的线索及目前网友的认知<textarea value={draft.disclosureClues || ""} onChange={e => setDraft({ ...draft, disclosureClues: e.target.value })} placeholder="例：两个账号晒过同款手表；目前只有少数网友觉得眼熟，还没人确定归属" /><small>自由描述公开线索，以及网友现在知道或怀疑到哪一步；不用填写百分比。</small></label>
+          <label>后续怎么猜<select value={draft.allowClueProgression ? "slow" : "limited"} onChange={e => setDraft({ ...draft, allowClueProgression: e.target.value === "slow" })}><option value="limited">只停留在当前线索和认知</option><option value="slow">遇到新的公开线索时慢慢继续猜</option></select><small>默认不继续猜。开启后也只看后来实际公开的内容，不会按固定速度推进。</small></label>
+        </>}
+      </>}
       <label>账号可见范围<select value={draft.visibility || "public"} onChange={e => setDraft({ ...draft, visibility: e.target.value === "protected" ? "protected" : "public" })}><option value="public">公开</option><option value="protected">私密</option></select></label>
       <div className={styles.manageCounts}><label>粉丝数<input type="number" min="0" value={draft.followers ?? 0} onChange={e => setDraft({ ...draft, followers: numberValue(e.target.value) })} /></label><label>关注数<input type="number" min="0" value={draft.followingCount ?? 0} onChange={e => setDraft({ ...draft, followingCount: numberValue(e.target.value) })} /></label></div>
       <p>主账号与副账号的粉丝数、身份、互动分别保存。</p>

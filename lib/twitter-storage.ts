@@ -16,6 +16,7 @@ export type TwitterProfile = {
   verification?: "none" | "blue" | "gold" | "grey";
   disclosure?: "independent" | "full" | "clues";
   disclosureClues?: string;
+  allowClueProgression?: boolean; // Only for "clues"; off means observers stop at the user-described awareness.
   characterIds?: string[]; // Group account only.
   includeUserPersona?: boolean;
 };
@@ -197,6 +198,18 @@ export function isPublicTwitterPost(state: TwitterState, post: TwitterPost): boo
 export function twitterPublicAddress(state: TwitterState, accountId = "user"): string {
   const profile = accountId === "user" ? state.profile : state.accounts[accountId] || state.characterProfiles[accountId];
   return profile?.publicAddress?.trim() || profile?.name?.trim() || "用户";
+}
+
+/** Only supplies what outsiders may infer from a secondary account's public clues. */
+export function twitterClueGuidance(state: TwitterState, accountId: string): string {
+  if (!accountId.endsWith(":alt")) return "";
+  const profile = state.accounts[accountId];
+  if (!profile || profile.disclosure === "independent" || !profile.disclosure) return "这个副账号没有公开与主账号的关联，网友不能凭后台账号关系猜出真实归属。";
+  if (profile.disclosure === "full") return "账号归属已由本人公开，可以自然讨论这一公开事实。";
+  const clues = profile.disclosureClues?.trim().slice(0, 900) || "暂无用户设定的公开线索";
+  return `此副账号公开可见的线索及目前网友对线索的认知：${clues}。这里只是网友能观察到的内容，不是身份已经证实。${profile.allowClueProgression
+    ? "仅在新公开动态出现可核对的新证据时，允许少数网友逐步提出猜测；没有新证据就停留在现有认知，不能凭空跳到实锤，也不要求每次生成都推进。"
+    : "网友最多提到或讨论当前已注意到的线索，不要从这条线索继续推断身份、增加新的怀疑或宣布实锤。"}`;
 }
 
 export function getTwitterPrivateAccountContext(characterId: string): string {

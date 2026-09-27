@@ -9,7 +9,7 @@ import { buildCharacterTimeContext } from "./character-time";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "./settings-storage";
 import type { RegexConfig } from "./settings-types";
 import { selectedTwitterWorldBooks } from "./twitter-worldbooks";
-import { isPublicTwitterPost, twitterPublicAddress, type TwitterMessage, type TwitterPost, type TwitterState } from "./twitter-storage";
+import { isPublicTwitterPost, twitterClueGuidance, twitterPublicAddress, type TwitterMessage, type TwitterPost, type TwitterState } from "./twitter-storage";
 
 export type TwitterGeneratedLine = { original: string; translated: string; photoDescription?: string };
 export type TwitterCommentDraft = { name: string; handle: string; original: string; translated?: string };
@@ -37,7 +37,7 @@ export async function generateTwitterText(input: {
   replyToMessage?: TwitterMessage;
   anonymous?: boolean;
   senderName?: string;
-  accountProfile?: { name: string; identity?: string; visibility?: "public" | "protected"; disclosure?: "independent" | "full" | "clues"; disclosureClues?: string };
+  accountProfile?: { name: string; identity?: string; visibility?: "public" | "protected"; disclosure?: "independent" | "full" | "clues"; disclosureClues?: string; allowClueProgression?: boolean };
   accountKind?: "alternate" | "group";
   communityName?: string;
   withComments?: boolean;
@@ -77,9 +77,13 @@ export async function generateTwitterText(input: {
   let instruction: string;
   if (input.kind === "post") {
     const recent = input.state.posts.filter(p => !p.replyToId && isPublicTwitterPost(input.state, p)).slice(-10).map(p => `${p.authorId === "user" ? twitterPublicAddress(input.state) : p.authorId === character.id ? character.name : "其他账号"}：${p.original}`).join("\n");
-    const accountRule = input.accountKind === "alternate" ? `你以副账号“${input.accountProfile?.name || "副账号"}”发帖；对外身份是“${input.accountProfile?.identity || "未设定"}”。账号关联方式：${input.accountProfile?.disclosure === "full" ? "已经完全公开与主账号的关系，可以自然谈及。" : input.accountProfile?.disclosure === "clues" ? `只存在以下可见线索“${input.accountProfile.disclosureClues || "无"}”，不能直接证实或曝光身份。` : "独立身份，不要主动泄漏与主账号的联系或私密记忆。"}` : "";
+    const altId = `${character.id}:alt`;
+    const priorClueDiscussion = input.accountKind === "alternate" && input.state.accounts[altId]?.allowClueProgression
+      ? input.state.posts.filter(p => p.replyToId && input.state.posts.some(parent => parent.id === p.replyToId && parent.authorId === altId)).slice(-8).map(p => p.original.slice(0, 130)).join("；").slice(0, 800)
+      : "";
+    const accountRule = input.accountKind === "alternate" ? `你以副账号“${input.accountProfile?.name || "副账号"}”发帖；对外身份是“${input.accountProfile?.identity || "未设定"}”。${twitterClueGuidance(input.state, altId)}${priorClueDiscussion ? `此前网友公开讨论过：“${priorClueDiscussion}”。只依据之后实际公开的新线索变化，不要突然升级为实锤。` : ""}发帖时尊重本账号设定，不得仅凭幕后身份主动泄漏私密记忆。` : "";
     const communityRule = input.communityName ? `这条发在“${input.communityName.slice(0, 60)}”社区，内容要贴合社区主题，不能因关联角色而公开其未公开的小号。` : "";
-    instruction = `${publicRule}\n${stateRule}\n${accountRule}\n${communityRule}\n近期公开帖子：\n${recent || "暂无"}\n根据本人设定、记忆与时间，自然发布一条适合当前情境的新帖子，可以回应近期公开话题，但不要机械模仿。可偶尔发照片；只有这次确实想配图时才填写 photoDescription，描述照片的主体、人物或场景，便于从该账号可用相册匹配；不发图时留空。${shared}\nJSON 格式：{"original":"帖子原文","translated":"中文译文","photoDescription":"配图描述，若不发图则留空"${input.withComments ? ',"comments":[{"name":"路人昵称","handle":"路人账号","original":"短评论原文","translated":"中文译文"}]' : ""}}。${input.withComments ? "同时给 5 至 10 条自然的路人评论，避免暴露副账号与主账号的隐藏关联。" : ""}`;
+    instruction = `${publicRule}\n${stateRule}\n${accountRule}\n${communityRule}\n近期公开帖子：\n${recent || "暂无"}\n根据本人设定、记忆与时间，自然发布一条适合当前情境的新帖子，可以回应近期公开话题，但不要机械模仿。可偶尔发照片；只有这次确实想配图时才填写 photoDescription，描述照片的主体、人物或场景，便于从该账号可用相册匹配；不发图时留空。${shared}\nJSON 格式：{"original":"帖子原文","translated":"中文译文","photoDescription":"配图描述，若不发图则留空"${input.withComments ? ',"comments":[{"name":"路人昵称","handle":"路人账号","original":"短评论原文","translated":"中文译文"}]' : ""}}。${input.withComments ? "同时给 5 至 10 条自然的路人评论；路人只能依据公开内容，若有副账号线索，按上面的线索规则决定是否出现少量未经证实的猜测，不能因后台归属直接宣布身份。" : ""}`;
   } else if (input.kind === "reply") {
     if (!input.targetPost) throw new Error("找不到要回复的帖子。");
     instruction = `${publicRule}\n${stateRule}\n你正在回复一条推特帖子，内容：“${input.targetPost.original.slice(0, 900)}”。直接回应具体内容，自然简短，不要离题。${shared}\nJSON 格式：{"original":"回复原文","translated":"中文译文"}`;
