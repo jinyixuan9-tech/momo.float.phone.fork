@@ -161,6 +161,7 @@ function normalizeWalletState(state: WalletState): WalletState {
     creditMaskedNumber: state.creditMaskedNumber || undefined,
     creditDebts: Object.fromEntries(WALLET_CURRENCIES.map(currency => [currency, roundWalletMoney(Math.max(0, Number(state.creditDebts?.[currency]) || 0), currency)])),
     lastLivingRefreshAt: state.lastLivingRefreshAt,
+    roleAssetsInitialized: state.roleAssetsInitialized === true,
   };
 }
 
@@ -225,6 +226,7 @@ function migrateLegacyParsedState(parsed: Record<string, unknown>): WalletState 
     creditMaskedNumber: cleanText(parsed.creditMaskedNumber, 40) || undefined,
     creditDebts: parsed.creditDebts && typeof parsed.creditDebts === "object" ? parsed.creditDebts as WalletState["creditDebts"] : {},
     lastLivingRefreshAt: cleanText(parsed.lastLivingRefreshAt, 80) || undefined,
+    roleAssetsInitialized: parsed.roleAssetsInitialized === true,
   });
 }
 

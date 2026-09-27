@@ -58,6 +58,7 @@ export type WalletState = {
   creditMaskedNumber?: string;
   creditDebts?: Partial<Record<WalletCurrency, number>>;
   lastLivingRefreshAt?: string;
+  roleAssetsInitialized?: boolean;
 };
 
 export type WalletPaymentInput = {

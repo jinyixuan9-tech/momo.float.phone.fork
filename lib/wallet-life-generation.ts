@@ -30,7 +30,24 @@ function parseEntries(raw: string, start: number, end: number): Entry[] {
 
 /** Each refresh advances its own cursor. Real payments never enter the prompt as generated history. */
 export async function refreshWalletLiving(ownerId?: string): Promise<{ count: number; skipped: number }> {
-  const wallet = loadWalletState(ownerId);
+  let wallet = loadWalletState(ownerId);
+  // Seed a new role once, without exposing its amount in the user's setup UI or
+  // recording fictitious income. Existing balances and historical ledgers win.
+  if (ownerId && !wallet.roleAssetsInitialized) {
+    if (!loadCharacters().some(character => character.id === ownerId)) throw new Error("找不到角色。");
+    const hasHistory = wallet.transactions.length > 0 || WALLET_CURRENCIES.some(currency => getWalletCurrencyBalance(wallet, currency) > 0 || (wallet.creditDebts?.[currency] || 0) > 0);
+    if (hasHistory) {
+      wallet = saveWalletState({ ...wallet, roleAssetsInitialized: true }, ownerId);
+    } else {
+      const proposal = await suggestWalletBase(ownerId, true);
+      wallet = saveWalletState({
+        ...wallet,
+        balance: proposal.currency === "CNY" ? proposal.amount : wallet.balance,
+        currencyBalances: proposal.currency === "CNY" ? wallet.currencyBalances : { ...wallet.currencyBalances, [proposal.currency]: proposal.amount },
+        roleAssetsInitialized: true,
+      }, ownerId);
+    }
+  }
   const now = Date.now();
   const last = wallet.lastLivingRefreshAt ? Date.parse(wallet.lastLivingRefreshAt) : NaN;
   const start = Number.isFinite(last) && last <= now ? last : now - 7 * 86400000;
@@ -69,7 +86,7 @@ export async function refreshWalletLiving(ownerId?: string): Promise<{ count: nu
 }
 
 /** Suggests a starting amount for review; does not write to the ledger. */
-export async function suggestWalletBase(ownerId?: string): Promise<{ currency: WalletCurrency; amount: number; explanation: string }> {
+export async function suggestWalletBase(ownerId?: string, blind = false): Promise<{ currency: WalletCurrency; amount: number; explanation: string }> {
   const wallet = loadWalletState(ownerId);
   const character = ownerId ? loadCharacters().find(c => c.id === ownerId) : null;
   const identity = resolveUserIdentity(ownerId, ownerId ? "checkphone" : "chat");
@@ -78,7 +95,7 @@ export async function suggestWalletBase(ownerId?: string): Promise<{ currency: W
   const api = configs.find(item => item.id === binding.apiConfigId) || configs[0];
   if (!api) throw new Error("请先设置 AI 接口。");
   const persona = character ? `${character.name}：${character.persona} ${character.personality || ""}` : `${identity?.name || "用户"}：${identity?.bio || ""} ${identity?.occupation || ""} ${identity?.customSettings || ""}`;
-  const raw = await sendLLMRequest(api, null, [{ role: "system", content: `根据人物设定建议一张储蓄卡的初始基础余额，供用户审核后决定是否采用。不要把它当作已经入账的流水。只输出 JSON 对象 {"currency":"${wallet.primaryCurrency}","amount":数字,"explanation":"简短中文理由"}。初始金额须与人物经济条件、所在地及收入合理匹配，若信息模糊就保守估计。人物：${persona}。补充财务情况：${wallet.wealthLevel || "未设置"}；收入来源：${wallet.incomeSources || "未设置"}。` }, { role: "user", content: "给出建议基础金额。" }], [], { characterName: character?.name, userName: identity?.name }, { skipOutputRegex: true, appId: "wallet_base" });
+  const raw = await sendLLMRequest(api, null, [{ role: "system", content: `根据人物设定建议一张储蓄卡的初始基础余额。${blind ? "这是角色的隐蔽初始化，金额只写入角色资产，不在用户的钱包设置中显示。" : "供用户审核后决定是否采用。"}不要把它当作已经入账的流水。只输出 JSON 对象 {"currency":"${wallet.primaryCurrency}","amount":数字,"explanation":"简短中文理由"}。初始金额须与人物经济条件、所在地及收入合理匹配，若信息模糊就保守估计。人物：${persona}。补充财务情况：${wallet.wealthLevel || "未设置"}；收入来源：${wallet.incomeSources || "未设置"}。` }, { role: "user", content: "给出建议基础金额。" }], [], { characterName: character?.name, userName: identity?.name }, { skipOutputRegex: true, appId: "wallet_base" });
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("无法解析建议金额，请重试。");
   let proposal: Record<string, unknown>;

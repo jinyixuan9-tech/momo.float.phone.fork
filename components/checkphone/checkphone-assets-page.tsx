@@ -13,7 +13,7 @@ export function CheckPhoneAssetsPage({ character, onBack }: { character: Charact
     setLoading(true); setError("");
     try {
       const result = await refreshWalletLiving(character.id);
-      if (result.skipped) setError(`${result.skipped} 条消费超过储蓄卡余额，未记入流水。可在设置中调整基础余额。`);
+      if (result.skipped) setError(`${result.skipped} 条消费超过储蓄卡余额，未记入流水。请到自己的资产设置检查角色配置。`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "刷新失败"); }
     finally { setLoading(false); }
   }
