@@ -18,6 +18,8 @@ import { formatChatUiTime } from "@/lib/chat-time";
 import { generateCheckPhonePhone } from "@/lib/checkphone-engine";
 import { clearPhoneSnapshot, loadPhoneSnapshot, savePhoneSnapshot } from "@/lib/checkphone-storage";
 import { normalizeBilingualTextInput, splitBilingualText } from "@/lib/bilingual-text";
+import { mergeNativePhoneIntoCheckPhone } from "@/lib/phone-checkphone";
+import { PHONE_EVENT } from "@/lib/phone-storage";
 
 type CheckPhonePhonePageProps = {
   character: Character;
@@ -97,6 +99,8 @@ export function CheckPhonePhonePage({ character, onBack }: CheckPhonePhonePagePr
   const [debugNormalizeError, setDebugNormalizeError] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [nativePhoneRevision, setNativePhoneRevision] = useState(0);
+  useEffect(() => { const refresh = () => setNativePhoneRevision(v => v + 1); window.addEventListener(PHONE_EVENT, refresh); return () => window.removeEventListener(PHONE_EVENT, refresh); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,7 +195,7 @@ export function CheckPhonePhonePage({ character, onBack }: CheckPhonePhonePagePr
     setConfirmClearOpen(false);
   }
 
-  const payload = snapshot?.payload ?? null;
+  const payload = useMemo(() => snapshot?.payload ? mergeNativePhoneIntoCheckPhone(character.id, snapshot.payload) : null, [snapshot, character.id, nativePhoneRevision]);
   const sq = searchQuery.trim().toLowerCase();
 
   const filteredRecents = useMemo(() => {

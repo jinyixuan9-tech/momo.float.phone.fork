@@ -13,6 +13,7 @@ import { PhotosApp } from "@/components/photos/photos-app";
 import { WeverseApp } from "@/components/weverse/weverse-app";
 import { LysnApp } from "@/components/lysn/lysn-app";
 import { SmsApp } from "@/components/sms/sms-app";
+import { PhoneApp } from "@/components/phone/phone-app";
 import { TwitterApp } from "@/components/twitter/twitter-app";
 import { maybeGenerateLysnBackgroundMessage } from "@/lib/lysn-background";
 import { maybeGenerateSmsBackgroundMessage } from "@/lib/sms-background";
@@ -124,6 +125,7 @@ import {
   type DesktopPageKey,
   ensureNativeSmsIcon,
   ensureNativeTwitterIcon,
+  ensureNativePhoneIcon,
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
@@ -1147,6 +1149,16 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
+  useEffect(() => {
+    const onPhoneRequest = (e: Event) => {
+      const characterId = String((e as CustomEvent).detail?.characterId || "");
+      if (!characterId) return;
+      setActiveApp("phone" as IconId);
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("phone-start-outgoing", { detail: { characterId } })), 300);
+    };
+    window.addEventListener("phone-request-outgoing", onPhoneRequest);
+    return () => window.removeEventListener("phone-request-outgoing", onPhoneRequest);
+  }, []);
   // Listen for theme CSS updates from 小卷
   useEffect(() => {
     const onThemeUpdate = () => {
@@ -1518,11 +1530,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           const sane = sanitizeDesktopFolders(hydratedFolders, normalized, hydratedDock, hydratedWidgets);
           const withSms = ensureNativeSmsIcon(sane.layout, hydratedWidgets, hydratedDock, sane.folders);
           const withTwitter = ensureNativeTwitterIcon(withSms.layout, hydratedWidgets, hydratedDock, sane.folders);
+          const withPhone = ensureNativePhoneIcon(withTwitter.layout, hydratedWidgets, hydratedDock, sane.folders);
           setFolders(sane.folders);
-          setLayout(withTwitter.layout);
-          if (sane.changed || withSms.changed || withTwitter.changed) {
+          setLayout(withPhone.layout);
+          if (sane.changed || withSms.changed || withTwitter.changed || withPhone.changed) {
             writeDesktopFolders(sane.folders);
-            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withTwitter.layout));
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withPhone.layout));
           }
           setDesktopReady(true);
           return;
@@ -1540,8 +1553,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           } as DesktopLayout;
           const withSms = ensureNativeSmsIcon(migrated, hydratedWidgets, hydratedDock, hydratedFolders);
           const withTwitter = ensureNativeTwitterIcon(withSms.layout, hydratedWidgets, hydratedDock, hydratedFolders);
-          setLayout(withTwitter.layout);
-          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withTwitter.layout));
+          const withPhone = ensureNativePhoneIcon(withTwitter.layout, hydratedWidgets, hydratedDock, hydratedFolders);
+          setLayout(withPhone.layout);
+          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withPhone.layout));
           kvRemove(ICON_LAYOUT_STORAGE_KEY_V1);
           setDesktopReady(true);
           return;
@@ -3963,6 +3977,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     if (activeApp === "sms") {
       return <SmsApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
+    if (activeApp === "phone") {
+      return <PhoneApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
     if (activeApp === "twitter") {
       return <TwitterApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
@@ -4326,15 +4343,16 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                       onClick={() => {
                         const call = incomingCall;
                         setIncomingCall(null);
-                        setActiveApp("chat" as IconId);
-                        setChatInitSessionId(call.sessionId);
-                        // Wait for chat-room to mount, then trigger the call screen
-                        // __fromBar prevents desktop-shell handler from re-showing the bar
-                        setTimeout(() => {
-                          window.dispatchEvent(new CustomEvent("ai-call-trigger", {
-                            detail: { sessionId: call.sessionId, type: call.type, __fromBar: true },
-                          }));
-                        }, 600);
+                        if (!call.isGroup && call.type === "voice") {
+                          setActiveApp("phone" as IconId);
+                          setTimeout(() => window.dispatchEvent(new CustomEvent("phone-open-incoming", { detail: { sessionId: call.sessionId } })), 350);
+                        } else {
+                          setActiveApp("chat" as IconId);
+                          setChatInitSessionId(call.sessionId);
+                          setTimeout(() => {
+                            window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId: call.sessionId, type: call.type, __fromBar: true } }));
+                          }, 600);
+                        }
                       }}
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

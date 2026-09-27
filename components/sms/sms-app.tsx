@@ -303,7 +303,7 @@ export function SmsApp({ onClose, onNotice }: { onClose: () => void; onNotice?: 
       <header className={styles.chatHeader}>
         <button className={styles.glass} aria-label="返回" onClick={back}><ArrowLeft size={22}/></button>
         <button className={styles.person} aria-label="长按联系人名称打开设置" onPointerDown={startContactPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={endPress} onContextMenu={e=>{e.preventDefault();endPress();showContactContext(e.currentTarget);}} onClick={()=>{skipClick.current=false;}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();showContactContext(e.currentTarget);}}}>{avatar(selectedThread.characterId)}<span className={styles.personName}>{name(selectedThread)} <ChevronRight size={12}/></span></button>
-        <button className={styles.glass} aria-label="视频暂不可用" title="视频暂不可用" disabled><Video size={21}/></button>
+        <button className={styles.glass} aria-label="打电话" title="打电话" onClick={()=>window.dispatchEvent(new CustomEvent("phone-request-outgoing", { detail: { characterId: selectedThread.characterId } }))}><Phone size={21}/></button>
       </header>
       <div className={styles.bubbles} ref={listRef}>
         {messages.length===0 && <div className={styles.chatEmpty}>发送第一条短信，或召唤角色主动说话</div>}
