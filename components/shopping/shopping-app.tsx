@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   CreditCard,
   Heart,
   HeartHandshake,
@@ -21,6 +22,7 @@ import {
   Trash2,
   Truck,
   WalletCards,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -453,6 +455,8 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   const [selectedFoodCurrency, setSelectedFoodCurrency] = useState<WalletCurrency | null>(null);
   const [ordersMode, setOrdersMode] = useState<ShoppingMode>("shop");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerClosing, setDrawerClosing] = useState(false);
+  const [drawerSection, setDrawerSection] = useState<"main" | "addresses">("main");
   const [regionEditorOpen, setRegionEditorOpen] = useState(false);
   const [newRegionCode, setNewRegionCode] = useState("");
   const [newRegionCountry, setNewRegionCountry] = useState("");
@@ -721,6 +725,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     resetShoppingScroll();
     setTranslationPreview(null);
     setSelectedTab(tabId);
+  }
+
+  function closeSettingsDrawer() {
+    setDrawerClosing(true);
+    window.setTimeout(() => { setDrawerOpen(false); setDrawerClosing(false); }, 210);
   }
 
   function openRefreshPicker() {
@@ -1440,7 +1449,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
           {!selectedProduct && !activeOrder && (selectedTab === "home" || selectedTab === "food") && <select aria-label="购物地区" value={state.region} onChange={event => switchRegion(event.target.value)} style={{ maxWidth: 70, border: "1px solid #eee", borderRadius: 14, padding: "9px 5px", background: "#fff", fontSize: 11 }}>
             {state.regions.filter(item => item.enabled).map(region => <option key={region.id} value={region.id}>{region.id}</option>)}
           </select>}
-          <button type="button" aria-label="购物设置" onClick={() => setDrawerOpen(true)} style={{ width: 40, height: 40, borderRadius: "50%", border: "1px solid #eaeaea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#333" }}><MoreHorizontal size={21} strokeWidth={2.35} /></button>
+          <button type="button" aria-label="购物设置" onClick={() => { setDrawerSection("main"); setDrawerClosing(false); setDrawerOpen(true); }} style={{ width: 40, height: 40, borderRadius: "50%", border: "1px solid #eaeaea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#333" }}><MoreHorizontal size={21} strokeWidth={2.35} /></button>
         </div>
       </header>
 
@@ -2067,7 +2076,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setPromptOpen(false)}>
           <div className="cp-shopping-translation-sheet" role="dialog" aria-modal="true" aria-label="购物提示词" onClick={event => event.stopPropagation()} style={{ maxHeight: "74vh" }}>
             <div className="cp-shopping-translation-head">
-              <span>{promptMode === "food" ? "外卖购物指令" : "Shopping 购物指令"}</span>
+              <span>{promptMode === "food" ? "Delivery 购物指令" : "Shopping 购物指令"}</span>
               <button type="button" onClick={() => setPromptOpen(false)}>Close</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
@@ -2434,19 +2443,37 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         <button type="button" onClick={addShoppingRegion} style={{ width: "100%", padding: 12, border: 0, background: "#ff6b00", color: "white", borderRadius: 12, marginTop: 12 }}>添加并启用</button>
       </div></div>}
 
-      {drawerOpen && <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setDrawerOpen(false)} style={{ zIndex: 102, justifyContent: "flex-end" }}><div role="dialog" aria-modal="true" aria-label="我的与购物设置" onClick={event => event.stopPropagation()} style={{ background: "#fff", width: "min(82vw, 330px)", height: "100%", padding: "65px 20px 24px", boxSizing: "border-box", display: "grid", alignContent: "start", gap: 10, overflowY: "auto" }}>
-        <strong style={{ fontSize: 18 }}>我的与购物设置</strong>
-        <span style={{ fontSize: 12, color: "#777" }}>本月购物支出 · {formatCurrencyAmount(state.orders.filter(order => order.paidAt && !order.canceledAt && new Date(order.paidAt).getMonth() === new Date().getMonth() && new Date(order.paidAt).getFullYear() === new Date().getFullYear()).reduce((sum, order) => sum + exchangeWalletAmount(parseShoppingAmount(order.totalLabel), order.currency || "CNY", currentRegion.currency), 0), currentRegion.currency)}（参考换算）</span>
-        <button type="button" onClick={() => { setDrawerOpen(false); setSelectedTab("account"); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>♡ 我的收藏</button>
-        <button type="button" onClick={() => { setDrawerOpen(false); setSelectedTab("items"); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>▣ 我的物品与仓库</button>
-        <button type="button" onClick={() => { setDrawerOpen(false); setAddressOwnerId(""); setAddressDraft({ name: "", phone: "", country: currentRegion.country, city: "", street: "" }); setAddressOpen(true); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>⌂ 地址管理 · {state.addresses.length} 个</button>
-        {state.addresses.length > 0 && <div style={{ fontSize: 11, color: "#777" }}>{state.addresses.map(address => <div key={address.id} style={{ marginBottom: 8 }}>{shoppingAddressLabel(address)} <button type="button" onClick={() => persist(current => ({ ...current, addresses: current.addresses.filter(item => item.id !== address.id) }))} style={{ border: 0, color: "#dc2626", background: "transparent" }}>删除</button></div>)}</div>}
-        <button type="button" onClick={() => { setDrawerOpen(false); setRegionEditorOpen(true); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>◎ 切换地区与币种</button>
-        <button type="button" onClick={() => { setDrawerOpen(false); openPromptSettings("shop"); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>Shopping 购物指令</button>
-        <button type="button" onClick={() => { setDrawerOpen(false); openPromptSettings("food"); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>外卖购物指令</button>
-        <button type="button" onClick={() => { setDrawerOpen(false); setClearConfirmOpen(true); }} style={{ padding: 12, border: 0, background: "#fff", color: "#dc2626", textAlign: "left" }}>清空购物痕迹</button>
-        <button type="button" onClick={() => setDrawerOpen(false)} style={{ marginTop: 8, padding: 12, border: 0, borderRadius: 12, background: "#f4f4f4" }}>关闭</button>
-      </div></div>}
+      {drawerOpen && <div className="cp-shopping-settings-scrim" data-closing={drawerClosing} role="presentation" onClick={closeSettingsDrawer}>
+        <aside className="cp-shopping-settings-drawer" role="dialog" aria-modal="true" aria-label={drawerSection === "main" ? "我的与购物设置" : "地址管理"} onClick={event => event.stopPropagation()}>
+          <div className="cp-shopping-settings-drawer-head">
+            {drawerSection === "addresses" && <button type="button" aria-label="返回我的" onClick={() => setDrawerSection("main")}><ChevronLeft size={17} /></button>}
+            <strong>{drawerSection === "main" ? "我的" : "地址管理"}</strong>
+            <button type="button" aria-label="关闭购物设置" onClick={closeSettingsDrawer}><X size={17} /></button>
+          </div>
+          <div className="cp-shopping-settings-drawer-scroll">
+            {drawerSection === "main" ? <>
+              <div className="cp-shopping-settings-spend"><span>本月购物支出</span><strong>{formatCurrencyAmount(state.orders.filter(order => order.paidAt && !order.canceledAt && new Date(order.paidAt).getMonth() === new Date().getMonth() && new Date(order.paidAt).getFullYear() === new Date().getFullYear()).reduce((sum, order) => sum + exchangeWalletAmount(parseShoppingAmount(order.totalLabel), order.currency || "CNY", currentRegion.currency), 0), currentRegion.currency)}</strong><small>按当前币种参考换算</small></div>
+              <div className="cp-shopping-settings-group">
+                <button type="button" onClick={() => { setDrawerOpen(false); setSelectedTab("account"); }}>我的收藏<ChevronRight size={15} /></button>
+                <button type="button" onClick={() => { setDrawerOpen(false); setSelectedTab("items"); }}>我的物品与仓库<ChevronRight size={15} /></button>
+                <button type="button" onClick={() => setDrawerSection("addresses")}>地址管理<span>{state.addresses.length} 个 <ChevronRight size={15} /></span></button>
+              </div>
+              <div className="cp-shopping-settings-group">
+                <button type="button" onClick={() => { setDrawerOpen(false); setRegionEditorOpen(true); }}>地区与币种<ChevronRight size={15} /></button>
+                <button type="button" onClick={() => { setDrawerOpen(false); openPromptSettings("shop"); }}>Shopping 购物指令<ChevronRight size={15} /></button>
+                <button type="button" onClick={() => { setDrawerOpen(false); openPromptSettings("food"); }}>Delivery 购物指令<ChevronRight size={15} /></button>
+              </div>
+              <div className="cp-shopping-settings-group cp-shopping-settings-danger"><button type="button" onClick={() => { setDrawerOpen(false); setClearConfirmOpen(true); }}>清空购物痕迹<ChevronRight size={15} /></button></div>
+            </> : <>
+              <div className="cp-shopping-settings-group cp-shopping-settings-addresses">
+                {state.addresses.length ? state.addresses.map(address => <div className="cp-shopping-settings-address" key={address.id}><div><strong>{address.name}</strong><span>{shoppingAddressLabel(address)}</span></div><button type="button" aria-label={`删除${address.name}的地址`} onClick={() => persist(current => ({ ...current, addresses: current.addresses.filter(item => item.id !== address.id) }))}>删除</button></div>) : <p>还没有保存地址</p>}
+              </div>
+              <button className="cp-shopping-settings-add-address" type="button" onClick={() => { setDrawerOpen(false); setAddressOwnerId(""); setAddressDraft({ name: "", phone: "", country: currentRegion.country, city: "", street: "" }); setAddressOpen(true); }}>添加地址</button>
+            </>}
+          </div>
+          <div className="cp-shopping-settings-drawer-footer"><button type="button" onClick={closeSettingsDrawer}>关闭</button></div>
+        </aside>
+      </div>}
 
       {foodCheckoutOpen && <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setFoodCheckoutOpen(false)} style={{ zIndex: 102 }}><div className="cp-shopping-translation-sheet" role="dialog" aria-modal="true" aria-label="外卖结算" onClick={event => event.stopPropagation()} style={{ maxHeight: "80vh", overflowY: "auto" }}>
         <div className="cp-shopping-translation-head"><span>外卖结算 · {formatCurrencyAmount(foodPayable, foodCurrency)}</span><button type="button" onClick={() => setFoodCheckoutOpen(false)}>关闭</button></div>

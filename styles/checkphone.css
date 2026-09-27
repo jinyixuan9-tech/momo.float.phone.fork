@@ -19983,3 +19983,131 @@
 .cp-scroll-guard > * {
   flex-shrink: 0;
 }
+
+/* Shopping / Delivery settings: right-edge drawer, matching the X sidebar gesture. */
+.cp-shopping-settings-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 102;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0;
+  background: rgba(16, 22, 28, 0.35);
+  animation: cp-shopping-settings-dim 220ms ease-out both;
+}
+.cp-shopping-settings-drawer {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 min(78%, 315px);
+  height: 100%;
+  min-width: 0;
+  padding: calc(var(--page-header-safe-top, 48px) + 12px) 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: #f7f7f9;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.09);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  color: #202124;
+  animation: cp-shopping-settings-in 240ms cubic-bezier(.22,.8,.2,1) both;
+}
+.cp-shopping-settings-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 2px 11px;
+}
+.cp-shopping-settings-drawer-head strong {
+  flex: 1;
+  font-size: calc(14px * var(--app-text-scale, 1));
+  font-weight: 650;
+}
+.cp-shopping-settings-drawer-head button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #e9e9ed;
+  color: #555a63;
+}
+.cp-shopping-settings-drawer-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.cp-shopping-settings-drawer-scroll::-webkit-scrollbar { display: none; }
+.cp-shopping-settings-spend {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 15px;
+  padding: 11px 13px;
+  border-radius: 13px;
+  background: #fff;
+}
+.cp-shopping-settings-spend span, .cp-shopping-settings-spend small {
+  color: #84858a;
+  font-size: calc(10px * var(--app-text-scale, 1));
+}
+.cp-shopping-settings-spend strong {
+  font-size: calc(14px * var(--app-text-scale, 1));
+  font-weight: 650;
+  line-height: 1.3;
+}
+.cp-shopping-settings-group {
+  overflow: hidden;
+  margin-bottom: 13px;
+  border-radius: 13px;
+  background: #fff;
+}
+.cp-shopping-settings-group > button {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 43px;
+  padding: 10px 13px;
+  border: 0;
+  background: transparent;
+  color: #303137;
+  text-align: left;
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  font-weight: 450;
+}
+.cp-shopping-settings-group > button + button,
+.cp-shopping-settings-address + .cp-shopping-settings-address { border-top: 1px solid #f1f1f4; }
+.cp-shopping-settings-group > button > svg,
+.cp-shopping-settings-group > button > span { color: #a6a7ad; }
+.cp-shopping-settings-group > button > span { display: flex; align-items: center; gap: 5px; font-size: calc(10px * var(--app-text-scale, 1)); }
+.cp-shopping-settings-danger > button { color: #d52d33; }
+.cp-shopping-settings-drawer-footer { padding-top: 9px; }
+.cp-shopping-settings-drawer-footer > button,
+.cp-shopping-settings-add-address {
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: #e9e9ed;
+  color: #303137;
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+.cp-shopping-settings-add-address { background: #fff; }
+.cp-shopping-settings-addresses > p { margin: 0; padding: 15px 13px; color: #85868b; font-size: calc(11px * var(--app-text-scale, 1)); }
+.cp-shopping-settings-address { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+.cp-shopping-settings-address > div { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.cp-shopping-settings-address strong { font-size: calc(11px * var(--app-text-scale, 1)); font-weight: 600; }
+.cp-shopping-settings-address span { color: #85868b; font-size: calc(10px * var(--app-text-scale, 1)); overflow-wrap: anywhere; }
+.cp-shopping-settings-address > button { flex: 0 0 auto; border: 0; background: transparent; color: #d52d33; font-size: calc(10px * var(--app-text-scale, 1)); }
+@keyframes cp-shopping-settings-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes cp-shopping-settings-dim { from { background: rgba(16, 22, 28, 0); } to { background: rgba(16, 22, 28, .35); } }
+.cp-shopping-settings-scrim[data-closing="true"] { animation: cp-shopping-settings-undim 210ms ease-in both; }
+.cp-shopping-settings-scrim[data-closing="true"] .cp-shopping-settings-drawer { animation: cp-shopping-settings-out 210ms ease-in both; }
+@keyframes cp-shopping-settings-out { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes cp-shopping-settings-undim { from { background: rgba(16, 22, 28, .35); } to { background: rgba(16, 22, 28, 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .cp-shopping-settings-scrim, .cp-shopping-settings-drawer { animation: none; }
+}
