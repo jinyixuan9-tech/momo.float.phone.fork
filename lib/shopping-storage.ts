@@ -1,5 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import type { ShoppingAddress, ShoppingCategory, ShoppingRegion, ShoppingSearchResult, ShoppingShipment, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
+import type { ShoppingAddress, ShoppingCategory, ShoppingCustomCategory, ShoppingRegion, ShoppingSearchResult, ShoppingShipment, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
 import { walletCurrency } from "./wallet-storage";
 import { DEFAULT_SHOPPING_REFRESH_PROMPT, DEFAULT_SHOPPING_SEARCH_PROMPT, SHOPPING_RECOMMENDATION_CATEGORIES } from "./shopping-engine";
 
@@ -61,6 +61,13 @@ function normalizeProduct(value: unknown): ShoppingState["catalog"]["recommendat
     previewIcon,
     tone,
     currency: record.currency ? walletCurrency(record.currency) : undefined,
+    brandLabel: cleanText(record.brandLabel, 100) || undefined,
+    mode: record.mode === "food" ? "food" : "shop",
+    categoryIds: Array.isArray(record.categoryIds) ? record.categoryIds.map(item => cleanText(item, 80)).filter(Boolean).slice(0, 12) : undefined,
+    variantGroups: Array.isArray(record.variantGroups) ? record.variantGroups.slice(0, 4).map(value => {
+      const group = value as { name?: string; options?: Array<{ label?: string; extra?: number }> };
+      return { name: cleanText(group.name, 30), options: Array.isArray(group.options) ? group.options.slice(0, 8).map(option => ({ label: cleanText(option.label, 50), extra: Math.max(0, Number(option.extra) || 0) })).filter(option => option.label) : [] };
+    }).filter(group => group.name && group.options.length) : undefined,
   };
 }
 
@@ -69,8 +76,8 @@ function normalizeCategory(value: unknown): ShoppingCategory | null {
   const record = value as Record<string, unknown>;
   const title = cleanText(record.title, 80);
   const template = SHOPPING_RECOMMENDATION_CATEGORIES.find(category => category.title === title);
-  const items = normalizeArray(record.items, normalizeProduct).slice(0, 12);
-  if (!title || items.length === 0) return null;
+  const items = normalizeArray(record.items, normalizeProduct).slice(0, 240);
+  if (!title) return null;
   return {
     id: cleanText(record.id, 80) || template?.id || title,
     title,
@@ -87,6 +94,8 @@ function normalizeCartItem(value: unknown): ShoppingState["cartItems"][number] |
     ...product,
     tagLabel: product.tagLabel || "购物车",
     quantityLabel: cleanText(record.quantityLabel, 40) || "x 1",
+    selectedOptions: Array.isArray(record.selectedOptions) ? record.selectedOptions.map(item => cleanText(item, 50)).slice(0, 8) : undefined,
+    unitPrice: Number.isFinite(Number(record.unitPrice)) ? Number(record.unitPrice) : undefined,
   };
 }
 
@@ -154,6 +163,8 @@ function normalizeOrder(value: unknown): ShoppingState["orders"][number] | null 
     paymentDeclinedAt: cleanText(record.paymentDeclinedAt, 80) || undefined,
     characterPaidAt: cleanText(record.characterPaidAt, 80) || undefined,
     currency: record.currency ? walletCurrency(record.currency) : undefined,
+    mode: record.mode === "food" ? "food" : "shop",
+    canceledAt: cleanText(record.canceledAt, 80) || undefined,
     recipientCharacterId: cleanText(record.recipientCharacterId, 120) || undefined,
     recipientAddressId: cleanText(record.recipientAddressId, 120) || undefined,
     recipientName: cleanText(record.recipientName, 120) || undefined,
@@ -194,6 +205,12 @@ export function createDefaultShoppingState(): ShoppingState {
     updatedAt: new Date().toISOString(),
     region: "CN",
     catalogsByRegion: {},
+    foodCatalogsByRegion: {},
+    customCategories: [],
+    dismissedProductKeys: [],
+    foodCartItems: [],
+    claimedCoupons: [],
+    usedCoupons: [],
     addresses: [],
     shipments: [],
   };
@@ -220,10 +237,13 @@ export function loadShoppingState(): ShoppingState {
     const deliveryMaxMinutes = normalizeDeliveryMinutes(settingsRaw.deliveryMaxMinutes, DEFAULT_DELIVERY_MAX_MINUTES);
     const region = (["CN", "KR", "JP", "US"].includes(String(parsed.region)) ? parsed.region : "CN") as ShoppingRegion;
     const catalogsByRegion: ShoppingState["catalogsByRegion"] = {};
+    const foodCatalogsByRegion: ShoppingState["foodCatalogsByRegion"] = {};
     const cached = parsed.catalogsByRegion && typeof parsed.catalogsByRegion === "object" ? parsed.catalogsByRegion as Record<string, unknown> : {};
     for (const key of ["CN", "KR", "JP", "US"] as ShoppingRegion[]) {
       const raw = cached[key] && typeof cached[key] === "object" ? cached[key] as Record<string, unknown> : null;
       if (raw) { const categories = normalizeArray(raw.categories, normalizeCategory); catalogsByRegion[key] = { categories, recommendations: categories.flatMap(category => category.items) }; }
+      const foodRaw = parsed.foodCatalogsByRegion && typeof parsed.foodCatalogsByRegion === "object" ? (parsed.foodCatalogsByRegion as Record<string, unknown>)[key] : null;
+      if (foodRaw && typeof foodRaw === "object") { const categories = normalizeArray((foodRaw as Record<string, unknown>).categories, normalizeCategory); foodCatalogsByRegion[key] = { categories, recommendations: categories.flatMap(category => category.items) }; }
     }
     const addresses: ShoppingAddress[] = Array.isArray(parsed.addresses) ? parsed.addresses.map(value => {
       const a = value as Partial<ShoppingAddress>;
@@ -261,7 +281,17 @@ export function loadShoppingState(): ShoppingState {
       },
       generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : undefined,
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
-      region, catalogsByRegion, addresses, shipments,
+      region, catalogsByRegion, foodCatalogsByRegion, addresses, shipments,
+      foodCartItems: normalizeArray(parsed.foodCartItems, normalizeCartItem).slice(0, 80),
+      claimedCoupons: Array.isArray(parsed.claimedCoupons) ? parsed.claimedCoupons.map(item => cleanText(item, 30)).filter(Boolean) : [],
+      usedCoupons: Array.isArray(parsed.usedCoupons) ? parsed.usedCoupons.map(item => cleanText(item, 30)).filter(Boolean) : [],
+      dismissedProductKeys: Array.isArray(parsed.dismissedProductKeys) ? parsed.dismissedProductKeys.map(item => cleanText(item, 450)).filter(Boolean).slice(-400) : [],
+      customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories.map(value => {
+        const item = value as Partial<ShoppingCustomCategory>;
+        const id = cleanText(item.id, 80), title = cleanText(item.title, 60);
+        if (!id || !title) return null;
+        return { id, title, subtitle: cleanText(item.subtitle, 160), mode: item.mode === "food" ? "food" : "shop", match: item.match === "brand" || item.match === "store" ? item.match : "type" } as ShoppingCustomCategory;
+      }).filter((item): item is ShoppingCustomCategory => Boolean(item)).slice(0, 50) : [],
     };
   } catch {
     return createDefaultShoppingState();

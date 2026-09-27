@@ -273,6 +273,10 @@ export type CheckPhoneShoppingProduct = {
   previewIcon: string;
   tone: CheckPhoneShoppingTone;
   currency?: WalletCurrency;
+  brandLabel?: string;
+  variantGroups?: Array<{ name: string; options: Array<{ label: string; extra: number }> }>;
+  categoryIds?: string[];
+  mode?: "shop" | "food";
 };
 
 export type CheckPhoneShoppingCartItem = CheckPhoneShoppingProduct & {

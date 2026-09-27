@@ -10,6 +10,7 @@ import {
   Heart,
   HeartHandshake,
   Home,
+  UtensilsCrossed,
   Minus,
   MoreHorizontal,
   Plus,
@@ -30,11 +31,12 @@ import { ConfirmDialog } from "@/components/ui";
 import { splitBilingualText } from "@/lib/bilingual-text";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
-import { createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
+import { createOrGetSession, pushChatMessage, loadChatMessages, deleteChatMessagesByIds } from "@/lib/chat-storage";
 import {
   DEFAULT_SHOPPING_REFRESH_PROMPT,
   DEFAULT_SHOPPING_SEARCH_PROMPT,
   generateShoppingCatalog,
+  buildSelectiveShoppingPrompt,
   generateShoppingSearchResults,
   SHOPPING_RECOMMENDATION_CATEGORIES,
 } from "@/lib/shopping-engine";
@@ -47,6 +49,8 @@ import {
 } from "@/lib/shopping-payment-request";
 import { createDefaultShoppingState, loadShoppingState, saveShoppingState, SHOPPING_STATE_UPDATED_EVENT } from "@/lib/shopping-storage";
 import type { ShoppingAddress, ShoppingCartItem, ShoppingCategory, ShoppingOrder, ShoppingProduct, ShoppingRegion, ShoppingShippingEvent, ShoppingState } from "@/lib/shopping-types";
+import type { ShoppingCustomCategory, ShoppingMode } from "@/lib/shopping-types";
+import { catalogCategoryDefinitions, customCategoryMatches, mergeGeneratedCatalog, productIdentity, removeCatalogProduct } from "@/lib/shopping-catalog";
 import { announceShoppingGift, shoppingAddressLabel, shoppingDeliveryEstimate, shippingTimelineForOrder, syncShoppingDeliveries } from "@/lib/shopping-delivery";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
 import {
@@ -59,6 +63,8 @@ import {
   WALLET_UPDATED_EVENT,
   formatCurrencyAmount,
   recordWalletPayment,
+  recordWalletCredit,
+  saveWalletState,
   getWalletCurrencyBalance,
   exchangeWalletAmount,
 } from "@/lib/wallet-storage";
@@ -71,8 +77,8 @@ type ShoppingAppProps = {
   onBusyChange?: (isBusy: boolean) => void;
 };
 
-type ShoppingTabId = "home" | "orders" | "cart" | "account" | "items";
-type ShoppingSectionSearchTabId = Exclude<ShoppingTabId, "home">;
+type ShoppingTabId = "home" | "food" | "orders" | "cart" | "account" | "items";
+type ShoppingSectionSearchTabId = "orders" | "cart" | "account" | "items";
 
 type ShoppingProductDetail = ShoppingProduct & {
   quantityLabel?: string;
@@ -108,11 +114,10 @@ const DEFAULT_DELIVERY_MIN_MINUTES = 60;
 const DEFAULT_DELIVERY_MAX_MINUTES = 180;
 
 const SHOPPING_TABS: Array<{ id: ShoppingTabId; label: string; icon: LucideIcon }> = [
-  { id: "home", label: "Home", icon: Home },
-  { id: "orders", label: "Orders", icon: Truck },
-  { id: "cart", label: "Cart", icon: ShoppingCart },
-  { id: "account", label: "Favorites", icon: Heart },
-  { id: "items", label: "我的物品", icon: Home },
+  { id: "home", label: "商城", icon: Home },
+  { id: "food", label: "外卖", icon: UtensilsCrossed },
+  { id: "cart", label: "购物车", icon: ShoppingCart },
+  { id: "orders", label: "订单", icon: Truck },
 ];
 
 const SHOPPING_SECTION_SEARCH_PLACEHOLDERS: Record<ShoppingSectionSearchTabId, string> = {
@@ -123,14 +128,14 @@ const SHOPPING_SECTION_SEARCH_PLACEHOLDERS: Record<ShoppingSectionSearchTabId, s
 };
 
 const REGION_OPTIONS: Record<ShoppingRegion, { label: string; country: string; currency: WalletCurrency; prompt: string }> = {
-  CN: { label: "中国 · Shopping", country: "中国", currency: "CNY", prompt: "中国购物平台风格；商品文案以中文为主，价格必须以人民币 ¥ 表示。" },
-  KR: { label: "韩国 · Shopping", country: "韩国", currency: "KRW", prompt: "韩国购物平台风格；商家与商品文案优先韩文，价格必须是合理的韩元 ₩ 整数，可附中文译文。" },
-  JP: { label: "日本 · Shopping", country: "日本", currency: "JPY", prompt: "日本购物平台风格；商家与商品文案优先日文，价格必须是合理的日元 ¥ 整数，可附中文译文。" },
-  US: { label: "美国 · Shopping", country: "美国", currency: "USD", prompt: "美国购物平台风格；商家与商品文案优先英文，价格必须以美元 $ 表示，可附中文译文。" },
+  CN: { label: "CN", country: "中国", currency: "CNY", prompt: "中国购物平台风格；商品文案以中文为主，价格必须以人民币 ¥ 表示。" },
+  KR: { label: "KR", country: "韩国", currency: "KRW", prompt: "韩国购物平台风格；商家与商品文案优先韩文，价格必须是合理的韩元 ₩ 整数，可附中文译文。" },
+  JP: { label: "JP", country: "日本", currency: "JPY", prompt: "日本购物平台风格；商家与商品文案优先日文，价格必须是合理的日元 ¥ 整数，可附中文译文。" },
+  US: { label: "US", country: "美国", currency: "USD", prompt: "美国购物平台风格；商家与商品文案优先英文，价格必须以美元 $ 表示，可附中文译文。" },
 };
 
 function isShoppingSectionSearchTab(tab: ShoppingTabId): tab is ShoppingSectionSearchTabId {
-  return tab !== "home";
+  return tab !== "home" && tab !== "food";
 }
 
 function parseShoppingAmount(label: string): number {
@@ -311,6 +316,7 @@ function toProductDetail(
   defaults?: { tagLabel?: string; quantityLabel?: string; detailLabel?: string },
 ): ShoppingProductDetail {
   return {
+    ...item,
     id: item.id,
     title: item.title,
     merchantLabel: item.merchantLabel,
@@ -327,6 +333,7 @@ function toProductDetail(
 
 function baseProduct(product: ShoppingProductDetail | ShoppingProduct): ShoppingProduct {
   return {
+    ...product,
     id: product.id,
     title: product.title,
     merchantLabel: product.merchantLabel,
@@ -345,7 +352,7 @@ function mergeShoppingProducts(...groups: ShoppingProduct[][]): ShoppingProduct[
   const merged: ShoppingProduct[] = [];
 
   for (const product of groups.flat()) {
-    const key = product.id || `${product.title}|${product.merchantLabel}|${product.priceLabel}`;
+    const key = productIdentity(product);
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(product);
@@ -397,6 +404,7 @@ function buildOrderFromCart(
     payerCharacterName: options.payerCharacterName,
     paymentRequestedAt: options.paymentRequestedAt,
     items: cartItems.map((item, index) => ({
+      ...item,
       id: `${id}_item_${index + 1}`,
       title: item.title,
       merchantLabel: item.merchantLabel,
@@ -439,6 +447,22 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     items: "",
   });
   const [selectedCategoryId, setSelectedCategoryId] = useState("all");
+  const [foodCategoryId, setFoodCategoryId] = useState("all");
+  const [cartMode, setCartMode] = useState<ShoppingMode>("shop");
+  const [ordersMode, setOrdersMode] = useState<ShoppingMode>("shop");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [refreshPickerOpen, setRefreshPickerOpen] = useState(false);
+  const [selectedRefreshIds, setSelectedRefreshIds] = useState<string[]>([]);
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState("");
+  const [categoryMatch, setCategoryMatch] = useState<ShoppingCustomCategory["match"]>("store");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [confirmCatalogDelete, setConfirmCatalogDelete] = useState<ShoppingProduct | null>(null);
+  const [selectedVariantOptions, setSelectedVariantOptions] = useState<string[]>([]);
+  const [foodCheckoutOpen, setFoodCheckoutOpen] = useState(false);
+  const [shippingMethod, setShippingMethod] = useState<"express" | "standard" | "air" | "sea">("express");
+  const [useCoupon, setUseCoupon] = useState(true);
+  const [cancelOrderCandidate, setCancelOrderCandidate] = useState<ShoppingOrder | null>(null);
   const [recentlyAddedProductId, setRecentlyAddedProductId] = useState<string | null>(null);
   const [cartFeedback, setCartFeedback] = useState<ShoppingCartFeedback | null>(null);
   const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false);
@@ -554,6 +578,12 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     );
     return { orderAmount, totalPayment: orderAmount };
   }, [state.cartItems]);
+  const foodTotal = state.foodCartItems.reduce((sum, item) => sum + (item.unitPrice ?? parseShoppingAmount(item.priceLabel)) * parseShoppingQuantity(item.quantityLabel), 0);
+  const foodCurrency = state.foodCartItems[0]?.currency || REGION_OPTIONS[state.region].currency;
+  const shopCouponAvailable = state.claimedCoupons.includes("shop") && !state.usedCoupons.includes("shop");
+  const foodCouponAvailable = state.claimedCoupons.includes("food") && !state.usedCoupons.includes("food");
+  const foodDiscount = useCoupon && foodCouponAvailable ? Math.min(Math.max(0, foodTotal - 1), exchangeWalletAmount(10, "CNY", foodCurrency)) : 0;
+  const foodPayable = Math.max(0, foodTotal - foodDiscount);
   const cartCurrency = state.cartItems[0]?.currency || REGION_OPTIONS[state.region].currency;
   const shopperAddresses = state.addresses.filter(address => !address.ownerId);
   const recipientAddresses = state.addresses.filter(address => address.ownerId === recipientId);
@@ -562,9 +592,12 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   const deliveryFrom = shopperAddresses.find(address => address.id === senderAddressId) || shopperAddresses[0];
   const storeAddress: ShoppingAddress = { country: REGION_OPTIONS[state.region].country, city: "", street: "", name: "商家", phone: "", id: "store" };
   const checkoutAddress = recipientId ? currentRecipientAddress : deliveryFrom;
-  const deliveryEstimate = checkoutAddress ? shoppingDeliveryEstimate(storeAddress, checkoutAddress) : null;
+  const internationalShipping = Boolean(checkoutAddress && checkoutAddress.country !== REGION_OPTIONS[state.region].country);
+  const effectiveShippingMethod = internationalShipping ? (shippingMethod === "sea" ? "sea" : "air") : (shippingMethod === "standard" ? "standard" : "express");
+  const deliveryEstimate = checkoutAddress ? shoppingDeliveryEstimate(storeAddress, checkoutAddress, effectiveShippingMethod) : null;
   const shippingFee = deliveryEstimate ? exchangeWalletAmount(deliveryEstimate.fee, "CNY", cartCurrency) : 0;
-  const checkoutTotal = cartTotals.totalPayment + shippingFee;
+  const shopDiscount = useCoupon && shopCouponAvailable ? Math.min(Math.max(0, cartTotals.totalPayment - 1), exchangeWalletAmount(20, "CNY", cartCurrency)) : 0;
+  const checkoutTotal = Math.max(0, cartTotals.totalPayment + shippingFee - shopDiscount);
   const warehouseGifts = selectedTab === "items" ? loadDeliveredShoppingGifts() : [];
   const selectedPaymentSource = useMemo(() => selectedPaymentSourceId === "wallet_credit_card" && walletState.creditEnabled
     ? { id: "wallet_credit_card", title: "信用卡", balance: 0, description: "跨币种消费，之后从储蓄卡还款" }
@@ -583,11 +616,16 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     : state.catalog.recommendations.length > 0
       ? [{ id: "featured", title: "精选推荐", subtitle: "为你推荐", items: state.catalog.recommendations }]
       : [];
+  const currentMode: ShoppingMode = selectedTab === "food" ? "food" : "shop";
+  const currentDefinitions = catalogCategoryDefinitions(currentMode, state.region, state.customCategories);
+  const foodCategories = state.foodCatalogsByRegion[state.region]?.categories || [];
+  const visibleFoodCategories = foodCategoryId === "all" ? foodCategories : foodCategories.filter(category => category.id === foodCategoryId);
+  const foodProducts = foodCategoryId === "all" ? mergeShoppingProducts(state.foodCatalogsByRegion[state.region]?.recommendations || [], ...visibleFoodCategories.map(category => category.items)) : mergeShoppingProducts(...visibleFoodCategories.map(category => category.items));
   const visibleCatalogCategories = selectedCategoryId === "all"
     ? catalogCategories
     : catalogCategories.filter(category => category.id === selectedCategoryId || category.title === selectedCategoryId);
   const searchResultProducts = state.searchResult?.items ?? [];
-  const allCatalogProducts = mergeShoppingProducts(searchResultProducts, catalogCategories.flatMap(category => category.items));
+  const allCatalogProducts = mergeShoppingProducts(searchResultProducts, state.catalog.recommendations, catalogCategories.flatMap(category => category.items));
   const normalizedHomeSearchQuery = normalizeShoppingSearchValue(searchInput);
   const filteredAllCatalogProducts = normalizedHomeSearchQuery
     ? allCatalogProducts.filter(item => productMatchesSearch(item, normalizedHomeSearchQuery))
@@ -666,19 +704,39 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     setSelectedTab(tabId);
   }
 
-  async function handleRefresh() {
-    if (loading) return;
+  function openRefreshPicker() {
+    const mode: ShoppingMode = selectedTab === "food" ? "food" : "shop";
+    const activeId = mode === "food" ? foodCategoryId : selectedCategoryId;
+    setSelectedRefreshIds(activeId !== "all" && activeId !== "search" ? [activeId] : []);
+    setRefreshPickerOpen(true);
+  }
+
+  async function handleRefresh(ids: string[], mode: ShoppingMode) {
+    if (loading || !ids.length) return;
+    const region = state.region;
+    const allDefinitions = catalogCategoryDefinitions(mode, region, state.customCategories);
+    const chosen = allDefinitions.filter(category => ids.includes(category.id)).slice(0, 36);
+    if (!chosen.length) return;
+    setRefreshPickerOpen(false);
     setLoadingTask("refresh");
     setError(null);
     setDebugRawOutput(null);
-    const region = state.region;
-    const result = await generateShoppingCatalog(`${state.settings.refreshPrompt}\n\n地区模式：${REGION_OPTIONS[region].prompt}`);
+    const currentCatalog = mode === "food" ? state.foodCatalogsByRegion[region] : state.catalog;
+    const existing = [...(currentCatalog?.recommendations || []).map(item => `${item.merchantLabel} ${item.title}`), ...state.dismissedProductKeys];
+    const prompt = buildSelectiveShoppingPrompt(mode === "food" ? DEFAULT_SHOPPING_REFRESH_PROMPT : state.settings.refreshPrompt, chosen, mode, state.customCategories, REGION_OPTIONS[region].prompt, existing);
+    const result = await generateShoppingCatalog(prompt, chosen);
     if (result.catalog) {
-      const catalog = { ...result.catalog, categories: result.catalog.categories.map(category => ({ ...category, items: category.items.map(item => ({ ...item, currency: REGION_OPTIONS[region].currency })) })), recommendations: result.catalog.recommendations.map(item => ({ ...item, currency: REGION_OPTIONS[region].currency })) };
+      const generatedCategories = result.catalog.categories.map(category => ({ ...category, items: category.items.filter(item => { const rule = state.customCategories.find(custom => custom.id === category.id); return !rule || customCategoryMatches(rule, item); }).slice(0, Math.min(6, Math.floor(36 / chosen.length))).map(item => ({ ...item, currency: REGION_OPTIONS[region].currency, mode })) }));
+      const generated = { categories: generatedCategories, recommendations: generatedCategories.flatMap(category => category.items) };
       persist(current => ({
         ...current,
-        catalog,
-        catalogsByRegion: { ...current.catalogsByRegion, [region]: catalog },
+        ...(mode === "shop" ? (() => {
+          const catalog = mergeGeneratedCatalog(current.catalogsByRegion[region] || current.catalog, generated, catalogCategoryDefinitions(mode, region, current.customCategories), current.customCategories.filter(item => item.mode === mode), current.dismissedProductKeys);
+          return { catalog: current.region === region ? catalog : current.catalog, catalogsByRegion: { ...current.catalogsByRegion, [region]: catalog } };
+        })() : (() => {
+          const catalog = mergeGeneratedCatalog(current.foodCatalogsByRegion[region] || { categories: [], recommendations: [] }, generated, catalogCategoryDefinitions(mode, region, current.customCategories), current.customCategories.filter(item => item.mode === mode), current.dismissedProductKeys);
+          return { foodCatalogsByRegion: { ...current.foodCatalogsByRegion, [region]: catalog } };
+        })()),
         generatedAt: new Date().toISOString(),
       }));
       setSelectedProduct(null);
@@ -689,6 +747,46 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     setDebugRawOutput(result.rawOutput ?? null);
     setLoadingTask(null);
     setLoaded(true);
+  }
+
+  function saveCustomCategory() {
+    const title = categoryName.trim().slice(0, 32);
+    if (!title) return;
+    const mode = currentMode;
+    const existing = catalogCategoryDefinitions(mode, state.region, state.customCategories).find(item => item.title.toLocaleLowerCase() === title.toLocaleLowerCase() && item.id !== editingCategoryId);
+    if (existing) { setError("这个分类已经存在。"); return; }
+    const id = editingCategoryId || `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const custom: ShoppingCustomCategory = { id, title, subtitle: categoryMatch === "store" ? "店铺专门入口" : categoryMatch === "brand" ? "品牌专门入口" : "自定义品类", match: categoryMatch, mode };
+    persist(current => {
+      const customCategories = [...current.customCategories.filter(item => item.id !== id), custom];
+      const definitions = catalogCategoryDefinitions(mode, current.region, customCategories);
+      const source = mode === "food" ? current.foodCatalogsByRegion[current.region] || { categories: [], recommendations: [] } : current.catalog;
+      const previous = editingCategoryId ? { ...source, categories: source.categories.map(item => item.id === editingCategoryId ? { ...item, items: [] } : item) } : source;
+      const catalog = mergeGeneratedCatalog(previous, { categories: [], recommendations: [] }, definitions, customCategories.filter(item => item.mode === mode), current.dismissedProductKeys);
+      return mode === "shop" ? { ...current, customCategories, catalog, catalogsByRegion: { ...current.catalogsByRegion, [current.region]: catalog } } : { ...current, customCategories, foodCatalogsByRegion: { ...current.foodCatalogsByRegion, [current.region]: catalog } };
+    });
+    if (mode === "food") setFoodCategoryId(id); else setSelectedCategoryId(id);
+    setEditingCategoryId(null);
+    setCategoryEditorOpen(false);
+    setCategoryName("");
+  }
+
+  function deleteCustomCategory(id: string) {
+    persist(current => ({ ...current, customCategories: current.customCategories.filter(item => item.id !== id), catalog: { ...current.catalog, categories: current.catalog.categories.filter(item => item.id !== id) }, catalogsByRegion: Object.fromEntries(Object.entries(current.catalogsByRegion).map(([region, catalog]) => [region, { ...catalog, categories: catalog.categories.filter(item => item.id !== id) }])), foodCatalogsByRegion: Object.fromEntries(Object.entries(current.foodCatalogsByRegion).map(([region, catalog]) => [region, { ...catalog, categories: catalog.categories.filter(item => item.id !== id) }])) }));
+    setSelectedCategoryId("all"); setFoodCategoryId("all"); setCategoryEditorOpen(false);
+  }
+
+  function deleteCatalogProduct(item: ShoppingProduct) {
+    const key = productIdentity(item);
+    persist(current => ({ ...current,
+      dismissedProductKeys: [...new Set([...current.dismissedProductKeys, key])].slice(-400),
+      catalog: removeCatalogProduct(current.catalog, item),
+      catalogsByRegion: Object.fromEntries(Object.entries(current.catalogsByRegion).map(([region, catalog]) => [region, removeCatalogProduct(catalog, item)])),
+      foodCatalogsByRegion: Object.fromEntries(Object.entries(current.foodCatalogsByRegion).map(([region, catalog]) => [region, removeCatalogProduct(catalog, item)])),
+      searchResult: current.searchResult ? { ...current.searchResult, items: current.searchResult.items.filter(found => productIdentity(found) !== key) } : undefined,
+    }));
+    setConfirmCatalogDelete(null);
+    setSelectedProduct(null);
   }
 
   function enterBlackMarketFromSearch() {
@@ -723,12 +821,14 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     setError(null);
     setDebugRawOutput(null);
     const region = state.region;
-    const result = await generateShoppingSearchResults(query, `${state.settings.searchPrompt}\n\n地区模式：${REGION_OPTIONS[region].prompt}`);
+    const result = await generateShoppingSearchResults(query, `${state.settings.searchPrompt}\n\n地区模式：${REGION_OPTIONS[region].prompt}\n店铺和品牌用真实存在的名称；款式和系列可合理虚构，但不编造著名产品的错误代际。可附 [品牌] 和 [规格] 字段，规格格式：容量:小+0|大+5；价格和加价使用本地币种。`);
     if (result.result) {
-      persist(current => ({
-        ...current,
-        searchResult: { ...result.result!, items: result.result!.items.map(item => ({ ...item, currency: REGION_OPTIONS[region].currency })) },
-      }));
+      persist(current => {
+        const items = result.result!.items.map(item => ({ ...item, currency: REGION_OPTIONS[region].currency, mode: "shop" as const })).filter(item => !current.dismissedProductKeys.includes(productIdentity(item)));
+        const previous = current.catalogsByRegion[region] || current.catalog;
+        const catalog = mergeGeneratedCatalog({ ...previous, recommendations: mergeShoppingProducts(previous.recommendations, items) }, { categories: [], recommendations: [] }, catalogCategoryDefinitions("shop", region, current.customCategories), current.customCategories.filter(item => item.mode === "shop"), current.dismissedProductKeys);
+        return { ...current, searchResult: { ...result.result!, items }, catalog: current.region === region ? catalog : current.catalog, catalogsByRegion: { ...current.catalogsByRegion, [region]: catalog } };
+      });
       setSelectedCategoryId("search");
       setSelectedProduct(null);
       setSelectedOrderId(null);
@@ -821,20 +921,26 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   }
 
   function addToCart(product: ShoppingProductDetail | ShoppingProduct) {
-    const item = { ...baseProduct(product), currency: product.currency || REGION_OPTIONS[state.region].currency };
-    if (state.cartItems.length > 0 && (state.cartItems[0].currency || "CNY") !== item.currency) {
+    const mode: ShoppingMode = product.mode === "food" ? "food" : "shop";
+    const options = product.variantGroups?.map((group, index) => group.options.find(option => option.label === selectedVariantOptions[index]) || group.options[0]);
+    const surcharge = options?.reduce((sum, option) => sum + (option?.extra || 0), 0) || 0;
+    const item = { ...baseProduct(product), currency: product.currency || REGION_OPTIONS[state.region].currency, mode, selectedOptions: options?.map(option => option?.label || "") || [], unitPrice: parseShoppingAmount(product.priceLabel) + surcharge };
+    const cart = mode === "food" ? state.foodCartItems : state.cartItems;
+    if (mode === "food" && cart.length && cart[0].merchantLabel !== item.merchantLabel) { setError("外卖购物车一次只能结算同一家店，请先结算或清空购物车。"); return; }
+    if (cart.length > 0 && (cart[0].currency || "CNY") !== item.currency) {
       setError("购物车已有其他币种商品，请先结算或清空购物车。");
       return;
     }
     persist(current => {
-      const exists = current.cartItems.find(cartItem => cartItem.id === item.id);
+      const key = `${item.id}:${item.selectedOptions.join("|")}`;
+      const existingCart = mode === "food" ? current.foodCartItems : current.cartItems;
+      const exists = existingCart.find(cartItem => cartItem.id === key);
+      const nextCart = exists
+        ? existingCart.map(cartItem => cartItem.id === key ? { ...cartItem, quantityLabel: cartQuantityLabel(parseShoppingQuantity(cartItem.quantityLabel) + 1) } : cartItem)
+        : [{ ...productAsCartItem(item), id: key, priceLabel: formatCurrencyAmount(item.unitPrice, item.currency), selectedOptions: item.selectedOptions, unitPrice: item.unitPrice }, ...existingCart];
       return {
         ...current,
-        cartItems: exists
-          ? current.cartItems.map(cartItem => cartItem.id === item.id
-            ? { ...cartItem, quantityLabel: cartQuantityLabel(parseShoppingQuantity(cartItem.quantityLabel) + 1) }
-            : cartItem)
-          : [productAsCartItem(item), ...current.cartItems],
+        ...(mode === "food" ? { foodCartItems: nextCart } : { cartItems: nextCart }),
       };
     });
     if (cartFeedbackTimerRef.current) {
@@ -887,6 +993,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     setWalletState(nextWalletState);
     setSelectedPaymentSourceId(WALLET_BALANCE_ACCOUNT_ID);
     setPaymentError(null);
+    setUseCoupon(true);
     setRecipientId("");
     setRecipientAddressId("");
     setConfirmCheckoutOpen(true);
@@ -920,7 +1027,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     const estimate = shoppingDeliveryEstimate(deliveryFrom, currentRecipientAddress);
     const item: ShoppingCartItem = { id: shipGift.itemId, title: shipGift.productName, merchantLabel: shipGift.merchantLabel,
       priceLabel: shipGift.priceLabel, tagLabel: "礼物", subtitle: shipGift.subtitle, detail: shipGift.detail,
-      previewIcon: shipGift.previewIcon, tone: shipGift.tone, quantityLabel: "× 1" };
+      previewIcon: shipGift.previewIcon, tone: shipGift.tone, quantityLabel: "× 1", selectedOptions: shipGift.selectedOptions };
     const shipment = { id: `shop_ship_${Date.now()}`, giftId: shipGift.id, sourceOrderId: shipGift.source === "order" ? shipGift.orderId : undefined,
       item, senderAddressId: deliveryFrom.id, recipientCharacterId: recipientId, recipientAddressId: currentRecipientAddress.id,
       recipientName: ownerName || currentRecipientAddress.name, recipientAddressLabel: shoppingAddressLabel(currentRecipientAddress),
@@ -1013,6 +1120,8 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     if (recipientId && !currentRecipientAddress) { setPaymentError("请先添加并选择收件地址。"); return; }
     if (!recipientId && !deliveryFrom) { setPaymentError("请先添加我的收件地址。"); return; }
     const order = buildOrderFromCart(state.cartItems, formatShoppingAmount(checkoutTotal, cartCurrency), state.settings);
+    order.note = `${order.note} · 配送方式：${effectiveShippingMethod === "sea" ? "国际海运" : effectiveShippingMethod === "air" ? "国际空运" : effectiveShippingMethod === "standard" ? "普通配送" : "快递"}`;
+    if (shopDiscount) order.note += ` · 优惠券抵扣 ${formatCurrencyAmount(shopDiscount, cartCurrency)}`;
     order.currency = cartCurrency;
     if (recipientId && currentRecipientAddress) {
       order.recipientCharacterId = recipientId;
@@ -1058,19 +1167,75 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
       ...current,
       orders: [paidOrder, ...current.orders],
       cartItems: [],
+      usedCoupons: shopDiscount ? [...current.usedCoupons, "shop"] : current.usedCoupons,
     }));
     if (recipientId && notifyRecipient) {
       for (const item of paidOrder.items) announceShoppingGift(recipientId, item, `${paidOrder.id}::${item.id}::notice`, paidOrder.recipientName || "收件人");
     }
     setSelectedTab("orders");
+    setOrdersMode("shop");
     setSelectedOrderId(paidOrder.id);
     setPaymentError(null);
     setConfirmCheckoutOpen(false);
   }
 
+  function checkoutFood() {
+    const items = state.foodCartItems;
+    if (!items.length) return;
+    const address = recipientId ? currentRecipientAddress : deliveryFrom;
+    if (!address || !address.phone) { setPaymentError("请先填写收餐人的地址和电话。"); return; }
+    if (address.country !== REGION_OPTIONS[state.region].country) { setPaymentError("外卖需选择与收餐地址相同的地区。"); return; }
+    const order = buildOrderFromCart(items, formatShoppingAmount(foodPayable, foodCurrency), state.settings);
+    order.mode = "food";
+    order.currency = foodCurrency;
+    order.recipientCharacterId = recipientId || undefined;
+    order.recipientAddressId = address.id;
+    order.recipientName = recipientId ? ownerName || address.name : address.name;
+    order.recipientAddressLabel = shoppingAddressLabel(address);
+    order.notifyRecipient = Boolean(recipientId && notifyRecipient);
+    if (foodDiscount) order.note += ` · 优惠券抵扣 ${formatCurrencyAmount(foodDiscount, foodCurrency)}`;
+    order.shippingTimeline = shippingTimelineForOrder(order, 45 / (24 * 60));
+    const payment = recordWalletPayment({ accountId: selectedPaymentSourceId, credit: selectedPaymentSourceId === "wallet_credit_card", amount: foodPayable, currency: foodCurrency, title: "外卖付款", detail: `${items[0].merchantLabel}：${order.summary}`, category: "外卖", relatedOrderId: order.id });
+    setWalletState(payment.state);
+    if (!payment.ok || !payment.transaction) { setPaymentError(payment.error || "付款失败"); return; }
+    order.paymentCardId = selectedPaymentSourceId;
+    order.paymentTransactionId = payment.transaction.id;
+    order.paidAt = payment.transaction.createdAt;
+    persist(current => ({ ...current, orders: [order, ...current.orders], foodCartItems: [], usedCoupons: foodDiscount ? [...current.usedCoupons, "food"] : current.usedCoupons }));
+    if (recipientId && notifyRecipient) {
+      const session = createOrGetSession(recipientId);
+      pushChatMessage({ sessionId: session.id, role: "user", content: "", mediaType: "gift", mediaData: { giftName: `外卖 · ${order.summary}`, label: "外卖卡", giftMerchantLabel: order.merchantLabel, giftPriceLabel: order.totalLabel, giftPreviewIcon: order.items[0]?.previewIcon || "🥡", recipientId, recipientName: order.recipientName, shoppingOrderId: order.id } });
+      window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+    }
+    setFoodCheckoutOpen(false); setPaymentError(null); setOrdersMode("food"); setSelectedTab("orders"); setSelectedOrderId(order.id);
+  }
+
+  function cancelPendingOrder(order: ShoppingOrder) {
+    const deliveryAt = order.shippingTimeline?.find(event => event.status === "delivered")?.timestamp;
+    if (deliveryAt && Date.parse(deliveryAt) <= Date.now()) { setPaymentError("订单已送达，无法取消。"); setCancelOrderCandidate(null); return; }
+    const wallet = loadWalletState();
+    const paidTransaction = wallet.transactions.find(tx => tx.id === order.paymentTransactionId);
+    const paidCurrency = paidTransaction?.currency || order.currency || "CNY";
+    if (paidTransaction?.credit) {
+      const debt = Math.max(0, (wallet.creditDebts?.[paidCurrency] || 0) - Math.abs(paidTransaction.amount));
+      const refund = { ...paidTransaction, id: `refund_${order.id}`, amount: -Math.abs(paidTransaction.amount), kind: "refund" as const, createdAt: new Date().toISOString(), balanceAfter: debt, detail: `取消订单 ${order.summary}` };
+      saveWalletState({ ...wallet, creditDebts: { ...wallet.creditDebts, [paidCurrency]: debt }, transactions: [refund, ...wallet.transactions] });
+    } else if (paidTransaction) {
+      recordWalletCredit({ currency: paidCurrency, sourceCurrency: paidCurrency, amount: Math.abs(paidTransaction.amount), title: "订单退款", detail: `取消订单 ${order.summary}`, kind: "refund", category: order.mode === "food" ? "外卖退款" : "购物退款", relatedOrderId: order.id, relatedMessageId: `refund_${order.id}` });
+    }
+    if (order.recipientCharacterId) {
+      const session = createOrGetSession(order.recipientCharacterId);
+      const associated = loadChatMessages(session.id).filter(message => message.mediaData?.shoppingOrderId === order.id || String(message.mediaData?.shoppingGiftId || "").startsWith(`${order.id}::`));
+      deleteChatMessagesByIds(session.id, associated.map(message => message.id));
+    }
+    persist(current => ({ ...current, orders: current.orders.filter(item => item.id !== order.id), usedCoupons: order.note?.includes("优惠券抵扣") ? current.usedCoupons.filter(item => item !== (order.mode === "food" ? "food" : "shop")) : current.usedCoupons }));
+    setCancelOrderCandidate(null); setSelectedOrderId(null); setWalletState(loadWalletState());
+  }
+
   function openProduct(product: ShoppingProduct | ShoppingCartItem | ShoppingOrder["items"][number], defaults?: { tagLabel?: string; detailLabel?: string }) {
     setTranslationPreview(null);
     setSelectedProduct(toProductDetail(product, defaults));
+    setSelectedVariantOptions(("variantGroups" in product ? product.variantGroups : undefined)?.map(group => group.options[0]?.label || "") || []);
   }
 
   function renderShoppingCardText(text: string) {
@@ -1119,7 +1284,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         setTranslationPreview(null);
         setSelectedOrderId(null);
       }
-      : () => onClose(loading);
+      : selectedTab === "account" || selectedTab === "items" ? () => setSelectedTab("home") : () => onClose(loading);
 
   const selectedProductRecentlyAdded = Boolean(selectedProduct && recentlyAddedProductId === selectedProduct.id);
 
@@ -1164,7 +1329,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
           style={{
             position: "absolute",
             top: "12px",
-            right: "12px",
+            right: "48px",
             zIndex: 2,
             background: isSaved ? "#ff6b00" : "#fff",
             border: "1px solid #eee",
@@ -1180,6 +1345,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         >
           <Heart size={15} fill={isSaved ? "white" : "none"} />
         </button>
+        <button type="button" aria-label="删除这件商品" onClick={event => { event.stopPropagation(); setConfirmCatalogDelete(item); }} style={{ position: "absolute", top: 12, right: 10, width: 30, height: 30, borderRadius: 15, border: "1px solid #eee", color: "#777", background: "#fff", zIndex: 2 }}><Trash2 size={14} /></button>
         <div style={{ width: "100%", height: compact ? "92px" : "120px", background: "#f5f5f5", borderRadius: "12px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: compact ? "30px" : "34px" }}>
           {item.previewIcon}
         </div>
@@ -1194,7 +1360,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
             aria-label={recentlyAdded ? "已加入购物车" : inCart ? "再次加入购物车" : "加入购物车"}
             onClick={(event) => {
               event.stopPropagation();
-              addToCart(item);
+              if (item.variantGroups?.length) openProduct(item); else addToCart(item);
             }}
             style={{
               background: recentlyAdded ? "#16a34a" : inCart ? "#222" : "#f46200",
@@ -1224,7 +1390,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   return (
     <div className="cp-shopping-module" style={{ background: "#f8f9fa", fontFamily: "sans-serif" }}>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: "var(--page-header-content-height, 42px)", marginTop: "var(--page-header-safe-top, 48px)", padding: "1px 24px" }}>
-        {!selectedProduct && !activeOrder && selectedTab === "home" ? (
+        {!selectedProduct && !activeOrder && (selectedTab === "home" || selectedTab === "food") ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <button type="button" aria-label="返回" onClick={backAction} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #eaeaea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#333" }}>
@@ -1232,15 +1398,15 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
               </button>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: "calc(12px*var(--app-text-scale,1))", color: "#888" }}>Welcome Back</span>
-                <strong style={{ fontSize: "calc(18px*var(--app-text-scale,1))", color: "#222", lineHeight: 1.15 }}>Shopping</strong>
+                <strong style={{ fontSize: "calc(18px*var(--app-text-scale,1))", color: "#222", lineHeight: 1.15 }}>{selectedTab === "food" ? "外卖" : "Shopping"}</strong>
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <select aria-label="购物地区" value={state.region} onChange={event => switchRegion(event.target.value as ShoppingRegion)} style={{ maxWidth: 105, border: "1px solid #eee", borderRadius: 14, padding: "9px 5px", background: "#fff", fontSize: 11 }}>
                 {(Object.keys(REGION_OPTIONS) as ShoppingRegion[]).map(region => <option key={region} value={region}>{REGION_OPTIONS[region].label}</option>)}
               </select>
-              <button type="button" aria-label="清空购物痕迹" onClick={() => setClearConfirmOpen(true)} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #eaeaea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#333" }}>
-                <Trash2 size={18} strokeWidth={2.2} />
+              <button type="button" aria-label="我的" onClick={() => setDrawerOpen(true)} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #eaeaea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#333" }}>
+                <Home size={18} strokeWidth={2.2} />
               </button>
               <button type="button" aria-label="提示词设置" onClick={() => openPromptSettings()} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #eaeaea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#333" }}>
                 <MoreHorizontal size={21} strokeWidth={2.35} />
@@ -1305,9 +1471,9 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
 
         {!selectedProduct && !activeOrder && (
           <>
-            {selectedTab === "home" ? (
+            {(selectedTab === "home" || selectedTab === "food") ? (
               <div style={{ padding: "0 24px", marginTop: "-4px", marginBottom: "16px" }}>
-                <form onSubmit={handleSearch} style={{ display: "flex", alignItems: "center", background: "#fff", borderRadius: "22px", padding: "0 8px 0 14px", minHeight: "40px", color: "#999", fontSize: "calc(13px*var(--app-text-scale,1))", gap: "8px", boxShadow: "0 3px 12px rgba(0,0,0,0.018)" }}>
+                {selectedTab === "food" ? <div style={{ background: "#fff", padding: 12, borderRadius: 18, color: "#777", fontSize: 12 }}>选择分类，刷新当前地区的店铺与外卖商品</div> : <form onSubmit={handleSearch} style={{ display: "flex", alignItems: "center", background: "#fff", borderRadius: "22px", padding: "0 8px 0 14px", minHeight: "40px", color: "#999", fontSize: "calc(13px*var(--app-text-scale,1))", gap: "8px", boxShadow: "0 3px 12px rgba(0,0,0,0.018)" }}>
                   <Search size={17} />
                   <input
                     aria-label="搜索商品"
@@ -1326,7 +1492,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                   <button type="submit" disabled={!searchInput.trim() || loading || blackMarketTransition} style={{ border: "none", background: searchInput.trim() && !loading && !blackMarketTransition ? "#ff6b00" : "#eee", color: searchInput.trim() && !loading && !blackMarketTransition ? "#fff" : "#aaa", borderRadius: "16px", height: "30px", padding: "0 12px", minWidth: "88px", fontSize: "calc(12px*var(--app-text-scale,1))", fontWeight: 700, whiteSpace: "nowrap" }}>
                     搜索新物品
                   </button>
-                </form>
+                </form>}
                 <div
                   role="tablist"
                   aria-label="商品分类"
@@ -1341,17 +1507,17 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                 >
                   {[
                     { id: "all", title: "全部" },
-                    ...(state.searchResult?.items.length ? [{ id: "search", title: `搜索：${state.searchResult.query}` }] : []),
-                    ...SHOPPING_RECOMMENDATION_CATEGORIES,
+                    ...(selectedTab === "home" && state.searchResult?.items.length ? [{ id: "search", title: `搜索：${state.searchResult.query}` }] : []),
+                    ...currentDefinitions,
                   ].map(category => {
-                    const active = selectedCategoryId === category.id;
+                    const active = (selectedTab === "food" ? foodCategoryId : selectedCategoryId) === category.id;
                     return (
                       <button
                         key={category.id}
                         type="button"
                         role="tab"
                         aria-selected={active}
-                        onClick={() => setSelectedCategoryId(category.id)}
+                        onClick={() => selectedTab === "food" ? setFoodCategoryId(category.id) : setSelectedCategoryId(category.id)}
                         style={{
                           flex: "0 0 auto",
                           minHeight: "36px",
@@ -1374,6 +1540,8 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                       </button>
                     );
                   })}
+                  <button type="button" onClick={() => { setEditingCategoryId(null); setCategoryName(""); setCategoryMatch("store"); setCategoryEditorOpen(true); }} style={{ flex: "0 0 auto", border: "1px dashed #ff6b00", background: "#fff", color: "#ff6b00", borderRadius: 18, padding: "0 13px", fontSize: 12 }}>＋ 自定义</button>
+                  {state.customCategories.find(category => category.mode === currentMode && category.id === (selectedTab === "food" ? foodCategoryId : selectedCategoryId)) && <button type="button" onClick={() => { const category = state.customCategories.find(item => item.id === (selectedTab === "food" ? foodCategoryId : selectedCategoryId)); if (!category) return; setEditingCategoryId(category.id); setCategoryName(category.title); setCategoryMatch(category.match); setCategoryEditorOpen(true); }} style={{ flex: "0 0 auto", border: "1px solid #eee", background: "#fff", color: "#666", borderRadius: 18, padding: "0 12px", fontSize: 12 }}>编辑此分类</button>}
                 </div>
               </div>
             ) : null}
@@ -1391,6 +1559,9 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
               className="cp-shopping-scroll"
               style={{ padding: "0 24px 120px", display: "flex", flexDirection: "column", gap: "32px", marginTop: selectedTab === "home" ? 0 : "8px" }}
             >
+              {selectedTab === "food" ? <section>
+                {foodProducts.length ? <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>{foodProducts.map(item => <ProductCard key={item.id} item={item} />)}</div> : <div className="cp-shopping-status cp-empty-copy"><p>暂无外卖商品</p><span>选一个分类，然后点刷新生成</span></div>}
+              </section> : null}
               {selectedTab === "home" && hasVisibleHomeContent ? (
                 <>
                   {hasVisibleSearchResults && state.searchResult?.items.length ? (
@@ -1426,7 +1597,17 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                 </>
               ) : null}
 
-              {selectedTab === "cart" && (
+              {(selectedTab === "cart" || selectedTab === "orders") && <div style={{ display: "flex", background: "#fff", borderRadius: 16, padding: 4, gap: 5 }}>
+                {(["shop", "food"] as ShoppingMode[]).map(mode => <button key={mode} type="button" onClick={() => selectedTab === "cart" ? setCartMode(mode) : setOrdersMode(mode)} style={{ flex: 1, padding: 9, border: 0, borderRadius: 13, fontSize: 12, background: (selectedTab === "cart" ? cartMode : ordersMode) === mode ? "#ff6b00" : "#fff", color: (selectedTab === "cart" ? cartMode : ordersMode) === mode ? "#fff" : "#555" }}>{mode === "shop" ? "商城" : "外卖"}</button>)}
+              </div>}
+
+              {selectedTab === "cart" && cartMode === "food" && <section style={{ display: "grid", gap: 12 }}>
+                <h2 style={{ fontSize: 17, margin: 0 }}>外卖购物车</h2>
+                {!state.foodCartItems.length ? <div className="cp-shopping-status">暂时没有外卖商品</div> : state.foodCartItems.map(item => <div key={item.id} style={{ background: "#fff", padding: 14, borderRadius: 16, display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 25 }}>{item.previewIcon}</span><div style={{ flex: 1, minWidth: 0 }}><strong style={{ fontSize: 12 }}>{item.title}</strong><p style={{ fontSize: 11, color: "#888", margin: "3px 0" }}>{item.selectedOptions?.join(" / ") || item.merchantLabel} · {item.priceLabel}</p></div><button type="button" onClick={() => persist(current => ({ ...current, foodCartItems: current.foodCartItems.filter(entry => entry.id !== item.id) }))} aria-label="从外卖购物车删除" style={{ border: 0, background: "#fff", color: "#777" }}><Trash2 size={15} /></button></div>)}
+                {state.foodCartItems.length > 0 && <><strong style={{ textAlign: "right", fontSize: 14 }}>{formatCurrencyAmount(foodTotal, foodCurrency)}</strong><button type="button" onClick={() => { setRecipientId(""); setRecipientAddressId(""); setPaymentError(null); setUseCoupon(true); setFoodCheckoutOpen(true); }} style={{ padding: 13, border: 0, borderRadius: 16, background: "#ff6b00", color: "#fff" }}>去结算</button></>}
+              </section>}
+
+              {selectedTab === "cart" && cartMode === "shop" && (
                 <section style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   <h2 style={{ fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: "bold", color: "#222", margin: "0 0 8px 4px" }}>Cart</h2>
                   {state.cartItems.length === 0 ? (
@@ -1522,7 +1703,9 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                 </section>
               )}
 
-              {selectedTab === "orders" && (
+              {selectedTab === "orders" && ordersMode === "food" && <section style={{ display: "grid", gap: 12 }}><h2 style={{ margin: 0, fontSize: 17 }}>外卖订单</h2>{state.orders.filter(order => order.mode === "food" && !order.canceledAt).length === 0 ? <div className="cp-shopping-status">暂无外卖订单</div> : state.orders.filter(order => order.mode === "food" && !order.canceledAt).map(order => <button type="button" key={order.id} onClick={() => setSelectedOrderId(order.id)} style={{ border: 0, background: "#fff", borderRadius: 16, padding: 15, textAlign: "left", display: "grid", gap: 6 }}><strong>{order.merchantLabel} · {order.totalLabel}</strong><span style={{ fontSize: 12, color: "#777" }}>{order.summary}</span><span style={{ fontSize: 11, color: "#999" }}>{resolveOrderShipping(order, nowTick).statusLabel} · {order.timeLabel}</span></button>)}</section>}
+
+              {selectedTab === "orders" && ordersMode === "shop" && (
                 <section style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   <h2 style={{ fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: "bold", color: "#222", margin: "0 0 8px 4px" }}>Orders</h2>
                   {state.orders.length === 0 ? (
@@ -1535,7 +1718,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                       <p>没有找到相关订单</p>
                     </div>
                   ) : null}
-                  {filteredOrders.map(order => {
+                  {filteredOrders.filter(order => order.mode !== "food" && !order.canceledAt).map(order => {
                     const shipping = resolveOrderShipping(order, nowTick);
                     return (
                       <button
@@ -1599,7 +1782,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                 <button type="button" onClick={() => { setAddressOwnerId(""); setAddressOpen(true); }} style={{ border: "1px solid #eee", background: "#fff", padding: 12, borderRadius: 14, textAlign: "left" }}>管理我的发件地址 · {shopperAddresses.length} 个</button>
                 {state.shipments.map(shipment => <div key={shipment.id} style={{ padding: 15, borderRadius: 15, background: "#fff", fontSize: 12 }}>寄给 {shipment.recipientName} · {shipment.item.title}<br /><span style={{ color: "#888" }}>{new Date(shipment.deliverAt).getTime() <= nowTick ? "已签收" : `预计 ${new Date(shipment.deliverAt).toLocaleDateString("zh-CN")} 到达`}</span></div>)}
                 {warehouseGifts.length === 0 && <div className="cp-shopping-status cp-empty-copy"><p>暂无可送出的物品</p></div>}
-                {warehouseGifts.map(gift => <div key={gift.id} style={{ padding: 15, background: "#fff", borderRadius: 15, display: "flex", gap: 10, alignItems: "center" }}><span style={{ fontSize: 25 }}>{gift.previewIcon}</span><div style={{ flex: 1, minWidth: 0 }}><strong>{gift.productName}</strong><p style={{ margin: "3px 0", color: "#888", fontSize: 11 }}>{gift.source === "character" ? "角色送来" : gift.merchantLabel} · {gift.priceLabel}</p></div><button type="button" onClick={() => { setShipGift(gift); setRecipientId(""); setRecipientAddressId(""); setPaymentError(null); }} style={{ border: 0, borderRadius: 12, padding: "9px 10px", background: "#111", color: "#fff" }}>转送</button></div>)}
+                {warehouseGifts.map(gift => <div key={gift.id} style={{ padding: 15, background: "#fff", borderRadius: 15, display: "flex", gap: 10, alignItems: "center" }}><span style={{ fontSize: 25 }}>{gift.previewIcon}</span><div style={{ flex: 1, minWidth: 0 }}><strong>{gift.productName}</strong><p style={{ margin: "3px 0", color: "#888", fontSize: 11 }}>{gift.source === "character" ? "角色送来" : gift.merchantLabel} · {gift.selectedOptions?.join(" / ") || ""} · {gift.priceLabel}</p></div><button type="button" onClick={() => { setShipGift(gift); setRecipientId(""); setRecipientAddressId(""); setPaymentError(null); }} style={{ border: 0, borderRadius: 12, padding: "9px 10px", background: "#111", color: "#fff" }}>转送</button></div>)}
               </section>}
             </div>
 
@@ -1626,11 +1809,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
               })}
             </nav>
 
-            {selectedTab === "home" ? (
+            {(selectedTab === "home" || selectedTab === "food") ? (
               <button
                 type="button"
                 aria-label="刷新首页推荐"
-                onClick={() => setConfirmRefreshOpen(true)}
+                onClick={openRefreshPicker}
                 disabled={loading}
                 style={{
                   position: "absolute",
@@ -1689,6 +1872,13 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                   <CheckPhoneBilingualText text={selectedProduct.detail || selectedProduct.subtitle} tone="shopping" />
                 </p>
               </div>
+
+              {selectedProduct.variantGroups?.map((group, groupIndex) => <div key={group.name} style={{ marginBottom: 13 }}>
+                <strong style={{ fontSize: 12 }}>{group.name}</strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>{group.options.map(option => <button type="button" key={option.label} onClick={() => setSelectedVariantOptions(current => { const next = [...current]; next[groupIndex] = option.label; return next; })} style={{ border: selectedVariantOptions[groupIndex] === option.label ? "1px solid #ff6b00" : "1px solid #eee", borderRadius: 12, padding: "7px 10px", background: "#fff", color: selectedVariantOptions[groupIndex] === option.label ? "#ff6b00" : "#444", fontSize: 12 }}>{option.label}{option.extra ? ` +${formatCurrencyAmount(option.extra, selectedProduct.currency || REGION_OPTIONS[state.region].currency)}` : ""}</button>)}</div>
+              </div>)}
+
+              <button type="button" onClick={() => setConfirmCatalogDelete(selectedProduct)} style={{ background: "transparent", border: "none", color: "#888", fontSize: 12, textAlign: "left", padding: "5px 0" }}>删除这件商品</button>
 
               <div style={{ marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "14px" }}>
                 <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1824,6 +2014,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                   <span style={{ color: "#ff6b00" }}>{activeOrder.totalLabel}</span>
                 </div>
               </div>
+              {(!activeOrder.shippingTimeline?.some(event => event.status === "delivered" && Date.parse(event.timestamp) <= nowTick)) && <button type="button" onClick={() => setCancelOrderCandidate(activeOrder)} style={{ border: "1px solid #f5d0d0", borderRadius: 14, color: "#dc2626", background: "#fff", padding: 12 }}>取消订单并退款</button>}
             </div>
           </div>
         )}
@@ -2005,10 +2196,12 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
             {selectedPaymentSource.id !== "wallet_credit_card" && cartCurrency !== walletState.primaryCurrency && <p style={{ fontSize: 11, color: "#777", margin: "-4px 2px 12px" }}>优先扣除 {cartCurrency}，不足时按参考汇率由默认币种 {walletState.primaryCurrency} 支付。</p>}
 
             <div style={{ display: "grid", gap: 9, marginBottom: 14, fontSize: 12 }}>
+              {shopCouponAvailable && <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={useCoupon} onChange={event => setUseCoupon(event.target.checked)} />使用商城优惠券 · 抵扣 {formatCurrencyAmount(shopDiscount || exchangeWalletAmount(20, "CNY", cartCurrency), cartCurrency)}（结账时计算）</label>}
               <label>购买给谁<select className="ui-input" value={recipientId} onChange={event => { setRecipientId(event.target.value); setRecipientAddressId(""); }}><option value="">买给自己（到货后进入我的物品）</option>{loadCharacters().map(person => <option key={person.id} value={person.id}>直接寄给 {person.name}</option>)}</select></label>
               <label>收件地址<select className="ui-input" value={recipientId ? currentRecipientAddress?.id || "" : deliveryFrom?.id || ""} onChange={event => recipientId ? setRecipientAddressId(event.target.value) : setSenderAddressId(event.target.value)}><option value="">请选择地址</option>{(recipientId ? recipientAddresses : shopperAddresses).map(address => <option value={address.id} key={address.id}>{shoppingAddressLabel(address)}</option>)}</select></label>
               <button type="button" onClick={() => { setAddressOwnerId(recipientId); setAddressDraft({ name: recipientId ? ownerName || "" : "", phone: "", country: REGION_OPTIONS[state.region].country, city: "", street: "" }); setAddressOpen(true); }} style={{ border: "1px solid #ddd", background: "#fff", borderRadius: 12, padding: 9 }}>＋ 新建{recipientId ? "角色" : "我的"}地址</button>
               {recipientId && <><label style={{ display: "flex", justifyContent: "space-between" }}>寄出时通知对方（Chat 礼物卡）<input type="checkbox" checked={notifyRecipient} onChange={event => setNotifyRecipient(event.target.checked)} /></label>{deliveryEstimate && <span style={{ color: "#777" }}>预计 {deliveryEstimate.days} 天到达 · 运费约 {formatCurrencyAmount(shippingFee, cartCurrency)}（参考估算）</span>}</>}
+              {checkoutAddress && <label>配送方式<select className="ui-input" value={effectiveShippingMethod} onChange={event => setShippingMethod(event.target.value as typeof shippingMethod)}>{!internationalShipping ? <><option value="express">{state.region === "CN" ? "顺丰快递" : state.region === "KR" ? "CJ대한통운" : state.region === "JP" ? "ヤマト運輸" : "UPS Express"} · 快速</option><option value="standard">{state.region === "CN" ? "菜鸟普通" : "普通配送"} · 经济</option></> : <><option value="air">顺丰国际 · 空运</option><option value="sea">顺丰国际 · 海运</option></>}</select></label>}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "42vh", overflowY: "auto", paddingRight: "2px" }}>
@@ -2202,20 +2395,49 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         />
       )}
 
-      {confirmRefreshOpen && (
-        <ConfirmDialog
-          title="刷新首页推荐？"
-          message="将重新生成首页分类推荐。收藏、购物车和订单不会受影响。"
-          variant="action"
-          confirmLabel="刷新"
-          cancelLabel="取消"
-          onConfirm={() => {
-            setConfirmRefreshOpen(false);
-            void handleRefresh();
-          }}
-          onCancel={() => setConfirmRefreshOpen(false)}
-        />
-      )}
+      {confirmCatalogDelete && <ConfirmDialog title="删除这件商品？" message="会从商品目录移除；购物车和已有订单保留。以后刷新也会避开这件商品。" variant="danger" confirmLabel="删除" cancelLabel="取消" onConfirm={() => deleteCatalogProduct(confirmCatalogDelete)} onCancel={() => setConfirmCatalogDelete(null)} />}
+      {cancelOrderCandidate && <ConfirmDialog title="取消订单并退款？" message="送达前可取消；本订单关联的通知卡片会一并移除。" variant="danger" confirmLabel="确认取消" cancelLabel="返回" onConfirm={() => cancelPendingOrder(cancelOrderCandidate)} onCancel={() => setCancelOrderCandidate(null)} />}
+
+      {refreshPickerOpen && <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setRefreshPickerOpen(false)} style={{ zIndex: 100 }}><div className="cp-shopping-translation-sheet" role="dialog" aria-modal="true" aria-label="选择刷新分类" onClick={event => event.stopPropagation()} style={{ maxHeight: "74vh", overflowY: "auto" }}>
+        <div className="cp-shopping-translation-head"><span>选择刷新分类</span><button type="button" onClick={() => setRefreshPickerOpen(false)}>关闭</button></div>
+        <p style={{ fontSize: 12, color: "#777" }}>可以选一类或多类；每类生成约 4～6 件，已有商品会保留并去重。</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{currentDefinitions.map(category => <button type="button" key={category.id} onClick={() => setSelectedRefreshIds(current => current.includes(category.id) ? current.filter(id => id !== category.id) : [...current, category.id])} style={{ border: selectedRefreshIds.includes(category.id) ? "1px solid #ff6b00" : "1px solid #eee", background: selectedRefreshIds.includes(category.id) ? "#fff3e9" : "#fff", borderRadius: 14, padding: "9px 11px", fontSize: 12 }}>{selectedRefreshIds.includes(category.id) ? "✓ " : ""}{category.title}</button>)}</div>
+        <button type="button" disabled={!selectedRefreshIds.length || loading} onClick={() => void handleRefresh(selectedRefreshIds, currentMode)} style={{ width: "100%", border: 0, borderRadius: 14, background: "#ff6b00", color: "white", padding: 12, marginTop: 18, opacity: selectedRefreshIds.length ? 1 : .5 }}>刷新选中的 {selectedRefreshIds.length} 类</button>
+      </div></div>}
+
+      {categoryEditorOpen && <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setCategoryEditorOpen(false)} style={{ zIndex: 101 }}><div className="cp-shopping-translation-sheet" role="dialog" aria-modal="true" aria-label="自定义分类" onClick={event => event.stopPropagation()}>
+        <div className="cp-shopping-translation-head"><span>{editingCategoryId ? "编辑分类" : "添加分类"}</span><button type="button" onClick={() => setCategoryEditorOpen(false)}>关闭</button></div>
+        <input className="ui-input" aria-label="分类名称" placeholder="例如 APPLE、星巴克、丝芙兰" value={categoryName} onChange={event => setCategoryName(event.target.value)} maxLength={32} />
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>{(["store", "brand", "type"] as const).map(match => <button type="button" key={match} onClick={() => setCategoryMatch(match)} style={{ flex: 1, padding: 10, borderRadius: 12, background: categoryMatch === match ? "#fff3e9" : "#fff", border: categoryMatch === match ? "1px solid #ff6b00" : "1px solid #ddd", fontSize: 12 }}>{match === "store" ? "店铺" : match === "brand" ? "品牌" : "品类"}</button>)}</div>
+        <p style={{ fontSize: 11, color: "#777" }}>已有商品和以后新生成的商品，符合此店铺／品牌／品类的会自动出现在入口里。</p>
+        <button type="button" onClick={saveCustomCategory} disabled={!categoryName.trim()} style={{ width: "100%", padding: 11, border: 0, borderRadius: 13, color: "#fff", background: "#ff6b00" }}>保存分类</button>
+        {editingCategoryId && <button type="button" onClick={() => deleteCustomCategory(editingCategoryId)} style={{ width: "100%", padding: 9, border: 0, background: "transparent", color: "#dc2626", marginTop: 9 }}>删除这个分类（保留商品）</button>}
+      </div></div>}
+
+      {drawerOpen && <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setDrawerOpen(false)} style={{ zIndex: 102, justifyContent: "flex-end" }}><div role="dialog" aria-modal="true" aria-label="我的" onClick={event => event.stopPropagation()} style={{ background: "#fff", width: "min(82vw, 330px)", height: "100%", padding: "65px 20px 24px", boxSizing: "border-box", display: "grid", alignContent: "start", gap: 12, overflowY: "auto" }}>
+        <strong style={{ fontSize: 19 }}>我的</strong>
+        <span style={{ fontSize: 12, color: "#777" }}>本月购物支出 · {state.orders.filter(order => order.paidAt && !order.canceledAt && new Date(order.paidAt).getMonth() === new Date().getMonth() && new Date(order.paidAt).getFullYear() === new Date().getFullYear()).reduce((sum, order) => sum + (order.currency === REGION_OPTIONS[state.region].currency ? parseShoppingAmount(order.totalLabel) : 0), 0).toFixed(0)} {REGION_OPTIONS[state.region].currency}（当前币种）</span>
+        <button type="button" onClick={() => { setDrawerOpen(false); setSelectedTab("account"); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>♡ 我的收藏</button>
+        <button type="button" onClick={() => { setDrawerOpen(false); setSelectedTab("items"); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>▣ 我的物品与仓库</button>
+        <button type="button" onClick={() => { setDrawerOpen(false); setAddressOwnerId(""); setAddressDraft({ name: "", phone: "", country: REGION_OPTIONS[state.region].country, city: "", street: "" }); setAddressOpen(true); }} style={{ padding: 13, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left" }}>⌂ 地址管理 · {state.addresses.length} 个</button>
+        <strong style={{ fontSize: 13 }}>优惠券</strong>
+        {(["shop", "food"] as const).map(kind => <button key={kind} type="button" disabled={state.claimedCoupons.includes(kind)} onClick={() => persist(current => ({ ...current, claimedCoupons: [...current.claimedCoupons, kind] }))} style={{ padding: 12, border: "1px solid #eee", borderRadius: 12, background: "#fff", textAlign: "left", color: "#555" }}>{kind === "shop" ? "商城优惠券 · 约 ¥20" : "外卖优惠券 · 约 ¥10"} · {state.usedCoupons.includes(kind) ? "已使用" : state.claimedCoupons.includes(kind) ? "已领取" : "领取"}</button>)}
+        <div style={{ fontSize: 11, color: "#777" }}>{state.addresses.map(address => <div key={address.id} style={{ marginBottom: 8 }}>{shoppingAddressLabel(address)} <button type="button" onClick={() => persist(current => ({ ...current, addresses: current.addresses.filter(item => item.id !== address.id) }))} style={{ border: 0, color: "#dc2626", background: "transparent" }}>删除</button></div>)}</div>
+        <button type="button" onClick={() => { setDrawerOpen(false); setClearConfirmOpen(true); }} style={{ padding: 12, border: 0, background: "#fff", color: "#dc2626", textAlign: "left" }}>清空购物痕迹</button>
+        <button type="button" onClick={() => setDrawerOpen(false)} style={{ marginTop: 20, padding: 12, border: 0, borderRadius: 12, background: "#f4f4f4" }}>关闭</button>
+      </div></div>}
+
+      {foodCheckoutOpen && <div className="cp-shopping-translation-overlay" role="presentation" onClick={() => setFoodCheckoutOpen(false)} style={{ zIndex: 102 }}><div className="cp-shopping-translation-sheet" role="dialog" aria-modal="true" aria-label="外卖结算" onClick={event => event.stopPropagation()} style={{ maxHeight: "80vh", overflowY: "auto" }}>
+        <div className="cp-shopping-translation-head"><span>外卖结算 · {formatCurrencyAmount(foodPayable, foodCurrency)}</span><button type="button" onClick={() => setFoodCheckoutOpen(false)}>关闭</button></div>
+        {foodCouponAvailable && <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><input type="checkbox" checked={useCoupon} onChange={event => setUseCoupon(event.target.checked)} />使用外卖优惠券 · 抵扣 {formatCurrencyAmount(foodDiscount || exchangeWalletAmount(10, "CNY", foodCurrency), foodCurrency)}</label>}
+        <label style={{ display: "grid", gap: 5, fontSize: 12 }}>送给谁<select className="ui-input" value={recipientId} onChange={event => { setRecipientId(event.target.value); setRecipientAddressId(""); }}><option value="">送给自己</option>{loadCharacters().map(character => <option key={character.id} value={character.id}>{character.name}</option>)}</select></label>
+        <label style={{ display: "grid", gap: 5, fontSize: 12, marginTop: 12 }}>收餐地址<select className="ui-input" value={recipientId ? currentRecipientAddress?.id || "" : deliveryFrom?.id || ""} onChange={event => recipientId ? setRecipientAddressId(event.target.value) : setSenderAddressId(event.target.value)}><option value="">请选择地址</option>{(recipientId ? recipientAddresses : shopperAddresses).map(address => <option value={address.id} key={address.id}>{shoppingAddressLabel(address)}</option>)}</select></label>
+        <button type="button" onClick={() => { setAddressOwnerId(recipientId); setAddressDraft({ name: ownerName || "", phone: "", country: REGION_OPTIONS[state.region].country, city: "", street: "" }); setAddressOpen(true); }} style={{ border: 0, padding: 10, marginTop: 9, background: "#fff3e9", borderRadius: 10, color: "#b45309" }}>＋ 添加收餐地址</button>
+        {recipientId && <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, marginTop: 12 }}><input type="checkbox" checked={notifyRecipient} onChange={event => setNotifyRecipient(event.target.checked)} />通知对方（Chat 外卖卡）</label>}
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}><button type="button" onClick={() => setSelectedPaymentSourceId(WALLET_BALANCE_ACCOUNT_ID)} style={{ flex: 1, border: selectedPaymentSourceId === WALLET_BALANCE_ACCOUNT_ID ? "1px solid #ff6b00" : "1px solid #ddd", borderRadius: 12, padding: 10, background: "#fff" }}>储蓄卡</button>{walletState.creditEnabled && <button type="button" onClick={() => setSelectedPaymentSourceId("wallet_credit_card")} style={{ flex: 1, border: selectedPaymentSourceId === "wallet_credit_card" ? "1px solid #ff6b00" : "1px solid #ddd", borderRadius: 12, padding: 10, background: "#fff" }}>信用卡</button>}</div>
+        {paymentError && <p style={{ fontSize: 12, color: "#dc2626" }}>{paymentError}</p>}
+        <button type="button" onClick={checkoutFood} style={{ width: "100%", border: 0, padding: 13, marginTop: 14, borderRadius: 14, color: "#fff", background: "#ff6b00" }}>确认付款并下单</button>
+      </div></div>}
     </div>
   );
 }

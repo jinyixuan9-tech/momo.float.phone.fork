@@ -12,6 +12,7 @@ export type ShoppingGiftCandidate = {
   merchantLabel: string;
   priceLabel: string;
   quantityLabel: string;
+  selectedOptions?: string[];
   subtitle: string;
   detail: string;
   previewIcon: string;
@@ -73,6 +74,7 @@ export function loadDeliveredShoppingGifts(options: LoadShoppingGiftOptions = {}
   const gifts: ShoppingGiftCandidate[] = [];
 
   for (const order of state.orders) {
+    if (order.mode === "food" || order.canceledAt) continue;
     if (order.recipientCharacterId) continue;
     if (!isOrderDelivered(order, nowMs)) continue;
     const deliveredEvent = getDeliveredEvent(order);
@@ -91,6 +93,7 @@ export function loadDeliveredShoppingGifts(options: LoadShoppingGiftOptions = {}
           merchantLabel: item.merchantLabel || order.merchantLabel,
           priceLabel: item.priceLabel,
           quantityLabel: quantity > 1 ? `第 ${unitIndex}/${quantity} 件` : item.quantityLabel || "x 1",
+          selectedOptions: "selectedOptions" in item && Array.isArray(item.selectedOptions) ? item.selectedOptions.filter((option): option is string => typeof option === "string") : undefined,
           subtitle: item.subtitle,
           detail: item.detail,
           previewIcon: item.previewIcon,

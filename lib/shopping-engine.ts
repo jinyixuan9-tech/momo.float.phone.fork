@@ -3,16 +3,11 @@ import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
 import type { CheckPhoneShoppingProduct, CheckPhoneShoppingTone } from "./checkphone-config";
 import type { ApiConfig } from "./settings-types";
 import type { ShoppingCatalog, ShoppingCategory, ShoppingRefreshResult, ShoppingSearchResponse } from "./shopping-types";
+import type { ShoppingCustomCategory, ShoppingMode } from "./shopping-types";
+import { SHOP_BASE_CATEGORIES } from "./shopping-catalog";
 import type { LLMMessage } from "./llm-prompt-assembler";
 
-export const SHOPPING_RECOMMENDATION_CATEGORIES: Array<Pick<ShoppingCategory, "id" | "title" | "subtitle">> = [
-  { id: "digital", title: "数码好物", subtitle: "小设备、桌面装备、智能配件" },
-  { id: "home", title: "生活家居", subtitle: "收纳、香氛、餐厨与居家质感" },
-  { id: "style", title: "穿搭配饰", subtitle: "服饰、包袋、鞋履和日常搭配" },
-  { id: "beauty", title: "美妆个护", subtitle: "护肤、彩妆、身体护理和仪容工具" },
-  { id: "food", title: "食品饮品", subtitle: "零食、咖啡、茶饮和轻食补给" },
-  { id: "hobby", title: "文具兴趣", subtitle: "纸品、手作、阅读、运动和旅行小物" },
-];
+export const SHOPPING_RECOMMENDATION_CATEGORIES: Array<Pick<ShoppingCategory, "id" | "title" | "subtitle">> = SHOP_BASE_CATEGORIES;
 
 export const DEFAULT_SHOPPING_REFRESH_PROMPT = [
   "<shopping_refresh_instruction>",
@@ -168,17 +163,17 @@ function extractProductBlocks(rawOutput: string, labels: string[]): ParsedRecomm
   });
 }
 
-function resolveCategory(value: string): Pick<ShoppingCategory, "id" | "title" | "subtitle"> {
+function resolveCategory(value: string, definitions = SHOPPING_RECOMMENDATION_CATEGORIES): Pick<ShoppingCategory, "id" | "title" | "subtitle"> {
   const normalized = cleanText(value, 80);
   return (
-    SHOPPING_RECOMMENDATION_CATEGORIES.find(category => category.title === normalized) ??
-    SHOPPING_RECOMMENDATION_CATEGORIES[0]
+    definitions.find(category => category.title === normalized) ??
+    definitions[0]
   );
 }
 
-function parseProduct(block: ParsedRecommendationBlock, index: number): { category: Pick<ShoppingCategory, "id" | "title" | "subtitle">; product: CheckPhoneShoppingProduct | null } {
+function parseProduct(block: ParsedRecommendationBlock, index: number, definitions = SHOPPING_RECOMMENDATION_CATEGORIES): { category: Pick<ShoppingCategory, "id" | "title" | "subtitle">; product: CheckPhoneShoppingProduct | null } {
   const fields = block.fields;
-  const category = resolveCategory(fields["分类"]);
+  const category = resolveCategory(fields["分类"], definitions);
   const title = cleanText(fields["名称"], 200);
   const merchantLabel = cleanText(fields["店铺"], 120);
   const priceLabel = cleanText(fields["价格"], 80);
@@ -190,7 +185,7 @@ function parseProduct(block: ParsedRecommendationBlock, index: number): { catego
     return { category, product: null };
   }
 
-  const signature = `${category.title}|${title}|${merchantLabel}|${priceLabel}|${previewIcon}`;
+  const signature = `${title}|${merchantLabel}|${fields["品牌"] || ""}`;
   return {
     category,
     product: {
@@ -199,12 +194,24 @@ function parseProduct(block: ParsedRecommendationBlock, index: number): { catego
       merchantLabel,
       priceLabel,
       tagLabel: category.title,
+      brandLabel: cleanText(fields["品牌"], 100),
+      variantGroups: parseVariantGroups(fields["规格"]),
       subtitle,
       detail,
       previewIcon,
       tone: deriveTone(index),
     },
   };
+}
+
+function parseVariantGroups(value?: string): NonNullable<CheckPhoneShoppingProduct["variantGroups"]> {
+  return (value || "").split(/[；;]/).slice(0, 4).map(section => {
+    const [name, choices] = section.split(/[:：]/, 2);
+    return { name: (name || "").trim().slice(0, 30), options: (choices || "").split("|").slice(0, 8).map(part => {
+      const match = part.trim().match(/^(.*?)(?:\+([\d,.]+))?$/);
+      return { label: (match?.[1] || "").trim().slice(0, 50), extra: Number((match?.[2] || "0").replaceAll(",", "")) || 0 };
+    }).filter(option => option.label) };
+  }).filter(group => group.name && group.options.length);
 }
 
 function parseSearchProduct(block: ParsedRecommendationBlock, query: string, index: number): CheckPhoneShoppingProduct | null {
@@ -226,6 +233,8 @@ function parseSearchProduct(block: ParsedRecommendationBlock, query: string, ind
     id: `search_${hashString(signature)}`,
     title,
     merchantLabel,
+    brandLabel: cleanText(fields["品牌"], 100),
+    variantGroups: parseVariantGroups(fields["规格"]),
     priceLabel,
     tagLabel,
     subtitle,
@@ -235,15 +244,15 @@ function parseSearchProduct(block: ParsedRecommendationBlock, query: string, ind
   };
 }
 
-function parseShoppingCatalog(rawOutput: string): ShoppingCatalog | null {
+function parseShoppingCatalog(rawOutput: string, definitions = SHOPPING_RECOMMENDATION_CATEGORIES): ShoppingCatalog | null {
   const grouped = new Map<string, ShoppingCategory>();
-  for (const category of SHOPPING_RECOMMENDATION_CATEGORIES) {
+  for (const category of definitions) {
     grouped.set(category.id, { ...category, items: [] });
   }
 
   const products = extractProductBlocks(rawOutput, ["推荐"])
     .sort((a, b) => a.order - b.order)
-    .map(parseProduct)
+    .map((block, index) => parseProduct(block, index, definitions))
     .filter((entry): entry is { category: Pick<ShoppingCategory, "id" | "title" | "subtitle">; product: CheckPhoneShoppingProduct } => Boolean(entry.product));
 
   for (const { category, product } of products) {
@@ -254,7 +263,7 @@ function parseShoppingCatalog(rawOutput: string): ShoppingCatalog | null {
     grouped.set(category.id, group);
   }
 
-  const categories = SHOPPING_RECOMMENDATION_CATEGORIES
+  const categories = definitions
     .map(category => grouped.get(category.id))
     .filter((category): category is ShoppingCategory => Boolean(category && category.items.length > 0));
 
@@ -290,7 +299,31 @@ function applySearchPromptTemplate(prompt: string, query: string): string {
     : `${filled}\n\n当前搜索词：${query}`;
 }
 
-export async function generateShoppingCatalog(refreshPrompt: string): Promise<ShoppingRefreshResult> {
+export function buildSelectiveShoppingPrompt(base: string, categories: ShoppingCategory[], mode: ShoppingMode, custom: ShoppingCustomCategory[], regionInstruction: string, existing: string[]): string {
+  const limit = Math.min(36, categories.length * 6);
+  const each = Math.min(6, Math.max(1, Math.floor(36 / Math.max(categories.length, 1))));
+  const baseInstruction = mode === "food" ? "你正在为模拟外卖应用生成可以下单的餐饮及即时配送商品。" : base === DEFAULT_SHOPPING_REFRESH_PROMPT ? "你正在为购物应用生成本次选中分类的新商品。" : base;
+  const lines = categories.map(category => {
+    const customCategory = custom.find(item => item.id === category.id);
+    const rule = customCategory?.match === "store" ? `必须是 ${category.title} 店铺出售的商品，店铺字段填该店` : customCategory?.match === "brand" ? `必须是 ${category.title} 品牌的商品，品牌字段填该品牌` : category.subtitle;
+    return `- ${category.title}：${rule}；生成 ${Math.min(4, each)} 到 ${each} 件。`;
+  });
+  return [
+    baseInstruction,
+    "\n<本次选择的分类覆盖旧提示词中的分类和数量要求>",
+    `应用模式：${mode === "food" ? "外卖即时配送" : "商城商品寄送"}。${regionInstruction}`,
+    `本次只生成以下 ${categories.length} 类，最多 ${limit} 件，禁止生成其他分类：`,
+    ...lines,
+    "店铺与品牌必须是当前地区真实存在的名称，切勿编造实体品牌或门店分店；不确定具体分店时只写连锁店名称。可生成符合品牌风格的合理虚构款式或系列，不能编造明显不存在的著名产品代际。店名、价格、币种、餐品和地区一致。用中文写说明。",
+    mode === "food" ? "外卖商品须适合即时配送。药店不写药物疗效和用量；高级料理按当地较高价位生成，不把不提供外送的餐厅写成已开通外送。" : "商城食品为可以邮寄的商品，现做餐食放外卖。",
+    "每条额外输出 [品牌] 品牌名称（无品牌填店铺名），并给适合定制的商品输出 [规格] 选项名:值+加价|值+加价；另一选项名:值+加价，例如 杯型:中杯+0|大杯+5；温度:热+0|冰+0。衣服可写尺码，数码可写容量，首饰可写材质；不适合定制的商品可以不写规格。加价用本地币数字。",
+    "严格沿用 #推荐1 和 [分类][名称][店铺][品牌][价格][说明][详情][图标] 的原有字段格式。",
+    existing.length ? `以下商品已经存在或被删除，不要重复生成：${existing.slice(-80).join("；")}` : "",
+    "</本次选择的分类覆盖旧提示词中的分类和数量要求>",
+  ].join("\n");
+}
+
+export async function generateShoppingCatalog(refreshPrompt: string, definitions = SHOPPING_RECOMMENDATION_CATEGORIES): Promise<ShoppingRefreshResult> {
   const apiConfig = resolveShoppingApiConfig();
   if (!apiConfig) {
     return { catalog: null, error: "未找到可用的 API 配置", rawOutput: "" };
@@ -310,7 +343,7 @@ export async function generateShoppingCatalog(refreshPrompt: string): Promise<Sh
       return { catalog: null, error: "LLM 返回为空", rawOutput };
     }
 
-    const catalog = parseShoppingCatalog(rawOutput);
+    const catalog = parseShoppingCatalog(rawOutput, definitions);
     if (!catalog) {
       return { catalog: null, error: "未找到有效的分类推荐商品块", rawOutput };
     }

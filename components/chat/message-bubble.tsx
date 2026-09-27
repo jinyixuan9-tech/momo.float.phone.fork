@@ -1099,6 +1099,7 @@ function CharAvatarFallbackInline({ name }: { name: string }) {
 
 function GiftBubble({ msg }: { msg: ChatMessage }) {
     const d = msg.mediaData;
+    const isFood = d?.label === "外卖卡";
     const title = d?.giftName || d?.label || "礼物";
     const recipient = d?.recipientName;
     const merchant = d?.giftMerchantLabel || "购物订单";
@@ -1120,7 +1121,7 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                 <div className="relative z-[1] min-h-[298px] flex flex-col">
                     <div className="chat-gift-card-header flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                            <div className="chat-gift-card-kicker ts-11 uppercase font-semibold tracking-normal text-[var(--c-icon)]">Gift Card</div>
+                            <div className="chat-gift-card-kicker ts-11 uppercase font-semibold tracking-normal text-[var(--c-icon)]">{isFood ? "Delivery Card" : "Gift Card"}</div>
                             <div className="chat-gift-card-source ts-12 text-[var(--c-text)] mt-1 truncate">{merchant}</div>
                         </div>
                         <div className="chat-gift-card-status ts-11 font-semibold px-2 py-1 shrink-0">
@@ -1132,7 +1133,7 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
 
                     <div className="chat-gift-card-main min-h-[86px]">
                         <div className="min-w-0 flex-1">
-                            <div className="chat-gift-card-label ts-10 uppercase font-semibold text-[var(--c-icon)]">Selected Gift</div>
+                            <div className="chat-gift-card-label ts-10 uppercase font-semibold text-[var(--c-icon)]">{isFood ? "外卖订单" : "Selected Gift"}</div>
                             <div className="chat-gift-card-title ts-24 font-semibold text-[var(--c-text-title)] leading-[1.12] break-words mt-1">
                                 {title}
                             </div>
@@ -1145,14 +1146,14 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                         )}
                         <GiftInfoCell label="编号" value={`G-${serial}`} />
                         <GiftInfoCell label="来源" value={merchant} />
-                        <GiftInfoCell label="礼物值" value={d?.giftPriceLabel || "心意礼物"} />
+                        <GiftInfoCell label={isFood ? "订单金额" : "礼物值"} value={d?.giftPriceLabel || "心意礼物"} />
                         {sentLabel && <GiftInfoCell label="送出" value={sentLabel} />}
                     </div>
 
                     <div className="flex-1" />
 
                     <div className="chat-gift-card-footer mt-5 pt-3 flex items-center justify-between gap-3">
-                        <div className="ts-10 uppercase font-semibold text-[var(--c-icon)]">Gift Certificate</div>
+                        <div className="ts-10 uppercase font-semibold text-[var(--c-icon)]">{isFood ? "Delivery Certificate" : "Gift Certificate"}</div>
                         <div className="chat-gift-card-brand ts-10 font-semibold text-[var(--c-icon)]">AI PHONE</div>
                     </div>
                 </div>

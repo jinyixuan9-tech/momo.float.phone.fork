@@ -7,11 +7,11 @@ export function shoppingAddressLabel(address: ShoppingAddress): string {
 }
 
 // A stable estimate, not a claim of actual carrier timing or customs fees.
-export function shoppingDeliveryEstimate(from: ShoppingAddress | undefined, to: ShoppingAddress): { days: number; fee: number } {
+export function shoppingDeliveryEstimate(from: ShoppingAddress | undefined, to: ShoppingAddress, method: "express" | "standard" | "air" | "sea" = "express"): { days: number; fee: number } {
   if (!from) return { days: 3, fee: 0 };
-  if (from.country !== to.country) return { days: 9, fee: 80 };
-  if (from.city !== to.city) return { days: 3, fee: 12 };
-  return { days: 1, fee: 6 };
+  if (from.country !== to.country) return method === "sea" ? { days: 5, fee: 38 } : { days: 3, fee: 80 };
+  if (from.city !== to.city) return method === "standard" ? { days: 2, fee: 8 } : { days: 1, fee: 15 };
+  return method === "standard" ? { days: 1, fee: 5 } : { days: .5, fee: 10 };
 }
 
 export function shippingTimelineForOrder(order: ShoppingOrder, days: number): ShoppingOrder["shippingTimeline"] {
@@ -48,6 +48,7 @@ export function syncShoppingDeliveries(): void {
     return { ...s, noticeSentAt: new Date().toISOString() };
   });
   const orders = state.orders.map(o => {
+    if (o.canceledAt) return o;
     if (!o.recipientCharacterId || o.deliveryNoticeSentAt) return o;
     const delivered = o.shippingTimeline?.find(e => e.status === "delivered");
     if (!delivered || new Date(delivered.timestamp).getTime() > now) return o;
