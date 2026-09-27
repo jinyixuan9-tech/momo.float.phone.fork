@@ -421,3 +421,22 @@ export function ensureNativePhoneIcon(
   }
   return { layout, changed: false };
 }
+
+/** Insert the native Theqoo forum app into older persisted layouts. */
+export function ensureNativeTheqooIcon(
+  layout: DesktopIconLayout, widgets: WidgetInstance[] = [], dock: DesktopIconId[] = [], folders: DesktopFolderMap = {},
+): { layout: DesktopIconLayout; changed: boolean } {
+  const present = new Set<string>(dock);
+  for (const item of getDesktopIconLayoutItems(layout)) present.add(item.id);
+  for (const folder of Object.values(folders)) folder.icons.forEach(id => present.add(id));
+  if (present.has("theqoo")) return { layout, changed: false };
+  const next = { ...layout } as DesktopIconLayout;
+  for (let page = 3; page <= 50; page++) {
+    const key = getDesktopPageKey(page); const icons = next[key] ?? []; const occupied = buildWidgetOccupancy(widgets, page);
+    for (const icon of icons) if (icon.row >= 1 && icon.row <= GRID_ROWS && icon.col >= 1 && icon.col <= GRID_COLS) occupied[icon.row - 1][icon.col - 1] = true;
+    const cells = Array.from({ length: GRID_ROWS * GRID_COLS }, (_, i) => [Math.floor(i / GRID_COLS) + 1, i % GRID_COLS + 1]);
+    const cell = cells.find(([row,col]) => !occupied[row-1]?.[col-1]); if (!cell) continue;
+    next[key] = [...icons, { id: "theqoo", row: cell[0], col: cell[1] }]; return { layout: next, changed: true };
+  }
+  return { layout, changed: false };
+}
