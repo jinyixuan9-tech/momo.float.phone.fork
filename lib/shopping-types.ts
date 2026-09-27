@@ -7,7 +7,8 @@ import type {
 } from "./checkphone-config";
 import type { WalletCurrency } from "./wallet-types";
 
-export type ShoppingRegion = "CN" | "KR" | "JP" | "US";
+export type ShoppingRegion = string;
+export type ShoppingRegionConfig = { id: ShoppingRegion; country: string; currency: WalletCurrency; enabled: boolean };
 export type ShoppingMode = "shop" | "food";
 export type ShoppingCustomCategory = { id: string; title: string; subtitle: string; mode: ShoppingMode; match: "store" | "brand" | "type" };
 export type ShoppingVariantGroup = { name: string; options: Array<{ label: string; extra: number }> };
@@ -19,7 +20,7 @@ export type ShoppingShipment = {
   sentAt: string; deliverAt: string; noticeSentAt?: string;
 };
 
-export type ShoppingProduct = CheckPhoneShoppingProduct & { brandLabel?: string; variantGroups?: ShoppingVariantGroup[]; categoryIds?: string[]; mode?: ShoppingMode };
+export type ShoppingProduct = CheckPhoneShoppingProduct & { brandLabel?: string; variantGroups?: ShoppingVariantGroup[]; categoryIds?: string[]; mode?: ShoppingMode; shippingCountry?: string; shippingCity?: string };
 export type ShoppingCartItem = CheckPhoneShoppingCartItem & ShoppingProduct & { selectedOptions?: string[]; unitPrice?: number };
 export type ShoppingOrder = CheckPhoneShoppingOrder & { mode?: ShoppingMode; canceledAt?: string; recipientCharacterId?: string; recipientAddressId?: string; recipientName?: string; recipientAddressLabel?: string; notifyRecipient?: boolean; currency?: import("./wallet-types").WalletCurrency };
 export type ShoppingShippingEvent = CheckPhoneShoppingShippingEvent;
@@ -39,6 +40,8 @@ export type ShoppingCatalog = {
 export type ShoppingSettings = {
   refreshPrompt: string;
   searchPrompt: string;
+  foodRefreshPrompt: string;
+  foodSearchPrompt: string;
   deliveryMinMinutes: number;
   deliveryMaxMinutes: number;
 };
@@ -59,8 +62,10 @@ export type ShoppingState = {
   generatedAt?: string;
   updatedAt: string;
   region: ShoppingRegion;
+  regions: ShoppingRegionConfig[];
   catalogsByRegion: Partial<Record<ShoppingRegion, ShoppingCatalog>>;
   foodCatalogsByRegion: Partial<Record<ShoppingRegion, ShoppingCatalog>>;
+  foodSearchResultsByRegion: Partial<Record<ShoppingRegion, ShoppingSearchResult>>;
   customCategories: ShoppingCustomCategory[];
   dismissedProductKeys: string[];
   foodCartItems: ShoppingCartItem[];

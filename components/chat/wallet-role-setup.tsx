@@ -61,7 +61,7 @@ export function WalletRoleSetup({ ownerId, ownerName }: { ownerId: string; owner
     <label style={labelStyle}>经济情况（可以模糊填写）<input className="ui-input" value={wallet.wealthLevel || ""} onChange={event => update({ wealthLevel: event.target.value })} placeholder="例如：收入稳定，花钱谨慎"/></label>
     <label style={labelStyle}>收入来源（可以模糊填写）<input className="ui-input" value={wallet.incomeSources || ""} onChange={event => update({ incomeSources: event.target.value })} placeholder="例如：工作收入、家人偶尔补贴"/></label>
     <label style={{ ...labelStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>开通信用卡<input type="checkbox" checked={wallet.creditEnabled} onChange={event => {
-      if (!event.target.checked && Object.values(wallet.creditDebts || {}).some(amount => amount > 0)) { setNotice("当前无法关闭信用卡，请到角色手机查看原因。"); return; }
+      if (!event.target.checked && Object.values(wallet.creditDebts || {}).some(amount => (amount || 0) > 0)) { setNotice("当前无法关闭信用卡，请到角色手机查看原因。"); return; }
       update({ creditEnabled: event.target.checked, creditMaskedNumber: wallet.creditMaskedNumber || `**** **** **** ${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}` });
     }}/></label>
     <p style={{ color: "#999", fontSize: size(10.5), margin: "3px 0 15px" }}>发卡行随默认结算币种确定；信用卡与储蓄卡使用同一家银行、不同尾号。切换总资产显示币种不改变发卡行。</p>

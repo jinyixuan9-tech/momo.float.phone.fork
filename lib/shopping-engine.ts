@@ -195,6 +195,8 @@ function parseProduct(block: ParsedRecommendationBlock, index: number, definitio
       priceLabel,
       tagLabel: category.title,
       brandLabel: cleanText(fields["品牌"], 100),
+      shippingCountry: cleanText(fields["发货国家"], 60) || undefined,
+      shippingCity: cleanText(fields["发货城市"], 80) || undefined,
       variantGroups: parseVariantGroups(fields["规格"]),
       subtitle,
       detail,
@@ -234,6 +236,8 @@ function parseSearchProduct(block: ParsedRecommendationBlock, query: string, ind
     title,
     merchantLabel,
     brandLabel: cleanText(fields["品牌"], 100),
+    shippingCountry: cleanText(fields["发货国家"], 60) || undefined,
+    shippingCity: cleanText(fields["发货城市"], 80) || undefined,
     variantGroups: parseVariantGroups(fields["规格"]),
     priceLabel,
     tagLabel,
@@ -302,7 +306,7 @@ function applySearchPromptTemplate(prompt: string, query: string): string {
 export function buildSelectiveShoppingPrompt(base: string, categories: ShoppingCategory[], mode: ShoppingMode, custom: ShoppingCustomCategory[], regionInstruction: string, existing: string[]): string {
   const limit = Math.min(36, categories.length * 6);
   const each = Math.min(6, Math.max(1, Math.floor(36 / Math.max(categories.length, 1))));
-  const baseInstruction = mode === "food" ? "你正在为模拟外卖应用生成可以下单的餐饮及即时配送商品。" : base === DEFAULT_SHOPPING_REFRESH_PROMPT ? "你正在为购物应用生成本次选中分类的新商品。" : base;
+  const baseInstruction = mode === "food" ? `${base}\n你正在为模拟外卖应用生成可以下单的餐饮及即时配送商品。` : base === DEFAULT_SHOPPING_REFRESH_PROMPT ? "你正在为购物应用生成本次选中分类的新商品。" : base;
   const lines = categories.map(category => {
     const customCategory = custom.find(item => item.id === category.id);
     const rule = customCategory?.match === "store" ? `必须是 ${category.title} 店铺出售的商品，店铺字段填该店` : customCategory?.match === "brand" ? `必须是 ${category.title} 品牌的商品，品牌字段填该品牌` : category.subtitle;
@@ -314,9 +318,10 @@ export function buildSelectiveShoppingPrompt(base: string, categories: ShoppingC
     `应用模式：${mode === "food" ? "外卖即时配送" : "商城商品寄送"}。${regionInstruction}`,
     `本次只生成以下 ${categories.length} 类，最多 ${limit} 件，禁止生成其他分类：`,
     ...lines,
-    "店铺与品牌必须是当前地区真实存在的名称，切勿编造实体品牌或门店分店；不确定具体分店时只写连锁店名称。可生成符合品牌风格的合理虚构款式或系列，不能编造明显不存在的著名产品代际。店名、价格、币种、餐品和地区一致。用中文写说明。",
+    "店铺与品牌必须是当前地区真实存在的名称，切勿编造实体品牌或门店分店；不确定具体分店时只写连锁店名称。可生成符合品牌风格的合理虚构款式或系列，不能编造明显不存在的著名产品代际。店名、价格、币种、餐品和地区一致。[名称]保留品牌原文（当地文字或英文）并使用中文商品品类和型号；[分类][说明][详情][规格]的选项名均用中文。",
     mode === "food" ? "外卖商品须适合即时配送。药店不写药物疗效和用量；高级料理按当地较高价位生成，不把不提供外送的餐厅写成已开通外送。" : "商城食品为可以邮寄的商品，现做餐食放外卖。",
     "每条额外输出 [品牌] 品牌名称（无品牌填店铺名），并给适合定制的商品输出 [规格] 选项名:值+加价|值+加价；另一选项名:值+加价，例如 杯型:中杯+0|大杯+5；温度:热+0|冰+0。衣服可写尺码，数码可写容量，首饰可写材质；不适合定制的商品可以不写规格。加价用本地币数字。",
+    mode === "shop" ? "每件商城商品额外输出 [发货国家] 当前地区名称、[发货城市] 在该地区真实存在的城市名称（只写城市）；外卖不需要发货地。" : "外卖无需生成发货地。",
     "严格沿用 #推荐1 和 [分类][名称][店铺][品牌][价格][说明][详情][图标] 的原有字段格式。",
     existing.length ? `以下商品已经存在或被删除，不要重复生成：${existing.slice(-80).join("；")}` : "",
     "</本次选择的分类覆盖旧提示词中的分类和数量要求>",

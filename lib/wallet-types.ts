@@ -1,5 +1,5 @@
 export type WalletCardStyle = "obsidian" | "graphite" | "silver";
-export type WalletCurrency = "CNY" | "KRW" | "JPY" | "USD" | "EUR" | "HKD" | "TWD" | "AUD";
+export type WalletCurrency = "CNY" | "KRW" | "JPY" | "USD" | "EUR" | "HKD" | "TWD" | "AUD" | (string & {});
 
 export type WalletCard = {
   id: string;

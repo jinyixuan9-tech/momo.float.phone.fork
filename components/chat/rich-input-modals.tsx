@@ -148,7 +148,7 @@ export function RedPacketModal({ mode, isGroup, onSend, onClose }: RedPacketModa
                             <span
                                 className="ts-24 font-bold"
                                 style={{ color }}
-                            >{{ CNY: "¥", KRW: "₩", JPY: "¥", USD: "$", EUR: "€", HKD: "HK$", TWD: "NT$", AUD: "A$" }[currency]}</span>
+                            >{({ CNY: "¥", KRW: "₩", JPY: "¥", USD: "$", EUR: "€", HKD: "HK$", TWD: "NT$", AUD: "A$" } as Record<string, string>)[currency] || currency}</span>
                             <input
                                 value={amount}
                                 onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}

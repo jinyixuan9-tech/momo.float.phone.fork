@@ -1,7 +1,9 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import type { ShoppingAddress, ShoppingCategory, ShoppingCustomCategory, ShoppingRegion, ShoppingSearchResult, ShoppingShipment, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
+import type { ShoppingAddress, ShoppingCategory, ShoppingCustomCategory, ShoppingSearchResult, ShoppingShipment, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
 import { walletCurrency } from "./wallet-storage";
 import { DEFAULT_SHOPPING_REFRESH_PROMPT, DEFAULT_SHOPPING_SEARCH_PROMPT, SHOPPING_RECOMMENDATION_CATEGORIES } from "./shopping-engine";
+import { normalizeShoppingRegions, SHOPPING_REGION_PRESETS } from "./shopping-regions";
+import { syncCustomWalletCurrencies } from "./wallet-storage";
 
 const SHOPPING_STATE_KEY = "ai_phone_shopping_state_v1";
 export const SHOPPING_STATE_UPDATED_EVENT = "shopping-state-updated";
@@ -63,6 +65,9 @@ function normalizeProduct(value: unknown): ShoppingState["catalog"]["recommendat
     currency: record.currency ? walletCurrency(record.currency) : undefined,
     brandLabel: cleanText(record.brandLabel, 100) || undefined,
     mode: record.mode === "food" ? "food" : "shop",
+    regionId: cleanText(record.regionId, 5) || undefined,
+    shippingCountry: cleanText(record.shippingCountry, 60) || undefined,
+    shippingCity: cleanText(record.shippingCity, 80) || undefined,
     categoryIds: Array.isArray(record.categoryIds) ? record.categoryIds.map(item => cleanText(item, 80)).filter(Boolean).slice(0, 12) : undefined,
     variantGroups: Array.isArray(record.variantGroups) ? record.variantGroups.slice(0, 4).map(value => {
       const group = value as { name?: string; options?: Array<{ label?: string; extra?: number }> };
@@ -199,13 +204,17 @@ export function createDefaultShoppingState(): ShoppingState {
     settings: {
       refreshPrompt: DEFAULT_SHOPPING_REFRESH_PROMPT,
       searchPrompt: DEFAULT_SHOPPING_SEARCH_PROMPT,
+      foodRefreshPrompt: "请生成符合本地区生活习惯、可以即时配送的真实外卖店铺与餐品。",
+      foodSearchPrompt: DEFAULT_SHOPPING_SEARCH_PROMPT,
       deliveryMinMinutes: DEFAULT_DELIVERY_MIN_MINUTES,
       deliveryMaxMinutes: DEFAULT_DELIVERY_MAX_MINUTES,
     },
     updatedAt: new Date().toISOString(),
     region: "CN",
+    regions: SHOPPING_REGION_PRESETS.map(item => ({ ...item })),
     catalogsByRegion: {},
     foodCatalogsByRegion: {},
+    foodSearchResultsByRegion: {},
     customCategories: [],
     dismissedProductKeys: [],
     foodCartItems: [],
@@ -235,11 +244,14 @@ export function loadShoppingState(): ShoppingState {
       : legacyRecommendations;
     const deliveryMinMinutes = normalizeDeliveryMinutes(settingsRaw.deliveryMinMinutes, DEFAULT_DELIVERY_MIN_MINUTES);
     const deliveryMaxMinutes = normalizeDeliveryMinutes(settingsRaw.deliveryMaxMinutes, DEFAULT_DELIVERY_MAX_MINUTES);
-    const region = (["CN", "KR", "JP", "US"].includes(String(parsed.region)) ? parsed.region : "CN") as ShoppingRegion;
+    syncCustomWalletCurrencies();
+    const region = cleanText(parsed.region, 5).toUpperCase() || "CN";
+    const regions = normalizeShoppingRegions(parsed.regions, region);
+    const activeRegion = regions.some(item => item.id === region && item.enabled) ? region : regions.find(item => item.enabled)?.id || "CN";
     const catalogsByRegion: ShoppingState["catalogsByRegion"] = {};
     const foodCatalogsByRegion: ShoppingState["foodCatalogsByRegion"] = {};
     const cached = parsed.catalogsByRegion && typeof parsed.catalogsByRegion === "object" ? parsed.catalogsByRegion as Record<string, unknown> : {};
-    for (const key of ["CN", "KR", "JP", "US"] as ShoppingRegion[]) {
+    for (const key of new Set([...Object.keys(cached), ...Object.keys(parsed.foodCatalogsByRegion && typeof parsed.foodCatalogsByRegion === "object" ? parsed.foodCatalogsByRegion : {})])) {
       const raw = cached[key] && typeof cached[key] === "object" ? cached[key] as Record<string, unknown> : null;
       if (raw) { const categories = normalizeArray(raw.categories, normalizeCategory); catalogsByRegion[key] = { categories, recommendations: categories.flatMap(category => category.items) }; }
       const foodRaw = parsed.foodCatalogsByRegion && typeof parsed.foodCatalogsByRegion === "object" ? (parsed.foodCatalogsByRegion as Record<string, unknown>)[key] : null;
@@ -276,12 +288,16 @@ export function loadShoppingState(): ShoppingState {
       settings: {
         refreshPrompt: normalizeRefreshPrompt(settingsRaw.refreshPrompt),
         searchPrompt: normalizeSearchPrompt(settingsRaw.searchPrompt),
+        foodRefreshPrompt: cleanText(settingsRaw.foodRefreshPrompt, 12000) || "请生成符合本地区生活习惯、可以即时配送的真实外卖店铺与餐品。",
+        foodSearchPrompt: cleanText(settingsRaw.foodSearchPrompt, 12000) || DEFAULT_SHOPPING_SEARCH_PROMPT,
         deliveryMinMinutes: Math.min(deliveryMinMinutes, deliveryMaxMinutes),
         deliveryMaxMinutes: Math.max(deliveryMinMinutes, deliveryMaxMinutes),
       },
       generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : undefined,
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
-      region, catalogsByRegion, foodCatalogsByRegion, addresses, shipments,
+      region: activeRegion, regions, catalogsByRegion, foodCatalogsByRegion,
+      foodSearchResultsByRegion: Object.fromEntries(Object.entries(parsed.foodSearchResultsByRegion && typeof parsed.foodSearchResultsByRegion === "object" ? parsed.foodSearchResultsByRegion : {}).map(([key, value]) => [key, normalizeSearchResult(value)]).filter((entry): entry is [string, ShoppingSearchResult] => Boolean(entry[1]))),
+      addresses, shipments,
       foodCartItems: normalizeArray(parsed.foodCartItems, normalizeCartItem).slice(0, 80),
       claimedCoupons: Array.isArray(parsed.claimedCoupons) ? parsed.claimedCoupons.map(item => cleanText(item, 30)).filter(Boolean) : [],
       usedCoupons: Array.isArray(parsed.usedCoupons) ? parsed.usedCoupons.map(item => cleanText(item, 30)).filter(Boolean) : [],

@@ -12,10 +12,10 @@ export const SHOP_BASE_CATEGORIES: Omit<ShoppingCustomCategory, "mode" | "match"
   { id: "outdoor", title: "运动户外", subtitle: "健身、露营和旅行装备" },
 ];
 
-const LOCAL_FOOD: Record<ShoppingRegion, string> = { CN: "中餐", KR: "韩餐", JP: "日料", US: "美式料理" };
+const LOCAL_FOOD: Record<string, string> = { CN: "中餐", KR: "韩餐", JP: "日料", US: "美式料理", HK: "港式料理", TW: "台式料理", MO: "澳门料理" };
 export function baseCategories(mode: ShoppingMode, region: ShoppingRegion): ShoppingCategory[] {
   const source = mode === "shop" ? SHOP_BASE_CATEGORIES : [
-    { id: "local", title: LOCAL_FOOD[region], subtitle: "当地料理和便餐" },
+    { id: "local", title: LOCAL_FOOD[region] || "当地料理", subtitle: "当地料理和便餐" },
     { id: "international", title: "异国料理", subtitle: "来自其他国家的菜式" },
     { id: "drinks", title: "饮品", subtitle: "咖啡、茶和其他饮品" },
     { id: "dessert", title: "甜品烘焙", subtitle: "蛋糕、面包和甜点" },

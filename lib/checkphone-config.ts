@@ -277,6 +277,9 @@ export type CheckPhoneShoppingProduct = {
   variantGroups?: Array<{ name: string; options: Array<{ label: string; extra: number }> }>;
   categoryIds?: string[];
   mode?: "shop" | "food";
+  regionId?: string;
+  shippingCountry?: string;
+  shippingCity?: string;
 };
 
 export type CheckPhoneShoppingCartItem = CheckPhoneShoppingProduct & {

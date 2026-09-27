@@ -8,26 +8,57 @@ const DEFAULT_WALLET_BALANCE = 10000;
 const CHARACTER_WALLET_PREFIX = "ai_phone_character_wallet_v1_";
 export const WALLET_CURRENCIES: WalletCurrency[] = ["CNY", "KRW", "JPY", "USD", "EUR", "HKD", "TWD", "AUD"];
 // Reference rates in CNY, deliberately fixed and shown as estimates in the UI.
-export const WALLET_REFERENCE_RATES: Record<WalletCurrency, number> = { CNY: 1, KRW: 0.0052, JPY: 0.047, USD: 7.1, EUR: 8.25, HKD: 0.91, TWD: 0.22, AUD: 4.8 };
+export const WALLET_REFERENCE_RATES: Record<string, number> = { CNY: 1, KRW: 0.0052, JPY: 0.047, USD: 7.1, EUR: 8.25, HKD: 0.91, TWD: 0.22, AUD: 4.8 };
+const CUSTOM_CURRENCIES_KEY = "ai_phone_wallet_custom_currencies_v1";
+export type CustomWalletCurrency = { code: string; rate: number; symbol: string };
+export function getCustomWalletCurrencies(): CustomWalletCurrency[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(kvGet(CUSTOM_CURRENCIES_KEY) || "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is CustomWalletCurrency => Boolean(item && typeof item === "object" && /^[A-Z]{3}$/.test(String((item as CustomWalletCurrency).code)) && Number.isFinite(Number((item as CustomWalletCurrency).rate)) && Number((item as CustomWalletCurrency).rate) > 0)).map(item => ({ code: item.code, rate: Number(item.rate), symbol: String(item.symbol || item.code).slice(0, 12) }));
+  } catch { return []; }
+}
+export function syncCustomWalletCurrencies(): void {
+  for (const item of getCustomWalletCurrencies()) {
+    if (!WALLET_CURRENCIES.includes(item.code)) WALLET_CURRENCIES.push(item.code);
+    if (!(item.code in WALLET_REFERENCE_RATES)) WALLET_REFERENCE_RATES[item.code] = item.rate;
+  }
+}
+export function registerCustomWalletCurrency(codeInput: string, rate: number, symbolInput: string): boolean {
+  const code = codeInput.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code) || !Number.isFinite(rate) || rate <= 0) return false;
+  if (code in WALLET_REFERENCE_RATES && !getCustomWalletCurrencies().some(item => item.code === code)) return false;
+  const currencies = getCustomWalletCurrencies().filter(item => item.code !== code);
+  kvSet(CUSTOM_CURRENCIES_KEY, JSON.stringify([...currencies, { code, rate, symbol: symbolInput.trim().slice(0, 12) || code }]));
+  if (!WALLET_CURRENCIES.includes(code)) WALLET_CURRENCIES.push(code);
+  WALLET_REFERENCE_RATES[code] = rate;
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(WALLET_UPDATED_EVENT));
+  return true;
+}
 export function walletCurrency(value: unknown): WalletCurrency {
+  syncCustomWalletCurrencies();
   return WALLET_CURRENCIES.includes(value as WalletCurrency) ? value as WalletCurrency : "CNY";
 }
 export function roundWalletMoney(value: number, currency: WalletCurrency): number {
   return Math.round(value * (currency === "KRW" || currency === "JPY" ? 1 : 100)) / (currency === "KRW" || currency === "JPY" ? 1 : 100);
 }
 export function exchangeWalletAmount(amount: number, from: WalletCurrency, to: WalletCurrency): number {
+  syncCustomWalletCurrencies();
   return roundWalletMoney(amount * WALLET_REFERENCE_RATES[from] / WALLET_REFERENCE_RATES[to], to);
 }
 export function formatCurrencyAmount(amount: number, currency: WalletCurrency): string {
-  const symbol: Record<WalletCurrency, string> = { CNY: "¥", KRW: "₩", JPY: "¥", USD: "$", EUR: "€", HKD: "HK$", TWD: "NT$", AUD: "A$" };
+  const symbol: Record<string, string> = { CNY: "¥", KRW: "₩", JPY: "¥", USD: "$", EUR: "€", HKD: "HK$", TWD: "NT$", AUD: "A$" };
+  const customSymbol = getCustomWalletCurrencies().find(item => item.code === currency)?.symbol;
   const formatted = Math.abs(amount).toLocaleString("zh-CN", { minimumFractionDigits: currency === "KRW" || currency === "JPY" ? 0 : 2, maximumFractionDigits: currency === "KRW" || currency === "JPY" ? 0 : 2 });
-  return `${amount < 0 ? "-" : ""}${symbol[currency]}${formatted}${currency === "JPY" ? " JPY" : ""}`;
+  return `${amount < 0 ? "-" : ""}${customSymbol || symbol[currency] || currency + " "}${formatted}${currency === "JPY" ? " JPY" : ""}`;
 }
 
 export const WALLET_BALANCE_ACCOUNT_ID = "wallet_balance_account";
 export const WALLET_UPDATED_EVENT = "wallet-state-updated";
 
 registerKvMigration(WALLET_STATE_KEY);
+registerKvMigration(CUSTOM_CURRENCIES_KEY);
 registerDynamicPrefix(CHARACTER_WALLET_PREFIX);
 
 function cleanText(value: unknown, maxLength: number): string {
@@ -138,6 +169,7 @@ function normalizeTransaction(value: unknown): WalletTransaction | null {
 }
 
 function normalizeWalletState(state: WalletState): WalletState {
+  syncCustomWalletCurrencies();
   const now = new Date().toISOString();
   const cards = state.cards.length > 0 ? state.cards : [createDefaultWalletCard(now)];
   const debitCard = cards.find(card => card.id === state.defaultCardId) || cards[0];
@@ -145,7 +177,7 @@ function normalizeWalletState(state: WalletState): WalletState {
   const cnyTotal = normalizeMoney(state.balance) + cards.reduce((sum, card) => sum + normalizeMoney(card.balance), 0);
   return {
     balance: cnyTotal,
-    cards: [{ ...debitCard, bankLabel: debitCard.bankLabel === "CHAT WALLET" ? ({ CNY: "中国银行", KRW: "新韩银行", JPY: "三菱UFJ银行", USD: "Chase", EUR: "BNP Paribas", HKD: "汇丰银行", TWD: "中国信托", AUD: "Commonwealth Bank" }[state.primaryCurrency] || "中国银行") : debitCard.bankLabel, isDefault: true, balance: 0, title: "储蓄卡" }],
+    cards: [{ ...debitCard, bankLabel: debitCard.bankLabel === "CHAT WALLET" ? (({ CNY: "中国银行", KRW: "新韩银行", JPY: "三菱UFJ银行", USD: "Chase", EUR: "BNP Paribas", HKD: "汇丰银行", TWD: "中国信托", AUD: "Commonwealth Bank" } as Record<string, string>)[state.primaryCurrency] || "当地银行") : debitCard.bankLabel, isDefault: true, balance: 0, title: "储蓄卡" }],
     transactions: state.transactions.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
     defaultCardId,
     updatedAt: state.updatedAt || now,
@@ -527,7 +559,7 @@ export function recordWalletPayment(input: WalletLedgerInput): WalletPaymentResu
   const charged = source === input.currency ? originalAmount : exchangeWalletAmount(originalAmount, input.currency, source);
   if (charged <= 0) return { ok: false, state, error: "换算后金额过小，无法扣款。" };
   const card = state.cards[0];
-  if (input.accountId && input.accountId !== WALLET_BALANCE_ACCOUNT_ID && input.accountId !== card.id) return { ok: false, state, error: "未找到付款银行卡。" };
+  if (input.accountId && input.accountId !== WALLET_BALANCE_ACCOUNT_ID && input.accountId !== card.id && !(input.credit && input.accountId === "wallet_credit_card")) return { ok: false, state, error: "未找到付款银行卡。" };
   const available = getWalletCurrencyBalance(state, source);
   if (input.credit && !state.creditEnabled) return { ok: false, state, error: "尚未开通信用卡。" };
   if (input.credit && state.creditEnabled) {
