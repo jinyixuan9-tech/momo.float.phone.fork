@@ -8,6 +8,7 @@ export const TWITTER_LOCALES = ["简中（大陆）", "繁中（港澳台）", "
 
 export type TwitterProfile = {
   name: string; handle: string; bio: string; avatarUrl?: string; bannerUrl?: string;
+  publicAddress?: string; // Optional public form of address; defaults to the X nickname.
   followers?: number; followingCount?: number; visibility?: "public" | "protected";
   identity?: string; // Public identity of an alternate account, not its private owner.
   createdAt?: number;
@@ -191,6 +192,11 @@ export function saveTwitterState(state: TwitterState): void {
 export function isPublicTwitterPost(state: TwitterState, post: TwitterPost): boolean {
   const profile = post.authorId === "user" ? state.profile : state.accounts[post.authorId] || state.characterProfiles[post.authorId];
   return profile?.visibility !== "protected";
+}
+
+export function twitterPublicAddress(state: TwitterState, accountId = "user"): string {
+  const profile = accountId === "user" ? state.profile : state.accounts[accountId] || state.characterProfiles[accountId];
+  return profile?.publicAddress?.trim() || profile?.name?.trim() || "用户";
 }
 
 export function getTwitterPrivateAccountContext(characterId: string): string {

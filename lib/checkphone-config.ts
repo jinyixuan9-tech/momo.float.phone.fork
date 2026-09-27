@@ -65,8 +65,6 @@ export type CheckPhoneNotesPayload = {
 export type CheckPhoneMessageBubble = {
   id: string;
   text: string;
-  /** Real SMS keeps original and translation separate; generated snapshots can still use bilingual text. */
-  translated?: string;
   timeLabel: string;
   direction: "incoming" | "outgoing";
 };
@@ -696,6 +694,8 @@ export type CheckPhoneXProfile = {
   name: string;
   handle: string;
   bio: string;
+  avatarUrl?: string;
+  bannerUrl?: string;
   location?: string;
   joinedAt?: string;
   followingCount: number;
@@ -705,6 +705,7 @@ export type CheckPhoneXProfile = {
 export type CheckPhoneXPost = {
   id: string;
   body: string;
+  imageRef?: string;
   mediaDescription?: string;
   createdAt: string;
   replyCount: number;
@@ -744,6 +745,7 @@ export type CheckPhoneXLike = {
   authorName: string;
   authorHandle: string;
   body: string;
+  imageRef?: string;
   mediaDescription?: string;
   createdAt: string;
   replyCount: number;

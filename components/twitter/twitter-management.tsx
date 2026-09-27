@@ -143,6 +143,7 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
       <button type="button" className={`${styles.manageCover} ${styles.manageCoverPick}`} onClick={() => chooseImage("bannerUrl")} aria-label="点击封面更换图片"><ManagedImage imageRef={draft.bannerUrl} /></button>
       <div className={styles.manageAvatar}><button type="button" className={styles.manageAvatarPreview} onClick={() => chooseImage("avatarUrl")} aria-label="点击头像更换图片">{draft.avatarUrl ? <ManagedImage imageRef={draft.avatarUrl} /> : draft.name.slice(0, 1) || "我"}</button></div>
       <label>昵称<input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
+      {editAccount === "user" && <label>网友对你的称呼（可选）<input value={draft.publicAddress || ""} onChange={e => setDraft({ ...draft, publicAddress: e.target.value })} placeholder={draft.name || "默认使用 X 昵称"} /><small>留空时按 X 昵称称呼；想使用本名，可以在这里填写。</small></label>}
       <label>账号名 @<input value={draft.handle} onChange={e => setDraft({ ...draft, handle: e.target.value })} /></label>
       <label>简介<textarea value={draft.bio} onChange={e => setDraft({ ...draft, bio: e.target.value })} /></label>
       <label>生日（可选）<input type="date" value={draft.birthday || ""} onChange={e => setDraft({ ...draft, birthday: e.target.value || undefined })} /></label>

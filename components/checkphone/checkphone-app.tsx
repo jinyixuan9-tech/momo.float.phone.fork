@@ -578,6 +578,10 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
   }
 
   async function handleBatchGenerate() {
+    if (batchAppIds.includes("x")) {
+      setBatchStatus({ success: false, message: "X 已使用共享账号数据，请进入查手机 X，点原有刷新图标选择同步或让 TA 发帖。" });
+      return;
+    }
     if (!activeCharId || batchLoading || batchAppIds.length === 0) {
       if (batchAppIds.length === 0) setBatchStatus({ success: false, message: "请至少选择一个应用。" });
       return;
@@ -1014,7 +1018,7 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
               <div className="flex flex-col gap-3">
                 <p className="menu-desc">选择 1–4 个应用，只调用一次 API 并分别保存结果。选择越多，模型输出越长。</p>
                 <div className="grid max-h-[48vh] grid-cols-2 gap-2 overflow-y-auto pr-1">
-                  {sanitizeCheckPhoneAppIds(manifest.allAppIds).map((appId) => {
+                  {sanitizeCheckPhoneAppIds(manifest.allAppIds).filter(appId => appId !== "x").map((appId) => {
                     const selected = batchAppIds.includes(appId);
                     return (
                       <button

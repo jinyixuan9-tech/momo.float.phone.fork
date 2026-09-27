@@ -29,8 +29,10 @@ import type {
   CheckPhoneSnapshot,
   CheckPhoneXPayload,
 } from "@/lib/checkphone-config";
-import { generateCheckPhoneX } from "@/lib/checkphone-engine";
-import { clearPhoneSnapshot, loadPhoneSnapshot, savePhoneSnapshot } from "@/lib/checkphone-storage";
+import { clearPhoneSnapshot, loadPhoneSnapshot } from "@/lib/checkphone-storage";
+import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
+import { TWITTER_UPDATED_EVENT, loadTwitterState } from "@/lib/twitter-storage";
+import { projectCharacterTwitter, publishCharacterTwitterFromCheckPhone } from "@/lib/twitter-checkphone-bridge";
 
 type CheckPhoneXPageProps = {
   character: Character;
@@ -199,8 +201,22 @@ function getEntries(payload: CheckPhoneXPayload | null, tab: XTabId): XEntry[] {
   return payload.likes.map((item) => ({ ...item, section: "likes" }));
 }
 
+function XImage({ imageRef }: { imageRef?: string }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    if (!imageRef) { setUrl(""); return; }
+    if (/^(https?:|data:)/.test(imageRef)) { setUrl(imageRef); return; }
+    let live = true;
+    void getChatImageFromIndexedDB(imageRef).then(value => { if (live) setUrl(value || ""); });
+    return () => { live = false; };
+  }, [imageRef]);
+  return url ? <img src={url} alt="" /> : null;
+}
+
 export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
   const [snapshot, setSnapshot] = useState<CheckPhoneSnapshot<CheckPhoneXPayload> | null>(null);
+  const [nativeState, setNativeState] = useState(() => loadTwitterState());
+  const [refreshMenuOpen, setRefreshMenuOpen] = useState(false);
   const [selectedTab, setSelectedTab] = useState<XTabId>("posts");
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -214,10 +230,17 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   useEffect(() => {
+    const sync = () => setNativeState(loadTwitterState());
+    window.addEventListener(TWITTER_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(TWITTER_UPDATED_EVENT, sync);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setLoaded(false);
     setError(null);
     setSnapshot(null);
+    setNativeState(loadTwitterState());
     setSelectedTab("posts");
     setExpandedEntryId(null);
     setDebugRawOutput(null);
@@ -236,8 +259,16 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
     };
   }, [character.id]);
 
-  async function handleRefresh() {
+  function handleSync() {
+    setRefreshMenuOpen(false);
+    setNativeState(loadTwitterState());
+    setError(null);
+    setLoaded(true);
+  }
+
+  async function handlePublish() {
     if (loading) return;
+    setRefreshMenuOpen(false);
     setLoading(true);
     setError(null);
     setDebugRawOutput(null);
@@ -245,39 +276,16 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
     setDebugParseMode(null);
     setDebugParseError(null);
     setDebugNormalizeError(null);
-    const {
-      payload,
-      summary,
-      error: nextError,
-      debugRawOutput: nextDebugRawOutput,
-      debugSanitizedOutput: nextDebugSanitizedOutput,
-      debugParseMode: nextDebugParseMode,
-      debugParseError: nextDebugParseError,
-      debugNormalizeError: nextDebugNormalizeError,
-    } = await generateCheckPhoneX(character.id, snapshot?.payload ?? null, snapshot?.updatedAt);
-    if (payload) {
-      const now = new Date().toISOString();
-      const nextSnapshot: CheckPhoneSnapshot<CheckPhoneXPayload> = {
-        id: `${character.id}:x`,
-        characterId: character.id,
-        appId: "x",
-        generatedAt: snapshot?.generatedAt ?? now,
-        updatedAt: now,
-        summary,
-        payload,
-      };
-      await savePhoneSnapshot(nextSnapshot);
-      setSnapshot(nextSnapshot);
+    try {
+      await publishCharacterTwitterFromCheckPhone(character);
+      setNativeState(loadTwitterState());
       setExpandedEntryId(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "角色发帖失败，请重试。");
+    } finally {
+      setLoading(false);
+      setLoaded(true);
     }
-    setError(nextError ?? null);
-    setDebugRawOutput(nextDebugRawOutput ?? null);
-    setDebugSanitizedOutput(nextDebugSanitizedOutput ?? null);
-    setDebugParseMode(nextDebugParseMode ?? null);
-    setDebugParseError(nextDebugParseError ?? null);
-    setDebugNormalizeError(nextDebugNormalizeError ?? null);
-    setLoading(false);
-    setLoaded(true);
   }
 
   async function handleClear() {
@@ -296,7 +304,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
     setConfirmClearOpen(false);
   }
 
-  const payload = snapshot?.payload ?? null;
+  const payload = useMemo(() => projectCharacterTwitter(character, nativeState), [character, nativeState]);
   const currentEntries = useMemo(() => getEntries(payload, selectedTab), [payload, selectedTab]);
   const profileInitial = payload ? getInitial(payload.profile.name) : "X";
   const joinedAtLabel = payload ? getJoinLabel(payload.profile.joinedAt) : "";
@@ -313,10 +321,10 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
             <div className="cp-x-header-title">X</div>
           </div>
           <div className="cp-x-action-cluster">
-            <button type="button" className="cp-x-icon-button" onClick={handleRefresh} disabled={loading} aria-label="Refresh X snapshot">
+            <button type="button" className="cp-x-icon-button" onClick={() => setRefreshMenuOpen(true)} disabled={loading} aria-label="刷新 X">
               <RefreshCw size={18} strokeWidth={2.5} className={loading ? "cp-spin" : ""} />
             </button>
-            <button type="button" className="cp-x-icon-button" onClick={() => setConfirmClearOpen(true)} disabled={loading || !snapshot} aria-label="Clear X snapshot">
+            <button type="button" className="cp-x-icon-button" onClick={() => setConfirmClearOpen(true)} disabled={loading || !snapshot} aria-label="清除旧 X 快照">
               <Trash2 size={17} strokeWidth={2.25} />
             </button>
           </div>
@@ -325,7 +333,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
 
       {loading && (
         <div className="cp-refresh-indicator cp-refresh-indicator--floating" aria-live="polite">
-          <span className="cp-refresh-indicator-text">Refreshing X</span>
+          <span className="cp-refresh-indicator-text">正在让 TA 发帖…</span>
           <span className="cp-refresh-indicator-dots" aria-hidden="true">
             <i></i><i></i><i></i>
           </span>
@@ -344,7 +352,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
 
         {error ? (
           <CheckPhoneDebugErrorCard
-            title="Unable to parse X content."
+            title="X 发帖失败"
             error={error}
             debugParseMode={debugParseMode}
             debugParseError={debugParseError}
@@ -361,10 +369,10 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
                 <ChevronLeft size={21} strokeWidth={2.4} />
                 </button>
                 <div className="cp-x-action-cluster">
-                  <button type="button" className="cp-x-glass-button" onClick={handleRefresh} disabled={loading} aria-label="Refresh X snapshot">
+                  <button type="button" className="cp-x-glass-button" onClick={() => setRefreshMenuOpen(true)} disabled={loading} aria-label="刷新 X">
                     <RefreshCw size={18} strokeWidth={2.35} className={loading ? "cp-spin" : ""} />
                   </button>
-                  <button type="button" className="cp-x-glass-button" onClick={() => setConfirmClearOpen(true)} disabled={loading || !snapshot} aria-label="Clear X snapshot">
+                  <button type="button" className="cp-x-glass-button" onClick={() => setConfirmClearOpen(true)} disabled={loading || !snapshot} aria-label="清除旧 X 快照">
                     <Trash2 size={17} strokeWidth={2.35} />
                   </button>
                 </div>
@@ -372,12 +380,13 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
 
             <section className="cp-x-profile-hero">
               <div className="cp-x-cover" aria-hidden="true">
-                <div className="cp-x-cover-noise" />
+                {payload.profile.bannerUrl && <XImage imageRef={payload.profile.bannerUrl} />}
+                {!payload.profile.bannerUrl && <div className="cp-x-cover-noise" />}
               </div>
 
               <div className="cp-x-profile-panel">
                 <div className="cp-x-avatar-row">
-                  <div className="cp-x-profile-avatar">{profileInitial}</div>
+                  <div className="cp-x-profile-avatar">{payload.profile.avatarUrl ? <XImage imageRef={payload.profile.avatarUrl} /> : profileInitial}</div>
                 </div>
                 <div className="cp-x-profile-main">
                   <h3>{payload.profile.name}</h3>
@@ -442,7 +451,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
                     }}
                     aria-expanded={isExpanded}
                   >
-                    <div className="cp-x-tweet-avatar">{profileInitial}</div>
+                    <div className="cp-x-tweet-avatar">{entry.section === "likes" ? getInitial(entry.authorName) : payload.profile.avatarUrl ? <XImage imageRef={payload.profile.avatarUrl} /> : profileInitial}</div>
                     <div className="cp-x-tweet-main">
                       <div className="cp-x-tweet-head">
                         <strong>{entry.section === "likes" ? entry.authorName : payload.profile.name}</strong>
@@ -458,16 +467,16 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
                         </div>
                       ) : null}
                       <CheckPhoneBilingualText text={entry.body} className="cp-x-tweet-body" tone="x" />
-                      {isExpanded ? (
+                      {isExpanded && getEntryNote(entry) ? (
                         <div className="cp-x-note-panel">
                           <div className="cp-x-note-title">NOTE</div>
                           <CheckPhoneBilingualText text={getEntryNote(entry)} className="cp-x-note-body" tone="x" />
                         </div>
                       ) : null}
-                      {mediaDescription ? (
+                      {("imageRef" in entry && entry.imageRef) || mediaDescription ? (
                         <div className="cp-x-media-preview">
-                          <div className="cp-x-media-sheen" aria-hidden="true" />
-                          <CheckPhoneBilingualText text={mediaDescription} className="cp-x-media-caption" tone="light" />
+                          {"imageRef" in entry && entry.imageRef ? <XImage imageRef={entry.imageRef} /> : <div className="cp-x-media-sheen" aria-hidden="true" />}
+                          {mediaDescription && <CheckPhoneBilingualText text={mediaDescription} className="cp-x-media-caption" tone="light" />}
                         </div>
                       ) : null}
                       <div className="cp-x-action-row" aria-hidden="true">
@@ -483,7 +492,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
               }) : (
                 <div className="cp-x-status cp-x-inline-empty">
                   <p>No content in this tab</p>
-                  <span className="cp-x-hint">Refresh to add more profile activity.</span>
+                  <span className="cp-x-hint">点右上角刷新，可同步账号或让 TA 发帖。</span>
                 </div>
               )}
             </div>
@@ -493,7 +502,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
 
       {payload && (
         <>
-          <button type="button" className="cp-x-compose-fab" onClick={handleRefresh} disabled={loading} aria-label="Refresh X snapshot">
+          <button type="button" className="cp-x-compose-fab" onClick={() => setRefreshMenuOpen(true)} disabled={loading} aria-label="刷新 X">
             <Plus size={25} strokeWidth={2.5} />
           </button>
 
@@ -510,13 +519,22 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
         </>
       )}
 
+      {refreshMenuOpen && <div className="cp-x-choice-backdrop" onClick={() => setRefreshMenuOpen(false)}>
+        <div className="cp-x-choice" role="dialog" aria-modal="true" aria-label="刷新 X" onClick={event => event.stopPropagation()}>
+          <h3>刷新 X</h3>
+          <button type="button" onClick={handleSync}>同步账号动态<span>读取小手机 X 已有的主页、帖子和互动</span></button>
+          <button type="button" onClick={() => { void handlePublish(); }}>让 TA 发帖<span>发布到同一份 X 账号，两边都会显示</span></button>
+          <button type="button" className="cp-x-choice-cancel" onClick={() => setRefreshMenuOpen(false)}>取消</button>
+        </div>
+      </div>}
+
       {confirmClearOpen && (
         <ConfirmDialog
-          title="Clear X content?"
-          message="This clears the current X cache. The next refresh will not reuse old X content."
+          title="清除查手机旧 X 快照？"
+          message="只清除以前独立生成的查手机内容，不会删除小手机 X 的账号或帖子。"
           variant="danger"
-          confirmLabel="Clear"
-          cancelLabel="Cancel"
+          confirmLabel="清除旧快照"
+          cancelLabel="取消"
           onConfirm={handleClear}
           onCancel={() => setConfirmClearOpen(false)}
         />

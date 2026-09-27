@@ -9,7 +9,7 @@ import { buildCharacterTimeContext } from "./character-time";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "./settings-storage";
 import type { RegexConfig } from "./settings-types";
 import { selectedTwitterWorldBooks } from "./twitter-worldbooks";
-import { isPublicTwitterPost, type TwitterMessage, type TwitterPost, type TwitterState } from "./twitter-storage";
+import { isPublicTwitterPost, twitterPublicAddress, type TwitterMessage, type TwitterPost, type TwitterState } from "./twitter-storage";
 
 export type TwitterGeneratedLine = { original: string; translated: string; photoDescription?: string };
 export type TwitterCommentDraft = { name: string; handle: string; original: string; translated?: string };
@@ -71,12 +71,12 @@ export async function generateTwitterText(input: {
     unifiedRecentItems: context?.unifiedRecentItems ?? [],
     timeContext: buildCharacterTimeContext(character.timeZone),
   });
-  const publicRule = "推特的帖子和回复是公开的。你可以有私下记忆，但不得随意公开地下关系、私人聊天内容、昵称或未公开身份。";
+  const publicRule = `推特的帖子和回复是公开的。你可以有私下记忆，但不得随意公开地下关系、私人聊天内容或未公开身份。用户主账号在 X 上的昵称是“${input.state.profile.name}”，网友对用户的称呼是“${twitterPublicAddress(input.state)}”；公开发言和生成的路人评论不得仅凭私下人设或记忆知道其本名就公开使用。`;
   const stateRule = input.state.worldRules.trim() ? `补充世界观：${input.state.worldRules.slice(0, 2500)}` : "";
   const shared = "以角色平常使用的语言写 original；如果不是中文，translated 给准确自然的简体中文译文，中文原文则两字段相同。原文中的 #话题标签保留原文，不翻译、不改写标签。只输出 JSON，不要解释。";
   let instruction: string;
   if (input.kind === "post") {
-    const recent = input.state.posts.filter(p => !p.replyToId && isPublicTwitterPost(input.state, p)).slice(-10).map(p => `${p.authorId === "user" ? input.state.profile.name : p.authorId === character.id ? character.name : "其他账号"}：${p.original}`).join("\n");
+    const recent = input.state.posts.filter(p => !p.replyToId && isPublicTwitterPost(input.state, p)).slice(-10).map(p => `${p.authorId === "user" ? twitterPublicAddress(input.state) : p.authorId === character.id ? character.name : "其他账号"}：${p.original}`).join("\n");
     const accountRule = input.accountKind === "alternate" ? `你以副账号“${input.accountProfile?.name || "副账号"}”发帖；对外身份是“${input.accountProfile?.identity || "未设定"}”。账号关联方式：${input.accountProfile?.disclosure === "full" ? "已经完全公开与主账号的关系，可以自然谈及。" : input.accountProfile?.disclosure === "clues" ? `只存在以下可见线索“${input.accountProfile.disclosureClues || "无"}”，不能直接证实或曝光身份。` : "独立身份，不要主动泄漏与主账号的联系或私密记忆。"}` : "";
     const communityRule = input.communityName ? `这条发在“${input.communityName.slice(0, 60)}”社区，内容要贴合社区主题，不能因关联角色而公开其未公开的小号。` : "";
     instruction = `${publicRule}\n${stateRule}\n${accountRule}\n${communityRule}\n近期公开帖子：\n${recent || "暂无"}\n根据本人设定、记忆与时间，自然发布一条适合当前情境的新帖子，可以回应近期公开话题，但不要机械模仿。可偶尔发照片；只有这次确实想配图时才填写 photoDescription，描述照片的主体、人物或场景，便于从该账号可用相册匹配；不发图时留空。${shared}\nJSON 格式：{"original":"帖子原文","translated":"中文译文","photoDescription":"配图描述，若不发图则留空"${input.withComments ? ',"comments":[{"name":"路人昵称","handle":"路人账号","original":"短评论原文","translated":"中文译文"}]' : ""}}。${input.withComments ? "同时给 5 至 10 条自然的路人评论，避免暴露副账号与主账号的隐藏关联。" : ""}`;
@@ -90,7 +90,7 @@ export async function generateTwitterText(input: {
     instruction = `${stateRule}\n你正在推特私信中回复。${dmIdentity}${anonymous ? "发送者是陌生的匿名用户；不可根据其他 App 的用户身份或共同历史揭穿身份，除非本次匿名对话明确提供证据。保持角色本人的边界与性格。" : "与公开发帖不同，这里是一对一私信，可以参考真实关系。"}\n本次会话：\n${history || "暂无消息"}${quoted}\n自然回应最近的消息；可拆成 1 至 3 条独立短信。${shared}\nJSON 格式：{"lines":[{"original":"第一条原文","translated":"第一条中文译文"}]}`;
   }
   const messages: LLMMessage[] = [...prompt, { role: "system", content: instruction }, { role: "user", content: "现在自然地回复。" }];
-  const raw = await sendLLMRequest(apiConfig, preset, messages, regexes, { characterName: character.name, userName: anonymous ? "匿名用户" : identity?.name || input.state.profile.name }, { appId: "twitter", appTags: ["twitter", input.kind], skipOutputRegex: true });
+  const raw = await sendLLMRequest(apiConfig, preset, messages, regexes, { characterName: character.name, userName: anonymous ? "匿名用户" : input.kind === "dm" ? identity?.name || input.state.profile.name : twitterPublicAddress(input.state) }, { appId: "twitter", appTags: ["twitter", input.kind], skipOutputRegex: true });
   const lines = parseLines(raw);
   if (!lines.length) throw new Error("这次没有生成有效内容，请重试。");
   const result = (input.kind === "dm" ? lines : lines.slice(0, 1)) as TwitterGeneratedLine[] & { comments?: TwitterCommentDraft[] };

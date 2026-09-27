@@ -183,7 +183,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const userIdentity = resolveUserIdentity(undefined, "twitter");
-  const user = { ...state.profile, name: state.profile.name === "我" ? userIdentity?.name || "我" : state.profile.name, avatarUrl: state.profile.avatarUrl || userIdentity?.avatarUrl || "" };
+  const user = { ...state.profile, avatarUrl: state.profile.avatarUrl || userIdentity?.avatarUrl || "" };
   const currentUserAccount = state.accounts[activeAccount] || user;
   const openManagement = (options: typeof managementOptions = {}) => { setManagementOptions(options); setManageOpen(true); };
 

@@ -1,6 +1,6 @@
 import { sendLLMRequest } from "./chat-engine";
 import { loadApiConfigs, loadBindingConfig, loadPresets, resolveBinding } from "./settings-storage";
-import type { TwitterState, TwitterPost, TwitterCommunityCharacter } from "./twitter-storage";
+import { twitterPublicAddress, type TwitterState, type TwitterPost, type TwitterCommunityCharacter } from "./twitter-storage";
 import { twitterWorldBookText } from "./twitter-worldbooks";
 
 export type TwitterWorldComment = { name: string; handle: string; original: string; translated?: string };
@@ -73,7 +73,7 @@ export async function generateTwitterTrends(state: TwitterState): Promise<string
 export async function generateTwitterStrangerDms(state: TwitterState, userAccountId = "user"): Promise<TwitterStranger[]> {
   const profile = userAccountId === "user" ? state.profile : state.accounts[userAccountId] || state.profile;
   const visible = state.posts.filter(p => p.authorId === userAccountId && profile.visibility !== "protected" && (!p.replyToId || state.posts.some(parent => parent.id === p.replyToId))).slice(-12).map(p => p.original.slice(0, 170)).join("；");
-  const row = await ask(`生成 2 至 4 位互不相同的虚构陌生人在推特上给用户发来的第一条私信。只能根据以下公开信息，不得引用私信、隐私设定、未公开感情关系或大小号归属。公开主页：${profile.name.slice(0, 60)}；${profile.bio.slice(0, 350)}。公开动态或互动：${visible.slice(0, 1000) || "暂无"}。世界公开背景：${publicWorld(state, 550)}。内容要各不相同，自然简短，不含真实新闻、外链、联系方式。外语需附准确中文译文，原文中文时译文相同。只输出 JSON：{"messages":[{"name":"虚构昵称","handle":"账号名","original":"原文","translated":"中文译文"}]}。`);
+  const row = await ask(`生成 2 至 4 位互不相同的虚构陌生人在推特上给用户发来的第一条私信。只能根据以下公开信息，不得引用私信、隐私设定、未公开感情关系或大小号归属。公开主页：${profile.name.slice(0, 60)}；${profile.bio.slice(0, 350)}。网友对该账号的称呼：${twitterPublicAddress(state, userAccountId).slice(0, 60)}；不能凭空使用真实姓名。公开动态或互动：${visible.slice(0, 1000) || "暂无"}。世界公开背景：${publicWorld(state, 550)}。内容要各不相同，自然简短，不含真实新闻、外链、联系方式。外语需附准确中文译文，原文中文时译文相同。只输出 JSON：{"messages":[{"name":"虚构昵称","handle":"账号名","original":"原文","translated":"中文译文"}]}。`);
   const messages = Array.isArray(row.messages) ? row.messages.slice(0, 4).flatMap(item => {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
@@ -85,7 +85,7 @@ export async function generateTwitterStrangerDms(state: TwitterState, userAccoun
 }
 
 export async function generateTwitterStrangerReply(state: TwitterState, accountName: string, messages: Array<{ role: "user" | "character"; original: string }>, userAccountId = "user"): Promise<{ original: string; translated?: string }> {
-  const history = messages.slice(-14).map(message => `${message.role === "user" ? (userAccountId === "user" ? state.profile.name : state.accounts[userAccountId]?.name || "用户") : accountName}：${message.original.slice(0, 350)}`).join("\n");
+  const history = messages.slice(-14).map(message => `${message.role === "user" ? twitterPublicAddress(state, userAccountId) : accountName}：${message.original.slice(0, 350)}`).join("\n");
   const row = await ask(`你是虚构社交平台上的普通账号“${accountName.slice(0, 60)}”，正与用户私信。公开世界背景：${publicWorld(state, 650)}。只依据本对话，不知道用户的隐私、小号身份或私人关系。自然回复最近一条消息。原文非中文时给准确中文译文。对话：\n${history}\n只输出 JSON：{"original":"回复原文","translated":"中文译文"}。`);
   const original = asText(row.original, 500);
   if (!original) throw new Error("这次没有收到有效回复，请重试。");
@@ -109,7 +109,8 @@ export async function translateTwitterLegacy(entries: Array<{ id: string; origin
 }
 
 export async function generateTwitterComments(state: TwitterState, post: TwitterPost, author: string, previous: string[]): Promise<TwitterWorldComment[]> {
-  const request = `请给以下虚构社交平台帖子生成 5 至 10 条新的自然路人评论。帖子作者：${author}。帖子内容：“${post.original.slice(0, 800)}”。既有评论：“${previous.slice(-15).join("；").slice(0, 1300)}”。世界公开背景：${publicWorld(state, 1000)}。禁止真实时事与现实新闻、外链、曝光私密关系或角色主副账号之间的幕后联系。角色为副账号时，仅按该账号公开表现理解其身份。不要复述既有评论或已被删除的评论。原文可用自然的交流语言，外语另给中文译文。只输出 JSON：{"comments":[{"name":"虚构昵称","handle":"英文账号","original":"评论原文","translated":"中文译文"}]}。`;
+  const publicAuthor = post.authorId.startsWith("user") ? twitterPublicAddress(state, post.authorId) : author;
+  const request = `请给以下虚构社交平台帖子生成 5 至 10 条新的自然路人评论。帖子作者：${publicAuthor}。帖子内容：“${post.original.slice(0, 800)}”。既有评论：“${previous.slice(-15).join("；").slice(0, 1300)}”。世界公开背景：${publicWorld(state, 1000)}。禁止真实时事与现实新闻、外链、曝光私密关系或角色主副账号之间的幕后联系。角色为副账号时，仅按该账号公开表现理解其身份。不要复述既有评论或已被删除的评论。原文可用自然的交流语言，外语另给中文译文。只输出 JSON：{"comments":[{"name":"虚构昵称","handle":"英文账号","original":"评论原文","translated":"中文译文"}]}。`;
   const row = await ask(request);
   const comments = commentsFrom(row.comments);
   if (!comments.length) throw new Error("本次没有生成评论，请重试。");
@@ -125,7 +126,8 @@ export async function generateTwitterCommunityText(state: TwitterState, characte
 }
 
 export async function generateTwitterDelayedReply(state: TwitterState, target: TwitterPost, comment: TwitterPost, author: string): Promise<{ original: string; translated?: string } | null> {
-  const row = await ask(`在虚构社交平台里，账号「${author}」发了帖子「${target.original.slice(0, 500)}」，用户留言「${comment.original.slice(0, 400)}」。根据内容与时机决定：作者或该帖下路人是否自然回复这条用户评论；不是每条留言都应收到回应。只使用公开信息，不知道用户或角色副账号的隐藏身份。如果无人回复输出 {"reply":false}；如有回复输出 {"reply":true,"name":"回复者昵称","handle":"账号名","original":"回复原文","translated":"中文译文"}。`);
+  const publicAuthor = target.authorId.startsWith("user") ? twitterPublicAddress(state, target.authorId) : author;
+  const row = await ask(`在虚构社交平台里，账号「${publicAuthor}」发了帖子「${target.original.slice(0, 500)}」，用户留言「${comment.original.slice(0, 400)}」。根据内容与时机决定：作者或该帖下路人是否自然回复这条用户评论；不是每条留言都应收到回应。只使用公开信息，不知道用户或角色副账号的隐藏身份。如果无人回复输出 {"reply":false}；如有回复输出 {"reply":true,"name":"回复者昵称","handle":"账号名","original":"回复原文","translated":"中文译文"}。`);
   if (row.reply !== true) return null;
   const original = asText(row.original, 320);
   return original ? { original, translated: asText(row.translated, 320) } : null;
