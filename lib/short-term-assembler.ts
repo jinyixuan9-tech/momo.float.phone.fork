@@ -362,10 +362,14 @@ export function loadNativeTimeline(
                     itemsText: msg.mediaData?.paymentRequestItemsText,
                 });
                 else if (msg.mediaType === "app_card") {
+                    if (msg.mediaData?.appId === "theqoo" && msg.mediaData.appHistoryText) {
+                        content = msg.mediaData.appHistoryText;
+                    } else {
                     const appName = msg.mediaData?.appName || "APP";
                     const title = msg.mediaData?.appCardTitle || msg.mediaData?.label || "应用卡片";
                     const body = msg.mediaData?.appCardBody || msg.mediaData?.appCardSummary || msg.content;
                     content = body ? `[${appName}卡片:${title}]${body}` : `[${appName}卡片:${title}]`;
+                    }
                 }
                 else if (msg.mediaType === "voice_call" || msg.mediaType === "video_call") content = `[我发起了${msg.mediaType === "voice_call" ? "语音" : "视频"}通话]`;
                 else if (msg.mediaType === "location") content = `[位置:${msg.mediaData?.label || ""}]`;

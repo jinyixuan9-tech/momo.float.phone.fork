@@ -258,6 +258,7 @@ export type ChatMessage = {
         appTags?: string[];
         appHistoryText?: string;
         appHistoryRole?: ChatMessageRole;
+        theqooSnapshot?: import("./theqoo-storage").TheqooPost & { translationMode: import("./theqoo-storage").TheqooTranslationMode };
         avatarRecommendationForCharacterId?: string;
         avatarRecommendationStatus?: "pending" | "accepted" | "declined";
         avatarRecommendationTargetPlatform?: "chat" | "wvs" | "lysn";

@@ -1,4 +1,4 @@
-export type TheqooTranslationMode = "original" | "folded" | "repost";
+export type TheqooTranslationMode = "original" | "chinese" | "folded" | "repost";
 export type TheqooUiLanguage = "ko" | "zh";
 
 export type TheqooComment = {
@@ -19,6 +19,9 @@ export type TheqooPost = {
   views: number;
   comments: TheqooComment[];
   favorite: boolean;
+  authoredByUser?: boolean;
+  imageRef?: string;
+  imagePrompt?: string;
 };
 
 export type TheqooState = {
@@ -96,7 +99,7 @@ export function loadTheqooState(): TheqooState {
       ...defaultTheqooState(),
       ...parsed,
       worldBookIds: Array.isArray(parsed.worldBookIds) ? parsed.worldBookIds : [],
-      posts: Array.isArray(parsed.posts) && parsed.posts.length ? parsed.posts : demoPosts,
+      posts: Array.isArray(parsed.posts) ? parsed.posts : demoPosts,
     };
   } catch {
     return defaultTheqooState();

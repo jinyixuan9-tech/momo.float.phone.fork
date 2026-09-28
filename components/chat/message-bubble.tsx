@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
+import { TheqooSnapshotWindow } from "@/components/theqoo/theqoo-snapshot";
 import { ChatMessage, createOrGetSession, updateMessageMediaStatus, updateMessageMediaData } from "@/lib/chat-storage";
 import { resolveContactCard } from "@/lib/contact-card";
 import { loadCharacters } from "@/lib/character-storage";
@@ -783,6 +784,7 @@ function PaymentRequestBubble({ msg, charName, userName, onShowDetail }: {
 // ── Custom App Card ─────────────────────────────
 
 function AppCardBubble({ msg, characterId, characterName }: { msg: ChatMessage; characterId?: string; characterName?: string }) {
+    const [snapshotOpen, setSnapshotOpen] = useState(false);
     const d = msg.mediaData;
     const appName = d?.appName || "APP";
     const layout = normalizeAppCardLayout(d?.appCardLayout);
@@ -799,6 +801,7 @@ function AppCardBubble({ msg, characterId, characterName }: { msg: ChatMessage; 
     } as React.CSSProperties;
     const openApp = () => {
         if (cardOpenDisabled) return;
+        if (d?.theqooSnapshot) { setSnapshotOpen(true); return; }
         if (!d?.appId || typeof window === "undefined") return;
         window.dispatchEvent(new CustomEvent("open-app", {
             detail: {
@@ -841,6 +844,7 @@ function AppCardBubble({ msg, characterId, characterName }: { msg: ChatMessage; 
     }
 
     return (
+        <>
         <div className={`chat-app-card${toneClass}`} data-disabled={cardOpenDisabled || undefined} style={style} onClick={openApp}>
             <div className="chat-app-card-head">
                 <span className="chat-app-card-icon" aria-hidden>
@@ -898,6 +902,8 @@ function AppCardBubble({ msg, characterId, characterName }: { msg: ChatMessage; 
                 </div>
             ) : null}
         </div>
+        {snapshotOpen && d?.theqooSnapshot && <TheqooSnapshotWindow snapshot={d.theqooSnapshot} onClose={() => setSnapshotOpen(false)} />}
+        </>
     );
 }
 
