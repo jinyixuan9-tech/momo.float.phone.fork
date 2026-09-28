@@ -6,6 +6,17 @@ export type TheqooComment = {
   original: string;
   translated: string;
   createdAt: number;
+  authoredByUser?: boolean;
+  pendingRefresh?: boolean;
+};
+
+export type TheqooImage = {
+  id: string;
+  kind: "text" | "generated";
+  originalText?: string;
+  translatedText?: string;
+  mediaRef?: string;
+  prompt?: string;
 };
 
 export type TheqooPost = {
@@ -22,12 +33,15 @@ export type TheqooPost = {
   authoredByUser?: boolean;
   imageRef?: string;
   imagePrompt?: string;
+  images?: TheqooImage[];
 };
 
 export type TheqooState = {
   uiLanguage: TheqooUiLanguage;
   translationMode: TheqooTranslationMode;
   worldBookIds: string[];
+  includeCalendar: boolean;
+  includeWeverseSchedule: boolean;
   posts: TheqooPost[];
 };
 
@@ -86,6 +100,8 @@ export const defaultTheqooState = (): TheqooState => ({
   uiLanguage: "ko",
   translationMode: "repost",
   worldBookIds: [],
+  includeCalendar: false,
+  includeWeverseSchedule: false,
   posts: demoPosts,
 });
 
@@ -99,6 +115,8 @@ export function loadTheqooState(): TheqooState {
       ...defaultTheqooState(),
       ...parsed,
       worldBookIds: Array.isArray(parsed.worldBookIds) ? parsed.worldBookIds : [],
+      includeCalendar: parsed.includeCalendar === true,
+      includeWeverseSchedule: parsed.includeWeverseSchedule === true,
       posts: Array.isArray(parsed.posts) ? parsed.posts : demoPosts,
     };
   } catch {
