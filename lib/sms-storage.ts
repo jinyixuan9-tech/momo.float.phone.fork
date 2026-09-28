@@ -2,6 +2,7 @@ import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
 export const SMS_KEY = "ai_phone_sms_v1";
 export const SMS_EVENT = "sms-updated";
+export const SMS_INCOMING_EVENT = "sms-incoming-message";
 registerKvMigration(SMS_KEY);
 
 export type SmsIdentity = { id: string; number: string; region: string; createdAt: number };
@@ -9,19 +10,44 @@ export type SmsReaction = { id: string; emoji: string; by: "user" | "character" 
 export type SmsMessage = { id: string; threadId: string; direction: "outgoing" | "incoming"; original: string; translated?: string; createdAt: number; delivered: boolean; batchId?: string; awarenessAt?: SmsThread["awareness"]; reactions?: SmsReaction[] };
 export type SmsThread = { id: string; characterId: string; identityId: string; number: string; characterNumber: string; alias?: string; backgroundUrl?: string; blockedByMe: boolean; blockedByCharacter: boolean; awareness: "unknown" | "suspected" | "confirmed"; suspicion?: string; summary?: string; updatedAt: number; readAt: number };
 export const DEFAULT_SMS_EMOJI = ["❤️", "👍", "😂", "😮", "😢", "👀", "🔥", "🫶", "🐰", "🥺", "😍", "✨", "💀", "👏", "😡", "💕"];
-export type SmsState = { version: 1; realNumber: string; characterNumbers: Record<string,string>; identities: SmsIdentity[]; threads: SmsThread[]; messages: SmsMessage[]; background: string; proactive: "off" | "rare" | "normal" | "often"; autoExpandTranslation: boolean; emojiChoices: string[]; lastAutoAt: Record<string,number>; contactAttempts: Record<string,number> };
-const empty = (): SmsState => ({ version: 1, realNumber: "", characterNumbers: {}, identities: [], threads: [], messages: [], background: "", proactive: "normal", autoExpandTranslation: false, emojiChoices: [...DEFAULT_SMS_EMOJI], lastAutoAt: {}, contactAttempts: {} });
+export type SmsState = { version: 1; realNumber: string; characterNumbers: Record<string,string>; identities: SmsIdentity[]; threads: SmsThread[]; messages: SmsMessage[]; background: string; proactive: "off" | "rare" | "normal" | "often"; autoExpandTranslation: boolean; ringtoneUrl?: string; emojiChoices: string[]; lastAutoAt: Record<string,number>; contactAttempts: Record<string,number> };
+const empty = (): SmsState => ({ version: 1, realNumber: "", characterNumbers: {}, identities: [], threads: [], messages: [], background: "", proactive: "normal", autoExpandTranslation: false, ringtoneUrl: "", emojiChoices: [...DEFAULT_SMS_EMOJI], lastAutoAt: {}, contactAttempts: {} });
 export function loadSms(): SmsState {
   try {
     const raw = kvGet(SMS_KEY);
     if (!raw) return empty();
     const parsed = JSON.parse(raw) as Partial<SmsState>;
-    return { ...empty(), ...parsed, autoExpandTranslation: parsed.autoExpandTranslation === true, emojiChoices: Array.isArray(parsed.emojiChoices) ? parsed.emojiChoices.filter((value): value is string => typeof value === "string" && value.length <= 32).slice(0, 80) : [...DEFAULT_SMS_EMOJI], characterNumbers: parsed.characterNumbers ?? {}, identities: Array.isArray(parsed.identities) ? parsed.identities : [], threads: Array.isArray(parsed.threads) ? parsed.threads : [], messages: Array.isArray(parsed.messages) ? parsed.messages : [], lastAutoAt: parsed.lastAutoAt ?? {}, contactAttempts: parsed.contactAttempts ?? {} };
+    return { ...empty(), ...parsed, autoExpandTranslation: parsed.autoExpandTranslation === true, ringtoneUrl: typeof parsed.ringtoneUrl === "string" ? parsed.ringtoneUrl : "", emojiChoices: Array.isArray(parsed.emojiChoices) ? parsed.emojiChoices.filter((value): value is string => typeof value === "string" && value.length <= 32).slice(0, 80) : [...DEFAULT_SMS_EMOJI], characterNumbers: parsed.characterNumbers ?? {}, identities: Array.isArray(parsed.identities) ? parsed.identities : [], threads: Array.isArray(parsed.threads) ? parsed.threads : [], messages: Array.isArray(parsed.messages) ? parsed.messages : [], lastAutoAt: parsed.lastAutoAt ?? {}, contactAttempts: parsed.contactAttempts ?? {} };
   } catch { return empty(); }
 }
 export function saveSms(state: SmsState): void {
+  const previousIds = new Set(loadSms().messages.map(message => message.id));
   kvSet(SMS_KEY, JSON.stringify(state));
-  if (typeof window !== "undefined") window.dispatchEvent(new Event(SMS_EVENT));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SMS_EVENT));
+    for (const message of state.messages) {
+      if (previousIds.has(message.id) || message.direction !== "incoming" || !message.delivered) continue;
+      const thread = state.threads.find(item => item.id === message.threadId);
+      if (thread) window.dispatchEvent(new CustomEvent(SMS_INCOMING_EVENT, { detail: { message, thread } }));
+    }
+  }
+}
+export function getSmsThreadUnreadCount(state: SmsState, threadId: string): number {
+  const thread = state.threads.find(item => item.id === threadId);
+  if (!thread) return 0;
+  return state.messages.filter(message => message.threadId === threadId && message.direction === "incoming" && message.delivered && message.createdAt > thread.readAt).length;
+}
+export function getSmsUnreadCount(state: SmsState = loadSms()): number {
+  return state.threads.reduce((count, thread) => count + getSmsThreadUnreadCount(state, thread.id), 0);
+}
+export function markSmsThreadRead(threadId: string): void {
+  const state = loadSms();
+  const thread = state.threads.find(item => item.id === threadId);
+  if (!thread) return;
+  const latest = state.messages.filter(message => message.threadId === threadId && message.direction === "incoming" && message.delivered).at(-1)?.createdAt || 0;
+  if (latest <= thread.readAt) return;
+  thread.readAt = Math.max(Date.now(), latest);
+  saveSms(state);
 }
 export function smsId(): string { return `sms_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`; }
 export function ensureSmsThread(state: SmsState, characterId: string, identityId: string, characterNumber = ""): SmsThread {
@@ -34,7 +60,7 @@ export function ensureSmsThread(state: SmsState, characterId: string, identityId
   return thread;
 }
 export function addSmsMessage(state: SmsState, thread: SmsThread, direction: SmsMessage["direction"], original: string, translated?: string, batchId?: string): SmsMessage {
-  const now = Date.now();
+  const now = Math.max(Date.now(), thread.updatedAt + 1);
   const message: SmsMessage = { id: smsId(), threadId: thread.id, direction, original: original.trim(), translated: translated?.trim(), createdAt: now, delivered: direction === "outgoing" ? !thread.blockedByCharacter : !thread.blockedByMe, batchId, awarenessAt: thread.awareness };
   state.messages.push(message);
   thread.updatedAt = now;

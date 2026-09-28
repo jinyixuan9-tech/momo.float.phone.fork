@@ -350,6 +350,11 @@ export type StorySession = {
   independentStory?: boolean;
   /** 小说目录页展示的自定义标签，保存在该故事的主线会话上。 */
   catalogTags?: string[];
+  /** 从相册设置的剧情封面/头像（data URL）；通常保存在主线会话。 */
+  storyAvatar?: string;
+  /** 邀请或快捷新建后，首次进入时由角色自动开启剧情。 */
+  autoStartPrompt?: string;
+  autoStartRequestedAt?: string;
   /** 独立剧情结束后可显式并入角色记忆。 */
   endedAt?: string;
   includedInMemoryAt?: string;
@@ -362,6 +367,7 @@ export type StorySession = {
   settings?: StoryCharacterSettings;
   lastMessageId?: string;
   lastMessagePreview?: string;
+  lastMessageAt?: string;
 };
 
 export type StoryMessageRole = "user" | "assistant" | "system";
@@ -851,10 +857,26 @@ export function pushStoryMessage(
   updateStorySession(message.sessionId, {
     lastMessageId: message.id,
     lastMessagePreview: preview,
+    lastMessageAt: message.createdAt,
     updatedAt: message.createdAt,
   });
 
   return message;
+}
+
+/** 把指定分页设为剧情 APP 下次打开的目标页，可由聊天邀请等跨 APP 流程调用。 */
+export function saveStoryLaunchTarget(session: StorySession): void {
+  const ownerType: StoryOwnerType = session.ownerType === "group" ? "group" : "single";
+  const ownerId = session.ownerId || session.characterId;
+  const ownerKey = `${ownerType}:${ownerId}`;
+  let pageMap: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(kvGet("story-active-page-map-v1") || "{}");
+    if (parsed && typeof parsed === "object") pageMap = parsed as Record<string, string>;
+  } catch { /* 损坏的旧值直接重建 */ }
+  kvSet("story-active-page-map-v1", JSON.stringify({ ...pageMap, [ownerKey]: session.id }));
+  kvSet("story-last-active-target-v1", JSON.stringify({ ownerType, ownerId }));
+  kvSet("story-last-active-character-id", session.characterId);
 }
 
 /** Delete a single story message */

@@ -108,3 +108,5 @@
 .contactPanel input{width:100%;height:38px;margin-top:7px;padding:7px 9px;border:1px solid #d7dce5;border-radius:9px;outline:0;font-size:calc(14px * var(--app-text-scale, 1))}
 .contactPanel .contextActions button{color:#137cdb}
 .contactPanel .contextActions button:last-child{color:#fff}
+
+.unreadCount{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:10px;background:#ff3b30;color:white!important;font-size:10px!important;line-height:18px;text-align:center;font-weight:700}

@@ -7,6 +7,8 @@
 
 import {
     loadChatSessions,
+    saveChatSessions,
+    loadChatAppSettings,
     loadChatMessages,
     pushChatMessage,
     loadAllFollowUpSchedules,
@@ -911,7 +913,19 @@ export async function parseAndSaveResponse(
     const sess = sessions.find(s => s.id === sessionId);
     const previousState = sess && !sess.isGroup ? getLatestCharacterStateValues(sess.contactId) : [];
 
-    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(rawText, previousState);
+    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue, characterRemarkForUser } = parseAIResponse(rawText, previousState);
+    if (sess && !sess.isGroup && characterRemarkForUser) {
+        const remark = Array.from(characterRemarkForUser.replace(/[\r\n]/g, " ").trim()).slice(0, 20).join("");
+        if (remark) {
+            const updatedAt = new Date().toISOString();
+            const index = sessions.findIndex(item => item.id === sess.id);
+            if (index >= 0) {
+                sessions[index] = { ...sessions[index], characterRemarkForUser: remark, characterRemarkForUserUpdatedAt: updatedAt };
+                saveChatSessions(sessions);
+                window.dispatchEvent(new CustomEvent("chat-character-remark-updated", { detail: { sessionId: sess.id, remark, updatedAt } }));
+            }
+        }
+    }
 
     // 自定义状态栏渲染戳：追发/屏幕速聊/离线回传落库的消息此前从不盖
     // statusRegionMode，custom 模式下 [状态栏] 原文被当 markdown 渲染成一坨
@@ -946,6 +960,11 @@ export async function parseAndSaveResponse(
     for (const p of parts) {
         if (p.mediaType === "voice_call") { triggerCall = "voice"; continue; }
         if (p.mediaType === "video_call") { triggerCall = "video"; continue; }
+        if (p.mediaType === "meeting_invite") {
+            if (!sess || sess.isGroup || loadChatAppSettings().allowCharacterMeetingInvites !== true) continue;
+            filteredParts.push({ ...p, mediaData: { ...p.mediaData, meetingInviteStatus: "pending", meetingInviteCharacterId: sess.contactId, meetingInviteCharacterName: charName } });
+            continue;
+        }
         // 「丢弃角色输出的无效表情包」开关（主动消息路径）
         if (p.mediaType === "sticker" && sess?.discardInvalidStickers === true) {
             const senderIds = sess.isGroup ? (sess.participantIds ?? []) : [sess.contactId];

@@ -49,7 +49,8 @@ import {
     updateChatCharacterProfile,
 } from "@/lib/chat-profile-storage";
 import { CharacterComputerPage } from "./character-computer-page";
-import { resolveUserIdentity, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
+import { resolveUserIdentity, loadApiConfigs, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
+import { sendLLMRequest } from "@/lib/chat-engine";
 import { clearStatusRegionConfig, getStatusRegionConfig, hasOwnStatusRegionConfig, saveStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
 import { downloadFile } from "@/lib/download-utils";
 import { createChatRecordExport, importChatRecordFile } from "@/lib/chat-record-transfer";
@@ -57,7 +58,7 @@ import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
 import { SessionChatSoundsSection } from "@/components/chat/session-chat-sounds";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, Ban, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, Camera, type LucideIcon } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, Ban, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, Camera, RefreshCw, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -331,6 +332,8 @@ export function ChatSettingsPanel({
 }: ChatSettingsPanelProps) {
     const [backgroundImage, setBackgroundImage] = useState<string>(session.backgroundImage || "");
     const [alias, setAlias] = useState<string>(session.alias || "");
+    const [characterRemarkForUser, setCharacterRemarkForUser] = useState<string>(session.characterRemarkForUser || "");
+    const [refreshingCharacterRemark, setRefreshingCharacterRemark] = useState(false);
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
     const [callAppearance, setCallAppearance] = useState<string>(session.callAppearance || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
@@ -754,6 +757,69 @@ export function ChatSettingsPanel({
         }
     };
 
+    const requestCharacterRemark = async () => {
+        if (refreshingCharacterRemark || session.isGroup) return;
+        setRefreshingCharacterRemark(true);
+        try {
+            const charLabel = character?.name || characterName;
+            const userLabel = userIdentity?.name || "用户";
+            const slot = resolveBinding(loadBindingConfig(), session.contactId, "chat");
+            const config = loadApiConfigs().find(item => item.id === slot.apiConfigId);
+            if (!config) throw new Error(`请先给${charLabel}绑定聊天 API`);
+
+            const presets = loadPresets();
+            const preset = (slot.presetId ? presets.find(item => item.id === slot.presetId) : null)
+                ?? presets.find(item => item.builtIn)
+                ?? null;
+            const recentMessages = loadChatMessages(session.id)
+                .filter(msg => !msg.isRetracted && (msg.role === "user" || msg.role === "assistant"))
+                .slice(-30);
+            const historyMessages: Parameters<typeof sendLLMRequest>[2] = recentMessages.map(msg => ({
+                role: msg.role === "user" ? "user" : "assistant",
+                content: msg.content?.trim() || getChatMessagePreview(msg),
+            }));
+            const promptMessages: Parameters<typeof sendLLMRequest>[2] = [
+                {
+                    role: "system",
+                    content: `你是${charLabel}。\n\n【角色人设】\n${character?.persona?.trim() || "未填写"}`,
+                },
+                ...historyMessages,
+                {
+                    role: "user",
+                    content: `请结合你的人设、以上最近30条聊天记录和当前关系，给${userLabel}设置一个不超过20字的私聊备注。只输出备注内容，不要解释，不要模拟聊天，不要输出标签。`,
+                },
+            ];
+            const rawRemark = await sendLLMRequest(
+                config,
+                preset,
+                promptMessages,
+                [],
+                { characterName: charLabel, userName: userLabel },
+                { skipOutputRegex: true, appId: "chat-remark", debugSessionId: session.id },
+            );
+            const unwrappedRemark = rawRemark
+                .trim()
+                .replace(/^\[给用户备注[:：]\s*([\s\S]*?)\]$/, "$1")
+                .replace(/^[“\"']|[”\"']$/g, "")
+                .split(/\r?\n/, 1)[0]
+                .trim();
+            const nextRemark = Array.from(unwrappedRemark).slice(0, 20).join("");
+            if (!nextRemark) throw new Error("AI 没有生成有效备注，请重试");
+
+            const updatedAt = new Date().toISOString();
+            updateSession({
+                characterRemarkForUser: nextRemark,
+                characterRemarkForUserUpdatedAt: updatedAt,
+            });
+            setCharacterRemarkForUser(nextRemark);
+            window.dispatchEvent(new CustomEvent("chat-character-remark-updated", { detail: { sessionId: session.id } }));
+        } catch (error) {
+            alert(error instanceof Error ? error.message : "生成备注失败，请重试");
+        } finally {
+            setRefreshingCharacterRemark(false);
+        }
+    };
+
     // 仿真拉黑：写成明确的私聊系统事件，直接进入该角色的短期记忆。
     // 只做本地消息落库，不额外请求 AI。
     const handleToggleBlacklist = (blocked: boolean) => {
@@ -998,6 +1064,19 @@ export function ChatSettingsPanel({
                             <ChevronRight size={16} />
                         </div>
                     </button>
+                    {!session.isGroup && (
+                        <button className="menu-item" onClick={requestCharacterRemark} disabled={refreshingCharacterRemark}>
+                            <ChatInfoIcon icon={UserPlus} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">TA 给你的备注</span>
+                                <span className="menu-desc">由角色根据人设与最近聊天决定，不可手动修改</span>
+                            </div>
+                            <div className="menu-right gap-2">
+                                <span className="menu-desc mr-1">{characterRemarkForUser || "未设置"}</span>
+                                <RefreshCw size={15} className={refreshingCharacterRemark ? "animate-spin" : ""} />
+                            </div>
+                        </button>
+                    )}
                     {!session.isGroup && (
                         <button className="menu-item" onClick={() => setShowAvatarDialog(true)}>
                             <ChatInfoIcon icon={Camera} color={BINDING_ACCENTS.preset} />

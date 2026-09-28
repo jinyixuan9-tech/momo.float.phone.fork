@@ -96,6 +96,7 @@ import { extractTextToolDirectiveText } from "@/lib/text-tool-protocol";
 import { emitChatPluginEvent, getChatPluginHookBus, runChatPluginTransform } from "@/lib/chat-plugin-hooks";
 import { CHAT_PLUGIN_TOAST_EVENT, getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
+import { createOrGetStorySession, hydrateStoryStorage, loadStorySessionsForOwner, saveStoryLaunchTarget, updateStorySession } from "@/lib/story-storage";
 
 // ── Call system message detection ──────────────────────────
 // Call messages are stored with user/assistant role for correct prompt alternation,
@@ -2503,6 +2504,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             let savedAnyPart = false;
             for (const part of parts) {
                 throwIfGenerationStopped(guard);
+                if (part.mediaType === "meeting_invite") continue;
                 // Filter action types
                 if (part.mediaType === "voice_call" || part.mediaType === "video_call") {
                     if (session.isSpectator) continue; // 围观群不能把用户卷进群通话
@@ -2901,7 +2903,30 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId);
 
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(aiResponseText, previousState);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, characterRemarkForUser } = parseAIResponse(aiResponseText, previousState);
+        if (!session.isGroup && characterRemarkForUser) {
+            const normalizedRemark = characterRemarkForUser.replace(/[\r\n]/g, " ").trim().slice(0, 20);
+            if (normalizedRemark) {
+                const updatedAt = new Date().toISOString();
+                const sessions = loadChatSessions();
+                const index = sessions.findIndex(item => item.id === session.id);
+                if (index >= 0) {
+                    sessions[index] = {
+                        ...sessions[index],
+                        characterRemarkForUser: normalizedRemark,
+                        characterRemarkForUserUpdatedAt: updatedAt,
+                    };
+                    saveChatSessions(sessions);
+                }
+                Object.assign(session, {
+                    characterRemarkForUser: normalizedRemark,
+                    characterRemarkForUserUpdatedAt: updatedAt,
+                });
+                window.dispatchEvent(new CustomEvent("chat-character-remark-updated", {
+                    detail: { sessionId: session.id, remark: normalizedRemark, updatedAt },
+                }));
+            }
+        }
         const parts = stripInvalidStickerParts(rawParts);
         throwIfGenerationStopped(options);
 
@@ -2920,6 +2945,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             throwIfGenerationStopped(options);
             if (p.mediaType === "voice_call") { triggerCall = "voice"; continue; }
             if (p.mediaType === "video_call") { triggerCall = "video"; continue; }
+            if (p.mediaType === "meeting_invite") {
+                // 仅允许私聊角色发起；把角色快照写进卡片，避免角色改名后旧邀请失去归属。
+                if (session.isGroup || loadChatAppSettings().allowCharacterMeetingInvites !== true) continue;
+                pushFilteredPart({
+                    ...p,
+                    content: p.content || `${charN}发出了线下见面邀请`,
+                    mediaData: {
+                        ...p.mediaData,
+                        meetingInviteStatus: "pending",
+                        meetingInviteCharacterId: session.contactId,
+                        meetingInviteCharacterName: charN,
+                    },
+                });
+                continue;
+            }
             if (p.mediaType === "accept_red_packet" || p.mediaType === "decline_red_packet"
                 || p.mediaType === "accept_transfer" || p.mediaType === "decline_transfer"
                 || p.mediaType === "accept_payment_request" || p.mediaType === "decline_payment_request") {
@@ -3728,6 +3768,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         let savedAnyPart = false;
                         for (const part of parts) {
                             throwIfGenerationStopped(generationGuard);
+                            if (part.mediaType === "meeting_invite") continue;
                             if (!part.content.trim() && !part.mediaType) continue;
                             const draft = buildAssistantMessageDraft(part, {
                                 sessionId: session.id,
@@ -4126,6 +4167,69 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             commitSendText(trimmed);
         }
         return true;
+    };
+
+    const handleMeetingInviteAction = async (invite: ChatMessage, action: "accept" | "decline") => {
+        if (invite.mediaData?.meetingInviteStatus && invite.mediaData.meetingInviteStatus !== "pending") return;
+        const resolvedAt = new Date().toISOString();
+        if (action === "decline") {
+            const nextMediaData: ChatMessage["mediaData"] = {
+                ...invite.mediaData,
+                meetingInviteStatus: "declined",
+                meetingInviteResolvedAt: resolvedAt,
+            };
+            updateMessageMediaData(invite.id, nextMediaData);
+            setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
+            // 按普通用户消息落库并立即触发回复，让角色真实收到拒绝而不是只改卡片外观。
+            handleSendText("不同意", { autoReply: true });
+            return;
+        }
+
+        try {
+            await hydrateStoryStorage();
+            const characterId = invite.mediaData?.meetingInviteCharacterId || session.contactId;
+            const characterName = invite.mediaData?.meetingInviteCharacterName || character?.name || "角色";
+            const mainSession = loadStorySessionsForOwner("single", characterId)
+                .find((item) => (item.branchId || "main") === "main")
+                || createOrGetStorySession(characterId, { ownerType: "single", ownerId: characterId, branchId: "main" });
+            const now = new Date();
+            const branchName = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+            const storySession = createOrGetStorySession(characterId, {
+                ownerType: "single",
+                ownerId: characterId,
+                participantIds: [characterId],
+                branchId: `invite_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                branchName,
+                inheritRecentMemory: true,
+                independentStory: false,
+                baseSession: mainSession,
+            });
+            const acceptedReaction = invite.mediaData?.meetingInviteAcceptResponse?.trim();
+            const meetingDescription = invite.mediaData?.meetingInviteDescription?.trim();
+            const launchPrompt = `${characterName}在线上邀请${userIdentity?.name || "用户"}线下见面，用户已经同意。${meetingDescription ? `邀请说明：${meetingDescription}。` : ""}${acceptedReaction ? `${characterName}对此的反应是：${acceptedReaction}。` : ""}请由${characterName}根据刚才的私聊语境自然开启这次见面剧情。`;
+            updateStorySession(storySession.id, {
+                autoStartPrompt: launchPrompt,
+                autoStartRequestedAt: resolvedAt,
+            });
+            const nextStorySession = {
+                ...storySession,
+                autoStartPrompt: launchPrompt,
+                autoStartRequestedAt: resolvedAt,
+            };
+            saveStoryLaunchTarget(nextStorySession);
+
+            const nextMediaData: ChatMessage["mediaData"] = {
+                ...invite.mediaData,
+                meetingInviteStatus: "accepted",
+                meetingInviteResolvedAt: resolvedAt,
+                meetingInviteStorySessionId: storySession.id,
+            };
+            updateMessageMediaData(invite.id, nextMediaData);
+            setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
+            window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "story" } }));
+        } catch (error) {
+            showChatToast(error instanceof Error ? error.message : "创建见面剧情失败，请稍后再试");
+        }
     };
 
     // 线下 XML 构造与提示词查看器共用 lib/offline-prompt-builder（社区 #108），
@@ -6218,6 +6322,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 }}
                                                 onMusicPlay={handleMusicCardPlay}
                                                 onActionSelect={(text) => chatTextInputRef.current?.appendText(text)}
+                                                onMeetingInviteAction={handleMeetingInviteAction}
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
                                             />
                                         </div>

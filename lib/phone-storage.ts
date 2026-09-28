@@ -27,18 +27,20 @@ export type PhoneCallRecord = {
   endedAt: number;
   durationSec: number;
   favorite?: boolean;
+  /** null 表示新未接来电尚未查看；旧记录缺失此字段时视为已看。 */
+  seenAt?: number | null;
   transcript: PhoneTranscriptLine[];
   source?: "phone" | "chat" | "sms" | "system";
 };
-export type PhoneState = { version: 1; calls: PhoneCallRecord[] };
+export type PhoneState = { version: 1; calls: PhoneCallRecord[]; ringtoneUrl?: string };
 
-const empty = (): PhoneState => ({ version: 1, calls: [] });
+const empty = (): PhoneState => ({ version: 1, calls: [], ringtoneUrl: "" });
 export function loadPhoneState(): PhoneState {
   try {
     const raw = kvGet(PHONE_KEY);
     if (!raw) return empty();
     const parsed = JSON.parse(raw) as Partial<PhoneState>;
-    return { version: 1, calls: Array.isArray(parsed.calls) ? parsed.calls : [] };
+    return { version: 1, calls: Array.isArray(parsed.calls) ? parsed.calls : [], ringtoneUrl: typeof parsed.ringtoneUrl === "string" ? parsed.ringtoneUrl : "" };
   } catch { return empty(); }
 }
 export function savePhoneState(state: PhoneState): void {
@@ -79,8 +81,18 @@ export function appendPhoneCall(record: PhoneCallRecord): void {
   const state = loadPhoneState();
   const idx = state.calls.findIndex(c => c.id === record.id);
   if (idx >= 0) state.calls[idx] = record;
-  else state.calls.unshift(record);
+  else state.calls.unshift(record.status === "missed" && record.direction === "incoming" ? { ...record, seenAt: null } : record);
   state.calls = state.calls.slice(0, 500);
+  savePhoneState(state);
+}
+export function getUnseenMissedCallCount(state: PhoneState = loadPhoneState()): number {
+  return state.calls.filter(call => call.status === "missed" && call.direction === "incoming" && call.seenAt === null).length;
+}
+export function markMissedCallsSeen(): void {
+  const state = loadPhoneState();
+  if (!state.calls.some(call => call.seenAt === null && call.status === "missed")) return;
+  const seenAt = Date.now();
+  state.calls.forEach(call => { if (call.status === "missed" && call.seenAt === null) call.seenAt = seenAt; });
   savePhoneState(state);
 }
 export function togglePhoneFavorite(callId: string): void {

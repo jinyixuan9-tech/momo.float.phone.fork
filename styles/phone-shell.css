@@ -187,6 +187,48 @@
   border-radius: 20px;
   background: #0a0a0a;
   visibility: var(--status-island-visibility, visible);
+  border: 0;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: width 220ms ease, box-shadow 220ms ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.status-island-active {
+  width: min(212px, 55vw);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.28);
+}
+
+.status-island-content {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  font-size: calc(11px*var(--app-text-scale,1));
+  font-weight: 600;
+}
+
+.status-island-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #68db90;
+  flex: none;
+  box-shadow: 0 0 8px #68db90;
+}
+
+.status-island-end {
+  margin-left: auto;
+  flex: none;
+  opacity: .72;
 }
 
 .phone-shell-wrap[data-hide-top-bar="1"] .phone-status-bar>* {

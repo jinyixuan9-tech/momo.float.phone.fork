@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Clock3, ContactRound, Delete, Keyboard, MicOff, Phone, PhoneOff, Search, Star, Trash2, UserRound, X } from "lucide-react";
+import { ChevronLeft, Clock3, ContactRound, Delete, Keyboard, MicOff, Phone, PhoneOff, Search, Settings2, Star, Trash2, UserRound, X } from "lucide-react";
 import { loadCharacters, CHARACTERS_UPDATED_EVENT } from "@/lib/character-storage";
 import { loadSms, SMS_EVENT } from "@/lib/sms-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
@@ -14,6 +14,8 @@ import {
   getCharacterPhoneNumber,
   getUserPhoneNumber,
   loadPhoneState,
+  markMissedCallsSeen,
+  savePhoneState,
   PHONE_EVENT,
   phoneId,
   setUserPhoneNumber,
@@ -53,6 +55,8 @@ function fmtRecent(ts: number) {
 
 export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?: (text: string) => void }) {
   const [tab, setTab] = useState<Tab>("recents");
+  const [showPhoneSettings, setShowPhoneSettings] = useState(false);
+  const [ringtoneDraft, setRingtoneDraft] = useState(() => loadPhoneState().ringtoneUrl || "");
   const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [recentFilter, setRecentFilter] = useState<"all" | "missed">("all");
@@ -76,6 +80,13 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
   const sms = useMemo(() => loadSms(), [revision]);
 
   useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
+  useEffect(() => { if (tab === "recents") markMissedCallsSeen(); }, [tab, revision]);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("phone-call-state", { detail: activeCall?.phase === "connected"
+      ? { active: true, characterId: activeCall.characterId, connectedAt: activeCall.connectedAt }
+      : { active: false } }));
+    return () => { window.dispatchEvent(new CustomEvent("phone-call-state", { detail: { active: false } })); };
+  }, [activeCall?.phase, activeCall?.characterId, activeCall?.connectedAt]);
   useEffect(() => {
     const refresh = () => setRevision(v => v + 1);
     window.addEventListener(PHONE_EVENT, refresh); window.addEventListener(SMS_EVENT, refresh); window.addEventListener(CHARACTERS_UPDATED_EVENT, refresh);
@@ -234,7 +245,7 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
   const matchDial = normalizedDial ? characters.find(c => getCharacterPhoneNumber(c.id).replace(/\D/g, "") === normalizedDial) : undefined;
 
   return <div className={styles.app}>
-    <header className={styles.header}><button className={styles.backButton} aria-label="返回桌面" title="返回桌面" onClick={onClose}><ChevronLeft size={22}/></button><span>电话</span><span className={styles.headerSpacer} /></header>
+    <header className={styles.header}><button className={styles.backButton} aria-label="返回桌面" title="返回桌面" onClick={onClose}><ChevronLeft size={22}/></button><span>电话</span><button className={styles.backButton} aria-label="电话设置" title="电话设置" onClick={()=>{setRingtoneDraft(loadPhoneState().ringtoneUrl || "");setShowPhoneSettings(true)}}><Settings2 size={19}/></button></header>
     <main className={styles.main}>
       {tab === "recents" && <section><div className={styles.segment}><button className={recentFilter==="all"?styles.activeSeg:undefined} onClick={()=>setRecentFilter("all")}>所有通话</button><button className={recentFilter==="missed"?styles.activeSeg:undefined} onClick={()=>setRecentFilter("missed")}>未接来电</button></div><h1>最近通话</h1><div className={styles.search}><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索" /></div><div className={styles.list}>{filteredCalls.map(call => <div className={styles.row} key={call.id} onClick={()=>startOutgoing(call.characterId)}><div className={styles.avatar}>{characterById(call.characterId)?.avatar ? <img src={characterById(call.characterId)!.avatar!} alt=""/> : aliasFor(call.characterId).slice(0,1)}</div><div className={styles.rowText}><strong className={call.status === "missed" ? styles.missed : undefined}>{aliasFor(call.characterId)}</strong><span>{call.direction === "incoming" ? "来电" : "去电"}{call.status !== "completed" ? ` · ${call.status === "missed" ? "未接" : call.status === "busy" ? "忙线" : call.status === "declined" ? "已拒绝" : "已取消"}` : call.durationSec ? ` · ${fmtDuration(call.durationSec)}` : ""}</span></div><span className={styles.time}>{fmtRecent(call.startedAt)}</span><button className={styles.infoBtn} onClick={e=>{e.stopPropagation(); togglePhoneFavorite(call.id)}} aria-label={call.favorite ? "取消收藏" : "收藏通话"}><Star fill={call.favorite ? "currentColor" : "none"} size={17}/></button><button className={styles.deleteCallBtn} onClick={e=>{e.stopPropagation(); removePhoneCall(call.id)}} aria-label="删除通话记录"><Trash2 size={17}/></button></div>)}</div></section>}
       {tab === "contacts" && <section><h1>通讯录</h1><div className={styles.search}><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索" /></div><button className={styles.meCard} onClick={()=>{setMyNumberDraft(getUserPhoneNumber());setEditingMe(true)}}><div className={styles.meAvatar}><UserRound/></div><div><strong>{resolveUserIdentity(characters[0]?.id || "", "chat")?.name || "我的名片"}</strong><span>{getUserPhoneNumber() || "点击填写我的电话号码"}</span></div></button><div className={styles.list}>{filteredChars.map(c=><div className={styles.row} key={c.id} onClick={()=>{setEditingCharacterId(c.id);setCharacterNumberDraft(getCharacterPhoneNumber(c.id));}}><div className={styles.avatar}>{c.avatar?<img src={c.avatar} alt=""/>:c.name.slice(0,1)}</div><div className={styles.rowText}><strong>{aliasFor(c.id)}</strong><span>{getCharacterPhoneNumber(c.id)||"未设置号码 · 点击编辑"}</span></div><button className={styles.phoneMini} onClick={e=>{e.stopPropagation();startOutgoing(c.id)}} disabled={!getCharacterPhoneNumber(c.id)}><Phone size={18}/></button></div>)}</div></section>}
@@ -242,6 +253,7 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
       {tab === "keypad" && <section className={styles.keypadPage}><div className={styles.dialDisplay}>{dial || " "}</div><button className={styles.addNumber}>添加号码</button>{dialCandidates.length > 0 && !matchDial && <div className={styles.dialSuggestions}>{dialCandidates.map(c=><button key={c.id} onClick={()=>setDial(getCharacterPhoneNumber(c.id))}><span className={styles.suggestionAvatar}>{c.avatar?<img src={c.avatar} alt=""/>:aliasFor(c.id).slice(0,1)}</span><span><strong>{aliasFor(c.id)}</strong><small>{getCharacterPhoneNumber(c.id)}</small></span></button>)}</div>}{matchDial && <div className={styles.dialMatch}>{aliasFor(matchDial.id)} · {getCharacterPhoneNumber(matchDial.id)}</div>}<div className={styles.keypad}>{[["1",""],["2","ABC"],["3","DEF"],["4","GHI"],["5","JKL"],["6","MNO"],["7","PQRS"],["8","TUV"],["9","WXYZ"],["*",""],["0","+"],["#",""]].map(([n,l])=><button key={n} onClick={()=>setDial(v=>v+n)}><strong>{n}</strong><span>{l}</span></button>)}</div><div className={styles.keypadBottom}><span/><button className={styles.callKey} disabled={!matchDial} onClick={()=>matchDial&&startOutgoing(matchDial.id)}><Phone/></button><button className={styles.deleteKey} onClick={()=>setDial(v=>v.slice(0,-1))}><Delete/></button></div></section>}
     </main>
     <nav className={styles.tabs}><button className={tab==="favorites"?styles.selected:undefined} onClick={()=>setTab("favorites")}><Star/><span>个人收藏</span></button><button className={tab==="recents"?styles.selected:undefined} onClick={()=>setTab("recents")}><Clock3/><span>最近通话</span></button><button className={tab==="contacts"?styles.selected:undefined} onClick={()=>setTab("contacts")}><ContactRound/><span>通讯录</span></button><button className={tab==="keypad"?styles.selected:undefined} onClick={()=>setTab("keypad")}><Keyboard/><span>拨号键盘</span></button></nav>
+    {showPhoneSettings && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="电话设置"><div className={styles.modalCard}><button className={styles.modalClose} onClick={()=>setShowPhoneSettings(false)} aria-label="关闭"><X/></button><h2>电话设置</h2><label>来电铃声 MP3 URL<input type="url" placeholder="https://.../ringtone.mp3" value={ringtoneDraft} onChange={event=>setRingtoneDraft(event.target.value)}/></label><p className={styles.modalHint}>角色来电时优先播放这个地址；留空则继续使用 Chat 提示音里的来电铃声。</p><button className={styles.saveBtn} onClick={()=>{const url=ringtoneDraft.trim();if(url && !/^https?:\/\//i.test(url)){onNotice?.("请填写 http 或 https 音频地址");return;}const next=loadPhoneState();next.ringtoneUrl=url;savePhoneState(next);setShowPhoneSettings(false)}}>保存</button></div></div>}
     {editingMe && <div className={styles.modal}><div className={styles.modalCard}><button className={styles.modalClose} onClick={()=>setEditingMe(false)}><X/></button><h2>我的名片</h2><label>电话号码<input value={myNumberDraft} onChange={e=>setMyNumberDraft(e.target.value)} placeholder="例如 +86 138 0000 0000"/></label><p className={styles.modalHint}>这里与 SMS 的真实号码共用同一份数据，保存后两边同步。</p><button className={styles.saveBtn} onClick={()=>{setUserPhoneNumber(myNumberDraft);setEditingMe(false)}}>保存</button></div></div>}
     {editingCharacterId && <div className={styles.modal}><div className={styles.modalCard}><button className={styles.modalClose} onClick={()=>setEditingCharacterId(null)}><X/></button><h2>{aliasFor(editingCharacterId)}</h2><label>电话号码<input value={characterNumberDraft} onChange={e=>setCharacterNumberDraft(e.target.value)} placeholder="输入角色电话号码"/></label><p className={styles.modalHint}>Phone 与 SMS 共用这个号码；在任一处修改，另一边都会同步显示。</p><button className={styles.saveBtn} onClick={()=>{setCharacterPhoneNumber(editingCharacterId,characterNumberDraft);setEditingCharacterId(null)}}>保存</button></div></div>}
   </div>;

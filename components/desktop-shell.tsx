@@ -143,6 +143,8 @@ import { parseAIResponse } from "@/lib/rich-message-parser";
 import { requestBackgroundChatReply, scheduleFollowUp } from "@/lib/follow-up-service";
 import { CHAT_MESSAGE_NOTICE_EVENT, CHAT_OPEN_SESSION_EVENT, type ChatMessageNoticeDetail } from "@/lib/chat-notification-events";
 import { startIncomingCallVibration } from "@/lib/call-vibration";
+import { SMS_EVENT, SMS_INCOMING_EVENT, getSmsUnreadCount, loadSms, type SmsMessage, type SmsThread } from "@/lib/sms-storage";
+import { PHONE_EVENT, appendPhoneCall, getCharacterPhoneNumber, getUnseenMissedCallCount, loadPhoneState, phoneId } from "@/lib/phone-storage";
 import { installChatSoundListener, playChatSoundOnce, setMiniChatSoundSessionId, startChatSoundLoop } from "@/lib/chat-sound";
 import { setMascotContext } from "@/lib/mascot-context";
 import { DESKTOP_WIDGETS_CHANGED_EVENT } from "@/lib/mascot-events";
@@ -1124,13 +1126,30 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [incomingCall, setIncomingCall] = useState<{
     sessionId: string; type: "voice" | "video"; charName: string; charAvatar: string | null; isGroup?: boolean;
   } | null>(null);
-  // 桌面来电横幅显示期间循环振动（开关在聊天主页"语音/视频来电振动"）
-  // + 循环来电铃声（角色专属提示音优先，其余在"全局聊天信息 → 提示音"）
+  // 来电优先使用 Phone 设置里的铃声 URL，留空沿用 Chat 的来电音。
   useEffect(() => {
     if (!incomingCall) return;
-    const stopRingtone = startChatSoundLoop("incomingCall", findChatSessionById(incomingCall.sessionId));
+    const url = loadPhoneState().ringtoneUrl?.trim();
+    let stopRingtone: () => void = () => undefined;
+    if (url && /^https?:\/\//i.test(url)) {
+      const audio = new Audio(url);
+      audio.loop = true;
+      audio.play().catch(() => undefined);
+      stopRingtone = () => { audio.pause(); audio.currentTime = 0; };
+    } else stopRingtone = startChatSoundLoop("incomingCall", findChatSessionById(incomingCall.sessionId));
     const stopVibration = startIncomingCallVibration();
-    return () => { stopRingtone(); stopVibration(); };
+    const missedTimer = window.setTimeout(() => {
+      if (!incomingCall.sessionId.startsWith("diy-")) {
+        const session = findChatSessionById(incomingCall.sessionId);
+        if (session && !session.isGroup) {
+          const now = Date.now();
+          appendPhoneCall({ id: phoneId(), characterId: session.contactId, number: getCharacterPhoneNumber(session.contactId), direction: "incoming", status: "missed", startedAt: now - 45000, endedAt: now, durationSec: 0, transcript: [], source: "chat" });
+          window.dispatchEvent(new CustomEvent("phone-missed-notice", { detail: { name: incomingCall.charName, avatar: incomingCall.charAvatar } }));
+        }
+      }
+      setIncomingCall(null);
+    }, 45000);
+    return () => { stopRingtone(); stopVibration(); window.clearTimeout(missedTimer); };
   }, [incomingCall]);
   // 全局聊天提示音（新消息/发送消息）：监听消息落库事件，按各会话配置播放（角色专属优先于全局）
   useEffect(() => installChatSoundListener(), []);
@@ -1141,7 +1160,70 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     avatar: string | null;
     isGroup?: boolean;
   } | null>(null);
-  const chatMessageNoticeTimerRef = useRef<number | null>(null);
+  const islandNoticeQueueRef = useRef<Array<{sessionId: string; title: string; body: string; avatar: string | null; isGroup?: boolean}>>([]);
+  const islandCurrentNoticeRef = useRef<{sessionId: string; title: string; body: string; avatar: string | null; isGroup?: boolean} | null>(null);
+  const [islandExpanded, setIslandExpanded] = useState(false);
+  const [smsUnreadCount, setSmsUnreadCount] = useState(0);
+  const [phoneMissedCount, setPhoneMissedCount] = useState(0);
+  const [smsOpenThreadId, setSmsOpenThreadId] = useState<string | null>(null);
+  const activeSmsThreadRef = useRef<string | null>(null);
+  const [activePhoneCall, setActivePhoneCall] = useState<{ characterId: string; connectedAt: number } | null>(null);
+  const [islandCallSeconds, setIslandCallSeconds] = useState(0);
+  useEffect(() => { if (incomingCall) setIslandExpanded(true); }, [incomingCall]);
+  const enqueueIslandNotice = useCallback((notice: {sessionId: string; title: string; body: string; avatar: string | null; isGroup?: boolean}) => {
+    if (islandCurrentNoticeRef.current) islandNoticeQueueRef.current.push(notice);
+    else { islandCurrentNoticeRef.current = notice; setChatMessageNotice(notice); }
+    if (!incomingCall) setIslandExpanded(false);
+  }, [incomingCall]);
+  const dismissIslandNotice = useCallback(() => {
+    const next = islandNoticeQueueRef.current.shift() || null;
+    islandCurrentNoticeRef.current = next;
+    setChatMessageNotice(next);
+    setIslandExpanded(false);
+  }, []);
+  useEffect(() => {
+    if (!chatMessageNotice || incomingCall) return;
+    const timer = window.setTimeout(dismissIslandNotice, 6000);
+    return () => window.clearTimeout(timer);
+  }, [chatMessageNotice, incomingCall, dismissIslandNotice]);
+  useEffect(() => {
+    if (!activePhoneCall) return;
+    const update = () => setIslandCallSeconds(Math.floor((Date.now() - activePhoneCall.connectedAt) / 1000));
+    update(); const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [activePhoneCall]);
+  useEffect(() => {
+    const refreshSms = () => setSmsUnreadCount(getSmsUnreadCount());
+    const refreshPhone = () => setPhoneMissedCount(getUnseenMissedCallCount());
+    const onActiveSms = (event: Event) => { activeSmsThreadRef.current = (event as CustomEvent<{threadId: string | null}>).detail?.threadId || null; };
+    const onPhoneCall = (event: Event) => {
+      const detail = (event as CustomEvent<{active: boolean; characterId?: string; connectedAt?: number}>).detail;
+      setActivePhoneCall(detail?.active && detail.characterId && detail.connectedAt ? { characterId: detail.characterId, connectedAt: detail.connectedAt } : null);
+    };
+    const onSmsIncoming = (event: Event) => {
+      const { message, thread } = (event as CustomEvent<{message: SmsMessage; thread: SmsThread}>).detail || {};
+      if (!message || !thread || activeSmsThreadRef.current === thread.id) return;
+      const character = loadCharacters().find(item => item.id === thread.characterId);
+      enqueueIslandNotice({ sessionId: `sms:${thread.id}`, title: thread.alias || character?.name || thread.characterNumber || "短信", body: message.original, avatar: character?.avatar || null });
+      const url = loadSms().ringtoneUrl?.trim();
+      if (url && /^https?:\/\//i.test(url)) { const audio = new Audio(url); void audio.play().catch(() => undefined); }
+    };
+    const onMissed = (event: Event) => {
+      const detail = (event as CustomEvent<{name: string; avatar: string | null}>).detail;
+      enqueueIslandNotice({ sessionId: "phone:missed", title: detail?.name || "未接来电", body: "未接来电", avatar: detail?.avatar || null });
+    };
+    refreshSms(); refreshPhone();
+    window.addEventListener(SMS_EVENT, refreshSms); window.addEventListener(PHONE_EVENT, refreshPhone);
+    window.addEventListener(SMS_INCOMING_EVENT, onSmsIncoming);
+    window.addEventListener("sms-active-thread", onActiveSms); window.addEventListener("phone-call-state", onPhoneCall);
+    window.addEventListener("phone-missed-notice", onMissed);
+    return () => {
+      window.removeEventListener(SMS_EVENT, refreshSms); window.removeEventListener(PHONE_EVENT, refreshPhone);
+      window.removeEventListener(SMS_INCOMING_EVENT, onSmsIncoming);
+      window.removeEventListener("sms-active-thread", onActiveSms); window.removeEventListener("phone-call-state", onPhoneCall);
+      window.removeEventListener("phone-missed-notice", onMissed);
+    };
+  }, [enqueueIslandNotice]);
   // Swipe-up-to-dismiss state for the chat message notice banner.
   const [noticeDragY, setNoticeDragY] = useState(0);
   const noticeDragRef = useRef({ startY: 0, dy: 0, dragging: false, far: false });
@@ -2393,18 +2475,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   }, []);
 
   const openChatSessionFromNotice = useCallback((sessionId: string) => {
-    if (chatMessageNoticeTimerRef.current !== null) {
-      window.clearTimeout(chatMessageNoticeTimerRef.current);
-      chatMessageNoticeTimerRef.current = null;
-    }
-    setChatMessageNotice(null);
+    dismissIslandNotice();
     setShowMiniChat(false);
     setActiveApp("chat" as IconId);
     setChatInitSessionId(sessionId);
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent(CHAT_OPEN_SESSION_EVENT, { detail: { sessionId } }));
     }, 0);
-  }, []);
+  }, [dismissIslandNotice]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -2433,22 +2511,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     return () => window.removeEventListener(CHAT_REQUEST_REPLY_EVENT, handler);
   }, []);
 
-  // Swipe up to dismiss the message notice; tap still opens the chat. Auto-dismiss
-  // pauses while the finger is down and resumes if the swipe doesn't pass threshold.
-  const armNoticeAutoDismiss = useCallback(() => {
-    if (chatMessageNoticeTimerRef.current !== null) window.clearTimeout(chatMessageNoticeTimerRef.current);
-    chatMessageNoticeTimerRef.current = window.setTimeout(() => {
-      setChatMessageNotice(null);
-      chatMessageNoticeTimerRef.current = null;
-    }, 6000);
-  }, []);
-
   const handleNoticePointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     noticeDragRef.current = { startY: e.clientY, dy: 0, dragging: true, far: false };
-    if (chatMessageNoticeTimerRef.current !== null) {
-      window.clearTimeout(chatMessageNoticeTimerRef.current);
-      chatMessageNoticeTimerRef.current = null;
-    }
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   }, []);
 
@@ -2468,33 +2532,37 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     drag.dragging = false;
     if (drag.dy < -44) {
       setNoticeDragY(-220); // slide away, then unmount
-      window.setTimeout(() => setChatMessageNotice(null), 170);
+      window.setTimeout(dismissIslandNotice, 170);
     } else {
-      setNoticeDragY(0); // bounce back + resume auto-dismiss
-      armNoticeAutoDismiss();
+      setNoticeDragY(0);
     }
-  }, [armNoticeAutoDismiss]);
+  }, [dismissIslandNotice]);
 
   const handleNoticeClick = useCallback(() => {
     if (noticeDragRef.current.far) { noticeDragRef.current.far = false; return; }
     if (chatMessageNotice?.sessionId.startsWith("lysn:")) {
       const characterId = chatMessageNotice.sessionId.slice(5);
-      setChatMessageNotice(null);
+      dismissIslandNotice();
       setActiveApp("lysn");
       window.setTimeout(() => window.dispatchEvent(new CustomEvent("lysn-open-character", { detail: { characterId } })), 30);
+    } else if (chatMessageNotice?.sessionId.startsWith("sms:")) {
+      setSmsOpenThreadId(chatMessageNotice.sessionId.slice(4));
+      setActiveApp("sms");
+      dismissIslandNotice();
+    } else if (chatMessageNotice?.sessionId.startsWith("phone:")) {
+      setActiveApp("phone");
+      dismissIslandNotice();
     } else if (chatMessageNotice) openChatSessionFromNotice(chatMessageNotice.sessionId);
-  }, [chatMessageNotice, openChatSessionFromNotice]);
+  }, [chatMessageNotice, openChatSessionFromNotice, dismissIslandNotice]);
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ characterId: string; title: string; body: string }>).detail;
       if (!detail?.characterId) return;
-      if (chatMessageNoticeTimerRef.current !== null) window.clearTimeout(chatMessageNoticeTimerRef.current);
-      setChatMessageNotice({ sessionId: `lysn:${detail.characterId}`, title: detail.title, body: detail.body, avatar: null, isGroup: false });
-      chatMessageNoticeTimerRef.current = window.setTimeout(() => setChatMessageNotice(null), 6000);
+      enqueueIslandNotice({ sessionId: `lysn:${detail.characterId}`, title: detail.title, body: detail.body, avatar: null, isGroup: false });
     };
     window.addEventListener("lysn-message-notice", handler);
     return () => window.removeEventListener("lysn-message-notice", handler);
-  }, [activeApp]);
+  }, [enqueueIslandNotice]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -2518,35 +2586,20 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         ? detailSenderName
         : (isGroup ? session.groupName || "群聊" : session.alias || char?.name || "新消息");
 
-      if (chatMessageNoticeTimerRef.current !== null) {
-        window.clearTimeout(chatMessageNoticeTimerRef.current);
-      }
       noticeDragRef.current = { startY: 0, dy: 0, dragging: false, far: false };
       setNoticeDragY(0);
-      setChatMessageNotice({
+      enqueueIslandNotice({
         sessionId: detail.sessionId,
         title,
         body: detail.body.trim(),
         avatar: detail.avatar ?? char?.avatar ?? null,
         isGroup,
       });
-      chatMessageNoticeTimerRef.current = window.setTimeout(() => {
-        setChatMessageNotice(null);
-        chatMessageNoticeTimerRef.current = null;
-      }, 6000);
     };
 
     window.addEventListener(CHAT_MESSAGE_NOTICE_EVENT, handler);
     return () => window.removeEventListener(CHAT_MESSAGE_NOTICE_EVENT, handler);
-  }, [activeApp, activeChatSession?.id, showMiniChat]);
-
-  useEffect(() => {
-    return () => {
-      if (chatMessageNoticeTimerRef.current !== null) {
-        window.clearTimeout(chatMessageNoticeTimerRef.current);
-      }
-    };
-  }, []);
+  }, [activeApp, activeChatSession?.id, showMiniChat, enqueueIslandNotice]);
 
   // ── Edit mode: drag & drop helpers ──
 
@@ -3983,7 +4036,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       return <LysnApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
     if (activeApp === "sms") {
-      return <SmsApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+      return <SmsApp initialThreadId={smsOpenThreadId} onClose={() => { setSmsOpenThreadId(null); setActiveApp(null); }} onNotice={setNotice} />;
     }
     if (activeApp === "phone") {
       return <PhoneApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
@@ -4145,7 +4198,21 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
               <header className="phone-status-bar">
                 <StatusClock />
-                <div className="status-island" />
+                <button
+                  type="button"
+                  className={`status-island${chatMessageNotice || activePhoneCall || incomingCall ? " status-island-active" : ""}`}
+                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : chatMessageNotice ? `新消息：${chatMessageNotice.title}` : activePhoneCall ? "返回通话" : "灵动岛"}
+                  onClick={() => {
+                    if (incomingCall) { setIslandExpanded(value => !value); return; }
+                    if (chatMessageNotice) { setIslandExpanded(value => !value); return; }
+                    if (activePhoneCall) setActiveApp("phone");
+                  }}
+                >
+                  {incomingCall ? <span className="status-island-content"><span className="status-island-dot" />{incomingCall.charName}来电</span>
+                    : chatMessageNotice ? <span className="status-island-content"><span className="status-island-dot" />{chatMessageNotice.title}<span className="status-island-end">消息</span></span>
+                    : activePhoneCall ? <span className="status-island-content"><span className="status-island-dot" />通话中 <span className="status-island-end">{Math.floor(islandCallSeconds / 60).toString().padStart(2, "0")}:{(islandCallSeconds % 60).toString().padStart(2, "0")}</span></span>
+                    : null}
+                </button>
                 <div className="status-right" aria-hidden>
                   <svg viewBox="0 0 72 51" className="status-signal" fill="currentColor">
                     <path d="M11.6,41.9c0,1.4,0,2.8,0,4.3c0,2.3-1.4,3.7-3.6,3.8c-1.5,0.1-3,0.1-4.4,0c-1.9-0.1-3.2-1.2-3.4-3c-0.3-3.4-0.2-6.8,0-10.1c0.1-1.8,1.5-3,3.3-3.1c1.5-0.1,3-0.1,4.4,0c2.2,0.1,3.6,1.5,3.7,3.8C11.6,39,11.6,40.5,11.6,41.9z" />
@@ -4295,7 +4362,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
               ) : null}
 
               {/* Incoming call bar — global overlay */}
-              {incomingCall && (
+              {incomingCall && islandExpanded && (
                 <div className="incoming-call-bar">
                   <div className="incoming-call-bar-info">
                     {incomingCall.charAvatar ? (
@@ -4377,7 +4444,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                 </div>
               )}
 
-              {chatMessageNotice && !incomingCall ? (
+              {chatMessageNotice && !incomingCall && islandExpanded ? (
                 <button
                   type="button"
                   className="chat-message-notice-bar"
@@ -4575,6 +4642,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                                 const folderBadge = folder.icons.reduce((sum, memberId) => {
                                   const appId = customAppIdFromIconId(memberId);
                                   if (appId) return sum + (customAppBadges[appId] ?? 0);
+                                  if (memberId === "sms") return sum + smsUnreadCount;
+                                  if (memberId === "phone") return sum + phoneMissedCount;
                                   return sum;
                                 }, 0);
                                 return (
@@ -4612,7 +4681,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                               const iconImageUrl = iconSkinUrl || customIconUrl;
                               const hasImageIcon = Boolean(iconImageUrl);
                               // 聊天图标右上角不显示未读红点（用户偏好）：未读只在聊天会话列表内以红点展示
-                              const badgeCount = customApp ? customAppBadges[customApp.id] ?? 0 : 0;
+                              const badgeCount = customApp ? customAppBadges[customApp.id] ?? 0 : iconId === "sms" ? smsUnreadCount : iconId === "phone" ? phoneMissedCount : 0;
                               return (
                                 <button
                                   key={iconId}
@@ -4752,6 +4821,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                     const iconImageUrl = iconSkinUrl || customIconUrl;
                     const hasImageIcon = Boolean(iconImageUrl);
                     const isDragging = dragItem?.type === "icon" && dragItem.id === iconId;
+                    const dockBadge = customApp ? customAppBadges[customApp.id] ?? 0 : iconId === "sms" ? smsUnreadCount : iconId === "phone" ? phoneMissedCount : 0;
                     return (
                       <button
                         key={iconId}
@@ -4789,6 +4859,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                           ) : customIconUrl ? null : (
                             <CustomAppGlyph seed={customApp?.name || icon.label} className="icon-glyph" />
                           )}
+                          {dockBadge > 0 ? <span className="desktop-icon-badge" aria-label={`${dockBadge} 条未读`}>{dockBadge > 99 ? "99+" : dockBadge}</span> : null}
                         </span>
                         <span className="icon-label">{icon.label}</span>
                       </button>
@@ -4958,7 +5029,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                                 ? memberCustomApp.iconDataUrl ?? null
                                 : null;
                               const memberImageUrl = memberSkinUrl || memberCustomUrl;
-                              const memberBadge = memberCustomApp ? customAppBadges[memberCustomApp.id] ?? 0 : 0;
+                              const memberBadge = memberCustomApp ? customAppBadges[memberCustomApp.id] ?? 0 : memberId === "sms" ? smsUnreadCount : memberId === "phone" ? phoneMissedCount : 0;
                               return (
                                 <button
                                   key={memberId}

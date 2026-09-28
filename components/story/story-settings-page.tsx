@@ -44,6 +44,8 @@ type StorySettingsPageProps = {
   onBranchCreate: (input: StoryBranchCreateInput) => void;
   onBranchDelete: (sessionIds: string[]) => void;
   onSessionUpdate: (sessionId: string, updates: Partial<StorySession>) => void;
+  onExportSession: (sessionId: string) => void;
+  onExportAll: () => void;
   onUiPrefsChange: (prefs: StoryUiPrefs) => void;
   onSettingsChange: (settings: StoryCharacterSettings) => void;
   /** 编辑公用仓库里的方案定义（新增/删除/改名/改内容都在这里落盘）。 */
@@ -514,6 +516,8 @@ export function StorySettingsPage(props: StorySettingsPageProps) {
           onBranchCreate={props.onBranchCreate}
           onBranchDelete={props.onBranchDelete}
           onSessionUpdate={props.onSessionUpdate}
+          onExportSession={props.onExportSession}
+          onExportAll={props.onExportAll}
         />
 
         <SettingCard title="剧情预设设置" hint="建议给剧情 APP 单独制作专属预设，避免影响其他应用">
