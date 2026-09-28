@@ -2,6 +2,18 @@ export const INTERVIEW_MAGAZINE_APP_ID = "interview_magazine" as const;
 export const INTERVIEW_MAGAZINE_HOST_NAME = "陈未明";
 export const INTERVIEW_MAGAZINE_TITLE = "PRESENCE";
 export const INTERVIEW_MAGAZINE_TITLE_CN = "在场";
+export const BUILTIN_INTERVIEW_HOSTS = [
+  { id: "chen", name: "陈未明", direction: "机敏幽默，善于追问细节" },
+  { id: "lin", name: "林知夏", direction: "温柔耐心，擅长听人物讲完自己的故事" },
+  { id: "han", name: "韩序", direction: "轻松随性，像朋友在电台聊天" },
+];
+export type InterviewProgramme = { id: string; name: string; description: string; direction: string };
+export const BUILTIN_INTERVIEW_PROGRAMMES: InterviewProgramme[] = [
+  { id: "interview", name: "在场·人物", description: "有人主持的人物对谈", direction: "具体、有现场感的人物对谈，主持人根据回答追问。" },
+  { id: "night_radio", name: "夜间电台", description: "安静的声音与来信", direction: "像夜间电台，语速舒缓，从一封听众来信或生活细节展开。" },
+  { id: "roundtable", name: "围桌闲谈", description: "多位角色自由接话", direction: "轻松的圆桌播客，嘉宾之间互相回应，有自然玩笑和分歧。" },
+  { id: "solo", name: "私人播客", description: "角色自己开麦", direction: "主持角色以自己的口吻开设个人节目，可以自述，也可以邀请嘉宾，避免杂志采访腔。" },
+];
 export const INTERVIEW_MAGAZINE_LEGACY_HOST_PROMPT = [
   `你是杂志《在场 PRESENCE》的主编兼主持人${INTERVIEW_MAGAZINE_HOST_NAME}。`,
   "你的工作不是闲聊，而是做足功课，带着角色卡、绑定用户人设和全量世界书进入现场。",
@@ -49,7 +61,7 @@ export type InterviewTarget = "character" | "user";
 
 export type InterviewMessage = {
   id: string;
-  role: "host" | "character" | "user";
+  role: "host" | "character" | "user" | "audience";
   content: string;
   kind?: "intro" | "question" | "answer" | "outro";
   target?: InterviewTarget;
@@ -113,6 +125,11 @@ export type InterviewIssue = {
   id: string;
   issueNumber: number;
   theme: string;
+  programme?: InterviewProgramme;
+  hostCharacterId?: string;
+  hostPresetId?: string;
+  includeUser?: boolean;
+  audienceEnabled?: boolean;
   characterIds?: string[];
   characterNames?: string[];
   characterId: string;
@@ -134,6 +151,11 @@ export type InterviewDraftStatus = "paused" | "error" | "awaiting_user" | "done"
 export type InterviewDraft = {
   id: string;
   theme: string;
+  programme?: InterviewProgramme;
+  hostCharacterId?: string;
+  hostPresetId?: string;
+  includeUser?: boolean;
+  audienceEnabled?: boolean;
   characterIds: string[];
   characterNames: string[];
   userIdentityId?: string;

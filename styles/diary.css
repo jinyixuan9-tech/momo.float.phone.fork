@@ -389,9 +389,15 @@
 }
 
 .diary-entry-app {
-  --diary-entry-font-family: "NoteWall Ximai", var(--app-font-family);
+  --diary-entry-font-family: var(--app-font-family);
   --diary-entry-font-scale: 1;
 }
+
+.diary-app, .diary-app *, .diary-entry-detail-paper, .diary-entry-detail-paper * {
+  font-family: var(--app-font-family) !important;
+}
+
+.diary-translation-error { color: #9d3939; font-size: 12px; margin: 6px 0; }
 
 .diary-entry-header-actions {
   display: inline-flex;

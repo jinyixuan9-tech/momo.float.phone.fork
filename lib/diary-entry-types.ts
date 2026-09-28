@@ -23,6 +23,7 @@ export type DiaryEntry = {
   tags: string[];
   body: string;
   blocks: DiaryEntryBlock[];
+  translation?: { title: string; mood: string; weather: string; tags: string[]; body: string; blocks: DiaryEntryBlock[] };
   trigger: DiaryEntryTrigger;
   createdAt: string;
   updatedAt: string;
@@ -38,6 +39,7 @@ export type DiaryEntryInput = {
   tags?: string[];
   body: string;
   blocks: DiaryEntryBlock[];
+  translation?: DiaryEntry["translation"];
   trigger?: DiaryEntryTrigger;
 };
 

@@ -191,6 +191,7 @@ export function normalizeDiaryEntry(raw: unknown): DiaryEntry | null {
     tags: normalizeTags(record.tags ?? record.labels),
     body: body || blocks.map(block => block.type === "paragraph" || block.type === "quote" ? block.text : "").filter(Boolean).join("\n\n"),
     blocks,
+    translation: record.translation && typeof record.translation === "object" ? record.translation as DiaryEntry["translation"] : undefined,
     trigger: normalizeTrigger(record.trigger),
     createdAt,
     updatedAt: typeof record.updatedAt === "string"
@@ -241,6 +242,7 @@ export function createDiaryEntry(input: DiaryEntryInput): DiaryEntry {
     tags: normalizeTags(input.tags),
     body,
     blocks: normalizeBlocks(input.blocks, body),
+    translation: input.translation,
     trigger: input.trigger ?? "manual",
     createdAt: now,
     updatedAt: now,

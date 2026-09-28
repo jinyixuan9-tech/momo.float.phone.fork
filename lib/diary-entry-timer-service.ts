@@ -94,6 +94,7 @@ export async function runDiaryEntryTimerCheck(): Promise<void> {
           tags: draft.tags,
           body: draft.body,
           blocks: draft.blocks,
+          translation: draft.translation,
           trigger: "timer",
         });
         createdCount += 1;

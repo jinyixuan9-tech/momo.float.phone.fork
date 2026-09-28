@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import type { InterviewProgramme } from "./interview-magazine-types";
 import {
   INTERVIEW_MAGAZINE_DEFAULT_HOST_PROMPT,
   INTERVIEW_MAGAZINE_DEFAULT_MEMORY_PROMPT,
@@ -14,6 +15,21 @@ const INTERVIEW_ISSUES_KEY = "ai_phone_interview_magazine_issues_v1";
 const INTERVIEW_DRAFTS_KEY = "ai_phone_interview_magazine_drafts_v1";
 const INTERVIEW_HOST_PROMPT_KEY = "ai_phone_interview_magazine_host_prompt_v1";
 const INTERVIEW_MEMORY_PROMPT_KEY = "ai_phone_interview_magazine_memory_prompt_v1";
+const INTERVIEW_PROGRAMMES_KEY = "ai_phone_interview_magazine_programmes_v1";
+registerKvMigration(INTERVIEW_PROGRAMMES_KEY);
+
+export function loadInterviewProgrammes(): InterviewProgramme[] {
+  try {
+    const raw = kvGet(INTERVIEW_PROGRAMMES_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is InterviewProgramme =>
+      Boolean(item && typeof item.id === "string" && typeof item.name === "string" && typeof item.direction === "string")) : [];
+  } catch { return []; }
+}
+
+export function saveInterviewProgrammes(programmes: InterviewProgramme[]): void {
+  kvSet(INTERVIEW_PROGRAMMES_KEY, JSON.stringify(programmes));
+}
 registerKvMigration(INTERVIEW_ISSUES_KEY);
 registerKvMigration(INTERVIEW_DRAFTS_KEY);
 registerKvMigration(INTERVIEW_HOST_PROMPT_KEY);

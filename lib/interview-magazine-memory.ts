@@ -29,6 +29,7 @@ type RecordInterviewMagazineProjectionInput = {
   characterIds: string[];
   characterNames: string[];
   userName: string;
+  includeUser?: boolean;
   summary: string;
   timestamp?: string;
 };
@@ -79,7 +80,7 @@ export function recordInterviewMagazineProjectionEvent(input: RecordInterviewMag
   if (!input.issueId || characterIds.length === 0) return null;
 
   const userName = cleanText(input.userName, 80) || "共同受访者";
-  const summary = normalizeUserNameToMacro(cleanText(input.summary, 1800), userName);
+  const summary = input.includeUser === false ? cleanText(input.summary, 1800) : normalizeUserNameToMacro(cleanText(input.summary, 1800), userName);
   if (!summary) return null;
 
   const timestamp = input.timestamp || new Date().toISOString();
@@ -88,7 +89,7 @@ export function recordInterviewMagazineProjectionEvent(input: RecordInterviewMag
   const title = cleanText(input.title, 80) || "未命名刊物";
   const shared = characterIds.length > 1;
   const guests = characterNames.length > 0 ? characterNames.join("、") : "嘉宾";
-  const content = `[访谈 ${formatChatTimestamp(timestamp)}] ${guests}与${USER_NAME_MACRO}完成了一期访谈，本期成刊《${title}》。${summary}`;
+  const content = `[节目 ${formatChatTimestamp(timestamp)}] ${guests}${input.includeUser === false ? "" : `与${USER_NAME_MACRO}`}完成了一期节目，本期成刊《${title}》。${summary}`;
 
   const entry: InterviewMagazineProjectionEntry = {
     id: `interview_issue_${input.issueId}`,

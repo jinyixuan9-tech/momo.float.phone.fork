@@ -6,7 +6,7 @@ import { DotsThree } from "@phosphor-icons/react";
 
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
-import { generateDiaryEntryForCharacter } from "@/lib/diary-entry-engine";
+import { generateDiaryEntryForCharacter, translateDiaryEntry } from "@/lib/diary-entry-engine";
 import { useDiaryGenerating } from "@/lib/diary-generating-tracker";
 import {
   DIARY_ENTRIES_UPDATED_EVENT,
@@ -21,6 +21,7 @@ import {
   loadDiaryEntryTimerSettings,
   saveDiaryEntryFontAssetId,
   saveDiaryEntryFontScale,
+  saveDiaryEntries,
   saveDiaryEntryTimerSettings,
 } from "@/lib/diary-entry-storage";
 import type { DiaryEntry, DiaryEntryBlock, DiaryEntryTimerSettings, DiaryEntryTrigger } from "@/lib/diary-entry-types";
@@ -223,14 +224,9 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
     notify("已恢复默认日记字体");
   }, [notify]);
 
-  const diaryEntryStyle = useMemo(() => {
-    return {
-      ...(diaryFontDataUrl
-        ? { "--diary-entry-font-family": `"${DIARY_USER_FONT_FAMILY}", "NoteWall Ximai", var(--app-font-family)` }
-        : {}),
-      "--diary-entry-font-scale": String(diaryFontScale),
-    } as CSSProperties;
-  }, [diaryFontDataUrl, diaryFontScale]);
+  const diaryEntryStyle = useMemo(() => ({
+    "--diary-entry-font-scale": String(diaryFontScale),
+  } as CSSProperties), [diaryFontScale]);
 
   const deleteEntry = useCallback((entry: DiaryEntry) => {
     deleteDiaryEntry(entry.id);
@@ -307,6 +303,7 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
             tags: result.draft.tags,
             body: result.draft.body,
             blocks: result.draft.blocks,
+            translation: result.draft.translation,
             trigger,
           }));
         } catch {
@@ -609,7 +606,7 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
         </button>
         <div>
           <h1>{activeBook ? `${activeBook.characterName} 的日记` : "日记"}</h1>
-          <p>{activeBook ? `共 ${activeBook.entries.length} 篇手写日常` : "每个角色一本，点开翻阅"}</p>
+          <p>{activeBook ? `共 ${activeBook.entries.length} 篇日记` : "每个角色一本，点开翻阅"}</p>
         </div>
         <input
           ref={fontFileRef}
@@ -619,15 +616,6 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
           onChange={handleDiaryFontUpload}
         />
         <span className="diary-entry-header-actions">
-          <button
-            type="button"
-            className="note-wall-menu-btn diary-font-upload-btn"
-            onClick={() => setFontPanelOpen(true)}
-            aria-label="日记字体设置"
-            title="日记字体设置"
-          >
-            <span className="diary-font-upload-mark" aria-hidden="true">Aa</span>
-          </button>
           <button type="button" className="note-wall-menu-btn" onClick={() => setTimerSettingsOpen(true)} aria-label="日记设置">
             <DotsThree size={28} weight="bold" />
           </button>
@@ -734,7 +722,13 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
       ) : null}
 
       {activeEntry ? (
-        <DiaryEntryDetail entry={activeEntry} onClose={() => setActiveEntry(null)} />
+        <DiaryEntryDetail entry={activeEntry} onClose={() => setActiveEntry(null)} onTranslate={async () => {
+          const translation = await translateDiaryEntry(activeEntry);
+          const updated = { ...activeEntry, translation, updatedAt: new Date().toISOString() };
+          saveDiaryEntries(loadDiaryEntries().map(item => item.id === updated.id ? updated : item));
+          setActiveEntry(current => current?.id === updated.id ? updated : current);
+          refreshEntries();
+        }} />
       ) : null}
 
       {deleteCandidateEntry ? (
@@ -1113,8 +1107,14 @@ function CharacterAvatarGrid({ characters, selectedIds, busyIds, disabled, onTog
   );
 }
 
-function DiaryEntryDetail({ entry, onClose }: { entry: DiaryEntry; onClose: () => void }) {
-  const markers = getEntryMarkers(entry);
+function DiaryEntryDetail({ entry, onClose, onTranslate }: { entry: DiaryEntry; onClose: () => void; onTranslate: () => Promise<void> }) {
+  const [translated, setTranslated] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState("");
+  const display = translated && entry.translation ? entry.translation : entry;
+  const markers = translated && entry.translation
+    ? Array.from(new Set([display.mood, ...display.tags, display.weather].filter(Boolean))).slice(0, 4)
+    : getEntryMarkers(entry);
   return (
     <div className="nw-modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <article className="diary-entry-detail-paper" onClick={(event) => event.stopPropagation()}>
@@ -1125,9 +1125,18 @@ function DiaryEntryDetail({ entry, onClose }: { entry: DiaryEntry; onClose: () =
           <header>
             <div>
               <span>日记详情</span>
-              <h2>{entry.title}</h2>
+              <h2>{display.title || entry.title}</h2>
             </div>
             <div className="diary-entry-detail-top">
+              <button type="button" disabled={translating} onClick={async () => {
+                if (translated) { setTranslated(false); return; }
+                if (!entry.translation) {
+                  setTranslating(true); setTranslationError("");
+                  try { await onTranslate(); } catch (error) { setTranslationError(error instanceof Error ? error.message : "翻译失败"); setTranslating(false); return; }
+                  setTranslating(false);
+                }
+                setTranslated(true);
+              }}>{translating ? "翻译中…" : translated ? "恢复原文" : "覆盖翻译"}</button>
               <button type="button" onClick={onClose}>关闭</button>
               {markers.length > 0 ? (
                 <span className="diary-entry-detail-markers">
@@ -1136,8 +1145,9 @@ function DiaryEntryDetail({ entry, onClose }: { entry: DiaryEntry; onClose: () =
               ) : null}
             </div>
           </header>
+          {translationError && <p role="status" className="diary-translation-error">{translationError}</p>}
           <div className="diary-entry-blocks">
-            {entry.blocks.map((block, index) => (
+            {display.blocks.map((block, index) => (
               <DiaryBlockView key={`${block.type}-${index}`} block={block} />
             ))}
           </div>
