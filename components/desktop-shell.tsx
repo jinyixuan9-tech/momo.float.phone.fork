@@ -13,6 +13,7 @@ import { PhotosApp } from "@/components/photos/photos-app";
 import { WeverseApp } from "@/components/weverse/weverse-app";
 import { LysnApp } from "@/components/lysn/lysn-app";
 import { SmsApp } from "@/components/sms/sms-app";
+import { PhoneApp } from "@/components/phone/phone-app";
 import { TwitterApp } from "@/components/twitter/twitter-app";
 import { TheqooApp } from "@/components/theqoo/theqoo-app";
 import { QuestionBoxApp } from "@/components/question-box/question-box-app";
@@ -3985,7 +3986,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       return <SmsApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
     if (activeApp === "phone") {
-      return <PhonePlaceholderApp icon={ICONS.phone} onClose={() => setActiveApp(null)} />;
+      return <PhoneApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
     if (activeApp === "twitter") {
       return <TwitterApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
