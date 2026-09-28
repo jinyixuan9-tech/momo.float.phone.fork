@@ -367,7 +367,7 @@ function findGuestContext(context: InterviewContext, characterId: string): Inter
 }
 
 function resolveTargetGuest(context: InterviewContext, rawTarget?: string, fallbackCharacterId?: string): InterviewGuestContext {
-  const invitees = context.guests.filter(guest => guest.character.id !== context.hostCharacterId);
+  const invitees = context.guests.filter(guest => !context.hostCharacterIds.includes(guest.character.id));
   const candidates = invitees.length > 0 ? invitees : context.guests;
   const target = rawTarget?.trim();
   if (target) {
@@ -509,6 +509,8 @@ export async function generateHostOpening(
   options: InterviewRunOptions = {},
 ): Promise<{ context: InterviewContext; intro: string; question: string; targetCharacterId: string; targetCharacterName: string }> {
   const context = loadInterviewContextForGuests(normalizeCharacterIds(characterIds), userIdentityId, options);
+  const invitedCharacters = context.guests.filter(guest => !context.hostCharacterIds.includes(guest.character.id));
+  const firstTargetIsUser = invitedCharacters.length === 0 && context.includeUser;
   const briefing = buildHostBriefing({ context, theme, phase: "开场，主持人需要介绍本期主题并向嘉宾发出第一问", transcript: [] });
   const result = await callHostJson<HostQuestionResult>(
     context,
@@ -521,13 +523,13 @@ export async function generateHostOpening(
       "",
       "请生成开场：",
       `- intro：30-60 字，符合「${context.programme?.name || "人物对谈"}」的开场白，点出主题和嘉宾${context.includeUser ? "与参与的用户" : ""}。`,
-      `- question：第一个问${context.guests.length ? "嘉宾" : "用户"}的问题，35-70 字，符合本栏目的气氛，不套话。`,
-      context.guests.length ? `- targetGuest：从本期参与角色中选择一个回应者：${context.guestNames.join("、")}。` : "- 本期只有用户作为受访者；直接向用户提问，targetGuest 留空。",
+      `- question：第一个问${firstTargetIsUser ? "用户" : "嘉宾"}的问题，35-70 字，符合本栏目的气氛，不套话。`,
+      firstTargetIsUser ? "- 本期没有其他角色嘉宾；直接向用户提问，targetGuest 留空。" : `- targetGuest：从本期参与角色中选择一个回应者：${(invitedCharacters.length ? invitedCharacters : context.guests).map(guest => guest.character.name).join("、")}。`,
       "",
       '返回格式：{"intro":"...","question":"...","targetGuest":"..."}',
     ].join("\n"),
   );
-  const targetGuest = context.guests.length ? resolveTargetGuest(context, result?.targetCharacterId || result?.targetGuest) : undefined;
+  const targetGuest = firstTargetIsUser ? undefined : context.guests.length ? resolveTargetGuest(context, result?.targetCharacterId || result?.targetGuest) : undefined;
 
   return {
     context,

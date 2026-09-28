@@ -10,7 +10,7 @@ export const BUILTIN_INTERVIEW_HOSTS: InterviewHost[] = [
   { id: "jaeha", programmeId: "horror", name: "尹在河（윤재하）", language: "韩语", direction: "韩国恐怖电台主持人，擅长念投稿、铺陈细节、适当停顿。自己也会害怕，顶多轻吸气或低声感叹「어… 잠깐만요」「어우」，不连续尖叫或夸张失控。留意嘉宾状态：可一起害怕、缓和气氛或轻轻吓人；对方真不舒服就收住。故事真假保持开放，不断言超自然真实存在。" },
   { id: "seoyun", programmeId: "night_radio", name: "韩叙允（한서윤）", language: "韩语", direction: "韩国夜间电台主持人，温柔克制，从音乐、投稿、夜里小事慢慢聊起。认真听，不把每段故事都变成恋爱话题，不冒充心理咨询师，也不替别人给情感下结论。" },
 ];
-export type InterviewProgramme = { id: string; name: string; description: string; direction: string; hostRule?: "required" | "optional" | "none"; hostPrompt?: string; memoryPrompt?: string; hostStyle?: string; characterRadio?: boolean };
+export type InterviewProgramme = { id: string; name: string; description: string; direction: string; hostRule?: "required" | "optional" | "none"; hostPrompt?: string; memoryPrompt?: string; hostStyle?: string; characterRadio?: boolean; hostCharacterIds?: string[] };
 export const BUILTIN_INTERVIEW_PROGRAMMES: InterviewProgramme[] = [
   { id: "interview", name: "在场·人物志", description: "一位主持人与人物面对面", hostRule: "required", direction: "人物访谈：可以采访一个角色、多位角色、角色与用户，或只采访用户。问题具体，有现场感，根据回答追问，不预设结论。", hostPrompt: "观察嘉宾的细节、选择和态度变化，给对方充分讲述的空间，避免空泛问答。", memoryPrompt: "摘要保留实际受访者、关键回答和关系变化；只记录真正参与者，不虚构未出场角色。" },
   { id: "roundtable", name: "在场·日月闲", description: "轻松、多人的闲聊电台", hostRule: "optional", direction: "轻松多人播客，笑点和话题自然发生。主持人若在场只轻轻带话题，不抢镜；无主持人则由参与者互相接话，允许自然分歧、跑题和随机趣味话题。", hostPrompt: "只在需要时抛轻巧的话头，让参与者自由接话，避免机械轮询。", memoryPrompt: "摘要保留实际聊到的趣事、参与者各自的观点与互动，勿把玩笑当成真实承诺。" },

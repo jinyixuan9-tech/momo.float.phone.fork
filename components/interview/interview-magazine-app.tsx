@@ -337,13 +337,18 @@ export function InterviewMagazineApp({ onClose }: Props) {
     setCharacterRounds(0);
   };
 
-  const saveProgramme = (name: string, description: string, direction: string, hostRule: InterviewProgramme["hostRule"], characterRadio: boolean, hostStyle: string) => {
-    const custom: InterviewProgramme = { id: `programme_${Date.now()}`, name: name.trim(), description: description.trim(), direction: direction.trim(), hostRule, characterRadio, hostStyle: hostStyle.trim(), hostPrompt: direction.trim(), memoryPrompt: "用第三人称总结实际播出的话题、参与者发言和关系变化；用户没有作为嘉宾参与时不要把用户写成嘉宾。不要编造未发生的经历，匿名弹幕的身份猜测不得写成事实。" };
-    if (!custom.name || !custom.direction) return;
+  const saveProgramme = (name: string, description: string, direction: string, hostRule: InterviewProgramme["hostRule"], characterRadio: boolean, hostStyle: string, initialHostIds: string[]) => {
+    const validHostIds = initialHostIds.filter(id => characters.some(character => character.id === id));
+    const custom: InterviewProgramme = { id: `programme_${Date.now()}`, name: name.trim(), description: description.trim(), direction: direction.trim(), hostRule, characterRadio, hostStyle: hostStyle.trim(), hostCharacterIds: characterRadio ? validHostIds : [], hostPrompt: direction.trim(), memoryPrompt: "用第三人称总结实际播出的话题、参与者发言和关系变化；用户没有作为嘉宾参与时不要把用户写成嘉宾。不要编造未发生的经历，匿名弹幕的身份猜测不得写成事实。" };
+    if (!custom.name || !custom.direction || (characterRadio && validHostIds.length === 0)) return;
     const next = [...programmes, custom];
     saveInterviewProgrammes(next);
     setProgrammes(next);
     setProgrammeId(custom.id);
+    setHostCharacterIds(characterRadio ? validHostIds : []);
+    setHostCharacterId(characterRadio ? validHostIds[0] : "");
+    setHostPresetId(`host_${custom.id}`);
+    setSelectedCharacterIds(characterRadio ? validHostIds : []);
   };
 
   const updateProgramme = (updated: InterviewProgramme) => {
@@ -362,7 +367,24 @@ export function InterviewMagazineApp({ onClose }: Props) {
     const next = programmes.filter(item => item.id !== id);
     saveInterviewProgrammes(next);
     setProgrammes(next);
-    if (programmeId === id) setProgrammeId("interview");
+    if (programmeId === id) { setProgrammeId("interview"); setHostCharacterId(""); setHostCharacterIds([]); setSelectedCharacterIds([]); setHostPresetId("jian"); }
+  };
+
+  const changeHostCharacterIds = (ids: string[]) => {
+    const validIds = [...new Set(ids)].filter(id => characters.some(character => character.id === id));
+    setSelectedCharacterIds(previous => [...previous.filter(id => !hostCharacterIds.includes(id)), ...validIds.filter(id => !previous.includes(id) || hostCharacterIds.includes(id))]);
+    setHostCharacterIds(validIds);
+    if (programme.characterRadio) updateProgramme({ ...programme, hostCharacterIds: validIds });
+  };
+
+  const changeProgramme = (id: string) => {
+    const nextProgramme = programmes.find(item => item.id === id) || BUILTIN_INTERVIEW_PROGRAMMES.find(item => item.id === id);
+    const nextHostIds = nextProgramme?.characterRadio ? (nextProgramme.hostCharacterIds || []).filter(hostId => characters.some(character => character.id === hostId)) : [];
+    setSelectedCharacterIds(previous => [...previous.filter(characterId => !hostCharacterIds.includes(characterId) && !nextHostIds.includes(characterId)), ...nextHostIds]);
+    setProgrammeId(id);
+    setHostCharacterIds(nextHostIds);
+    setHostCharacterId(nextHostIds[0] || "");
+    setHostPresetId(BUILTIN_INTERVIEW_HOSTS.find(host => host.programmeId === id)?.id || `host_${id}`);
   };
 
   const armResumeAction = (action: InterviewResumeAction) => {
@@ -584,13 +606,13 @@ export function InterviewMagazineApp({ onClose }: Props) {
       }
       const opening = await generateHostOpening(trimmedTheme, selectedCharacterIds, userIdentityId, runOptions);
       if (!isInterviewRunCurrent(runId)) return;
-      const firstTarget = count ? "character" : "user";
+      const firstTarget = opening.targetCharacterId ? "character" : "user";
       const initialMessages = [
         makeInterviewMessage("host", opening.intro, { kind: "intro", speakerCharacterId: runOptions.hostCharacterId, speakerName: selectedHostName }),
         makeInterviewMessage("host", opening.question, { kind: "question", target: firstTarget, targetCharacterId: opening.targetCharacterId, targetCharacterName: opening.targetCharacterName, speakerCharacterId: runOptions.hostCharacterId, speakerName: selectedHostName }),
       ];
       setMessages(initialMessages);
-      if (count) await runCharacterAnswer(opening.question, initialMessages, 1, opening.targetCharacterId || selectedCharacterIds[0], undefined, trimmedTheme, runId);
+      if (firstTarget === "character") await runCharacterAnswer(opening.question, initialMessages, 1, opening.targetCharacterId || selectedCharacterIds[0], undefined, trimmedTheme, runId);
       else { setPhase("user"); setPendingLabel(""); armResumeAction({ type: "next", baseMessages: initialMessages, round: 0, currentTheme: trimmedTheme }); }
     } catch (err) {
       if (!isInterviewRunCurrent(runId)) return;
@@ -633,7 +655,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
       armResumeAction({ type: "next", baseMessages, round, currentTheme: theme });
       // The user may speak as often as they wish; a host can occasionally address them, without blocking other guests.
       const lastWasUserQuestion = [...baseMessages].reverse().find(message => message.role === "host" && message.kind === "question")?.target === "user";
-      const target = selectedCharacterIds.length === 0 || (includeUser && round > 0 && round % 3 === 0 && !lastWasUserQuestion) ? "user" : "character";
+      const target = (selectedCharacterIds.every(id => hostCharacterIds.includes(id)) && includeUser) || (includeUser && round > 0 && round % 3 === 0 && !lastWasUserQuestion) ? "user" : "character";
       const lastCharacterId = [...baseMessages].reverse().find(message => message.role === "character")?.speakerCharacterId;
       const fallbackTargetCharacterId = getNextCharacterId(lastCharacterId);
       const speakingHostId = hostCharacterIds.length > 1 ? hostCharacterIds[round % hostCharacterIds.length] : runOptions.hostCharacterId;
@@ -776,11 +798,11 @@ export function InterviewMagazineApp({ onClose }: Props) {
             hostOverrides={hostOverrides}
             hostPresetId={hostPresetId}
             onHostPresetChange={setHostPresetId}
-            onProgrammeChange={id => { setProgrammeId(id); setHostCharacterId(""); setHostCharacterIds([]); setHostPresetId(BUILTIN_INTERVIEW_HOSTS.find(host => host.programmeId === id)?.id || `host_${id}`); }}
+            onProgrammeChange={changeProgramme}
             onProgrammeSave={saveProgramme}
             onProgrammeUpdate={updateProgramme}
             onHostUpdate={updateHost}
-            onHostCharacterIdsChange={setHostCharacterIds}
+            onHostCharacterIdsChange={changeHostCharacterIds}
             onProgrammeDelete={removeProgramme}
             onIncludeUserChange={setIncludeUser}
             onAudienceEnabledChange={setAudienceEnabled}
@@ -1115,7 +1137,7 @@ function SetupScreen({
   hostPresetId: string;
   onHostPresetChange: (id: string) => void;
   onProgrammeChange: (id: string) => void;
-  onProgrammeSave: (name: string, description: string, direction: string, hostRule: InterviewProgramme["hostRule"], characterRadio: boolean, hostStyle: string) => void;
+  onProgrammeSave: (name: string, description: string, direction: string, hostRule: InterviewProgramme["hostRule"], characterRadio: boolean, hostStyle: string, hostCharacterIds: string[]) => void;
   onProgrammeUpdate: (programme: InterviewProgramme) => void;
   onHostUpdate: (host: InterviewHost) => void;
   onHostCharacterIdsChange: (ids: string[]) => void;
@@ -1137,12 +1159,13 @@ function SetupScreen({
   const [newHostRule, setNewHostRule] = useState<InterviewProgramme["hostRule"]>("optional");
   const [newCharacterRadio, setNewCharacterRadio] = useState(false);
   const [newHostStyle, setNewHostStyle] = useState("");
+  const [newHostCharacterIds, setNewHostCharacterIds] = useState<string[]>([]);
   const currentProgramme = programmes.find(item => item.id === programmeId) || BUILTIN_INTERVIEW_PROGRAMMES[0];
   const programmeHosts = [...BUILTIN_INTERVIEW_HOSTS, ...(!BUILTIN_INTERVIEW_PROGRAMMES.some(item => item.id === programmeId) ? [{ id: `host_${programmeId}`, programmeId, name: "栏目主持人", language: "韩语", direction: currentProgramme.hostStyle || currentProgramme.direction }] : [])].map(host => hostOverrides.find(override => override.id === host.id) || host).filter(host => host.programmeId === programmeId);
   const currentHost = programmeHosts.find(host => host.id === hostPresetId) || programmeHosts[0];
   const withHost = currentProgramme.hostRule === "required" || (currentProgramme.hostRule !== "none" && hostCharacterId !== "none");
   const guestCount = selectedCharacterIds.length - hostCharacterIds.filter(id => selectedCharacterIds.includes(id)).length;
-  const ready = theme.trim().length > 0 && characters.length > 0 && (selectedCharacterIds.length > 0 || includeUser) && (!currentProgramme.characterRadio || (withHost && hostCharacterIds.length > 0)) && (withHost || selectedCharacterIds.length > 0) && (programmeId !== "roundtable" || (withHost ? guestCount + (includeUser ? 1 : 0) >= 2 : selectedCharacterIds.length + (includeUser ? 1 : 0) >= 3));
+  const ready = !programmeEditorOpen && theme.trim().length > 0 && characters.length > 0 && (selectedCharacterIds.length > 0 || includeUser) && (!currentProgramme.characterRadio || (withHost && hostCharacterIds.length > 0)) && (withHost || selectedCharacterIds.length > 0) && (programmeId !== "roundtable" || (withHost ? guestCount + (includeUser ? 1 : 0) >= 2 : selectedCharacterIds.length + (includeUser ? 1 : 0) >= 3));
 
   return (
     <>
@@ -1163,43 +1186,46 @@ function SetupScreen({
         <section className="fade-in">
           <SmallCaps className="text-white/60">PROGRAMME // 栏目</SmallCaps>
           <div className="flex flex-wrap gap-2 mt-3">
-            {programmes.map(item => <button key={item.id} type="button" className={`px-3 py-2 rounded-xl border text-sm ${programmeId === item.id ? "bg-white/20 border-white/60 text-white" : "border-white/15 text-white/60"}`} onClick={() => onProgrammeChange(item.id)} title={item.direction}>{item.name}</button>)}
-            <button type="button" className="px-3 py-2 rounded-xl border border-dashed border-white/30 text-sm text-white/70" onClick={() => setProgrammeEditorOpen(value => !value)}>＋ 自建栏目</button>
+            {programmes.map(item => <button key={item.id} type="button" className={`px-3 py-2 rounded-xl border text-sm ${!programmeEditorOpen && programmeId === item.id ? "bg-white/20 border-white/60 text-white" : "border-white/15 text-white/60"}`} onClick={() => { setProgrammeEditorOpen(false); onProgrammeChange(item.id); }} title={item.direction}>{item.name}</button>)}
+            <button type="button" className={`px-3 py-2 rounded-xl border border-dashed text-sm ${programmeEditorOpen ? "bg-white/20 border-white/60 text-white" : "border-white/30 text-white/70"}`} onClick={() => setProgrammeEditorOpen(value => !value)}>＋ 自建栏目</button>
           </div>
-          <p className="text-xs text-white/50 mt-2">{programmes.find(item => item.id === programmeId)?.description}</p>
+          <p className="text-xs text-white/50 mt-2">{programmeEditorOpen ? "新建栏目：先填写节目资料；角色自己的节目可在这里选主持人。" : programmes.find(item => item.id === programmeId)?.description}</p>
           {programmeEditorOpen && <div className="interview-glass-panel p-4 mt-3 flex flex-col gap-2">
             <input className="interview-glass-input p-2" placeholder="栏目名称" value={newProgrammeName} onChange={e => setNewProgrammeName(e.target.value)} />
             <input className="interview-glass-input p-2" placeholder="一句话介绍" value={newProgrammeDescription} onChange={e => setNewProgrammeDescription(e.target.value)} />
             <textarea className="interview-glass-input p-2" placeholder="主持风格、节目形式与节奏" value={newProgrammeDirection} onChange={e => setNewProgrammeDirection(e.target.value)} />
-            <label className="text-xs text-white/70">主持方式<select className="interview-glass-input p-2 block w-full mt-1" value={newHostRule} onChange={e => setNewHostRule(e.target.value as InterviewProgramme["hostRule"])}><option value="required">必须有主持</option><option value="optional">开播前选择有无主持</option><option value="none">没有主持</option></select></label>
-            <label className="text-xs text-white/70 flex items-center gap-2"><input type="checkbox" checked={newCharacterRadio} onChange={e => { setNewCharacterRadio(e.target.checked); if (e.target.checked) setNewHostRule("required"); }} />创建角色自己的电台（角色当主持人，可选多位）</label>
-            <input className="interview-glass-input p-2" placeholder="角色主持风格补充（可不填，默认按人设）" value={newHostStyle} onChange={e => setNewHostStyle(e.target.value)} />
-            <button type="button" className="text-white/90 text-sm self-end" disabled={!newProgrammeName.trim() || !newProgrammeDirection.trim()} onClick={() => { onProgrammeSave(newProgrammeName, newProgrammeDescription, newProgrammeDirection, newCharacterRadio ? "required" : newHostRule, newCharacterRadio, newHostStyle); setProgrammeEditorOpen(false); setNewProgrammeName(""); setNewProgrammeDescription(""); setNewProgrammeDirection(""); }}>保存栏目</button>
+            <label className="text-xs text-white/70">主持方式<select className="interview-glass-input p-2 block w-full mt-1" value={newCharacterRadio ? "required" : newHostRule} disabled={newCharacterRadio} onChange={e => setNewHostRule(e.target.value as InterviewProgramme["hostRule"])}><option value="required">必须有主持</option><option value="optional">开播前选择有无主持</option><option value="none">没有主持</option></select></label>
+            <label className="text-xs text-white/70 flex items-center gap-2"><input type="checkbox" checked={newCharacterRadio} onChange={e => { setNewCharacterRadio(e.target.checked); if (e.target.checked) setNewHostRule("required"); else setNewHostCharacterIds([]); }} />创建角色自己的电台（角色当主持人，可选多位）</label>
+            {newCharacterRadio && <div className="flex flex-col gap-2 border border-white/15 rounded-2xl p-3"><span className="text-xs text-white/65">选择这个节目的角色主持人（至少一位）</span><div className="flex flex-wrap gap-2">{characters.map(character => <label key={character.id} className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm ${newHostCharacterIds.includes(character.id) ? "border-white/60 bg-white/15 text-white" : "border-white/15 text-white/60"}`}><input type="checkbox" checked={newHostCharacterIds.includes(character.id)} onChange={e => setNewHostCharacterIds(previous => e.target.checked ? [...previous, character.id] : previous.filter(id => id !== character.id))} />{character.name}</label>)}</div></div>}
+            <input className="interview-glass-input p-2" placeholder={newCharacterRadio ? "角色主持风格补充（可不填，默认按人设）" : "主持人风格补充（可不填）"} value={newHostStyle} onChange={e => setNewHostStyle(e.target.value)} />
+            <button type="button" className="text-white/90 text-sm self-end disabled:opacity-35" disabled={!newProgrammeName.trim() || !newProgrammeDirection.trim() || (newCharacterRadio && newHostCharacterIds.length === 0)} onClick={() => { onProgrammeSave(newProgrammeName, newProgrammeDescription, newProgrammeDirection, newCharacterRadio ? "required" : newHostRule, newCharacterRadio, newHostStyle, newHostCharacterIds); setProgrammeEditorOpen(false); setNewProgrammeName(""); setNewProgrammeDescription(""); setNewProgrammeDirection(""); setNewHostCharacterIds([]); }}>保存栏目</button>
           </div>}
-          {programmeId.startsWith("programme_") && <button type="button" className="text-xs text-white/40 mt-2" onClick={() => onProgrammeDelete(programmeId)}>删除此自建栏目</button>}
+          {!programmeEditorOpen && programmeId.startsWith("programme_") && <button type="button" className="text-xs text-white/40 mt-2" onClick={() => onProgrammeDelete(programmeId)}>删除此自建栏目</button>}
         </section>
-        <section className="fade-in flex flex-col gap-3">
+        {!programmeEditorOpen && <section className="fade-in flex flex-col gap-3">
           <SmallCaps className="text-white/60">HOST // 主持方式</SmallCaps>
-          <select className="interview-glass-input p-3" value={currentProgramme.hostRule === "none" || currentProgramme.hostRule === "optional" && hostCharacterId === "none" ? "none" : hostCharacterId && hostCharacterId !== "none" ? `character:${hostCharacterId}` : currentProgramme.characterRadio ? "" : `preset:${currentHost?.id || hostPresetId}`} onChange={e => { if (e.target.value === "none") { onHostCharacterChange("none"); onHostCharacterIdsChange([]); return; } const [type, id] = e.target.value.split(":"); if (type === "character") { onHostCharacterChange(id); onHostCharacterIdsChange([id]); } else { onHostCharacterChange(""); onHostCharacterIdsChange([]); onHostPresetChange(id); } }}>
-            {currentProgramme.characterRadio && <option value="">选择角色主持人</option>}
-            {currentProgramme.hostRule === "none" && <option value="none">本栏目无主持人</option>}
+          {currentProgramme.hostRule === "none" ? <div className="interview-glass-input p-3 text-white/55">本栏目无主持人</div> : currentProgramme.characterRadio ? (
+            <div className="interview-glass-panel p-3 text-sm text-white/75">
+              <p>这个节目的角色主持人（至少一位；可在这里调整）</p>
+              <div className="flex flex-wrap gap-2 mt-3">{characters.map(item => <label key={item.id} className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${hostCharacterIds.includes(item.id) ? "border-white/60 bg-white/15 text-white" : "border-white/15 text-white/60"}`}><input type="checkbox" checked={hostCharacterIds.includes(item.id)} onChange={e => { const ids = e.target.checked ? [...hostCharacterIds, item.id] : hostCharacterIds.filter(id => id !== item.id); onHostCharacterIdsChange(ids); onHostCharacterChange(ids[0] || ""); }} />{item.name}</label>)}</div>
+            </div>
+          ) : <select className="interview-glass-input p-3" value={currentProgramme.hostRule === "optional" && hostCharacterId === "none" ? "none" : hostCharacterId && hostCharacterId !== "none" ? `character:${hostCharacterId}` : `preset:${currentHost?.id || hostPresetId}`} onChange={e => { if (e.target.value === "none") { onHostCharacterIdsChange([]); onHostCharacterChange("none"); return; } const [type, id] = e.target.value.split(":"); if (type === "character") { onHostCharacterIdsChange([id]); onHostCharacterChange(id); } else { onHostCharacterIdsChange([]); onHostCharacterChange(""); onHostPresetChange(id); } }}>
             {currentProgramme.hostRule === "optional" && <option value="none">本场无主持人</option>}
-            {!currentProgramme.characterRadio && currentProgramme.hostRule !== "none" && programmeHosts.map(item => <option key={item.id} value={`preset:${item.id}`}>{item.name} · {item.language}</option>)}
-            {currentProgramme.hostRule !== "none" && characters.filter(item => selectedCharacterIds.includes(item.id)).map(item => <option key={item.id} value={`character:${item.id}`}>{item.name} · 自己开播</option>)}
-          </select>
-          {currentProgramme.characterRadio && <div className="interview-glass-panel p-3 text-sm text-white/75">选本期角色主持人（至少一位）：<div className="flex flex-wrap gap-2 mt-2">{characters.filter(item => selectedCharacterIds.includes(item.id)).map(item => <label key={item.id} className="flex items-center gap-1"><input type="checkbox" checked={hostCharacterIds.includes(item.id)} onChange={e => { const ids = e.target.checked ? [...hostCharacterIds, item.id] : hostCharacterIds.filter(id => id !== item.id); onHostCharacterIdsChange(ids); onHostCharacterChange(ids[0] || ""); }} />{item.name}</label>)}</div></div>}
+            {programmeHosts.map(item => <option key={item.id} value={`preset:${item.id}`}>{item.name} · {item.language}</option>)}
+            {characters.map(item => <option key={item.id} value={`character:${item.id}`}>{item.name} · 角色主持</option>)}
+          </select>}
           {withHost && !hostCharacterId && currentHost && <details className="text-xs text-white/60"><summary className="cursor-pointer">编辑本栏目主持人 · {currentHost.name}</summary><div className="flex flex-col gap-2 mt-3"><input className="interview-glass-input p-2" aria-label="主持人名字" value={currentHost.name} onChange={e => onHostUpdate({ ...currentHost, name: e.target.value })} /><input className="interview-glass-input p-2" aria-label="主持人语言" value={currentHost.language} onChange={e => onHostUpdate({ ...currentHost, language: e.target.value })} /><textarea className="interview-glass-input p-2 min-h-28" aria-label="主持人风格" value={currentHost.direction} onChange={e => onHostUpdate({ ...currentHost, direction: e.target.value })} /></div></details>}
           <label className="text-sm text-white/80 flex items-center gap-2"><input type="checkbox" checked={includeUser} onChange={e => onIncludeUserChange(e.target.checked)} />邀请用户参与录制</label>
           <label className="text-sm text-white/80 flex items-center gap-2"><input type="checkbox" checked={audienceEnabled} onChange={e => onAudienceEnabledChange(e.target.checked)} />模拟听众弹幕与评论（每轮 0–5 条）</label>
           {programmeId === "roundtable" && <p className="text-xs text-white/55">日月闲至少三人：有主持人时另需两位嘉宾（角色或用户）；无主持人时三位参与者。</p>}
-        </section>
-        <section className="fade-in">
+        </section>}
+        {!programmeEditorOpen && <section className="fade-in">
           <div className="flex items-center gap-3 mb-4">
             <span className="text-white/30 text-xs font-mono">01</span>
             <SmallCaps className="text-white/60">VOICES // 参与角色</SmallCaps>
           </div>
           <div className="flex flex-col gap-3">
-            {characters.map((character) => {
+            {characters.filter(character => !hostCharacterIds.includes(character.id)).map((character) => {
               const active = selectedCharacterIds.includes(character.id);
               return (
                 <button
@@ -1218,9 +1244,9 @@ function SetupScreen({
               );
             })}
           </div>
-        </section>
+        </section>}
 
-        {includeUser && <section className="fade-in" style={{ animationDelay: '0.1s' }}>
+        {!programmeEditorOpen && includeUser && <section className="fade-in" style={{ animationDelay: '0.1s' }}>
           <div className="flex items-center gap-3 mb-4">
             <span className="text-white/30 text-xs font-mono">02</span>
             <SmallCaps className="text-white/60">用户 // 参与身份</SmallCaps>
@@ -1238,7 +1264,7 @@ function SetupScreen({
           </select>
         </section>}
 
-        <section className="fade-in" style={{ animationDelay: '0.2s' }}>
+        {!programmeEditorOpen && <section className="fade-in" style={{ animationDelay: '0.2s' }}>
           <div className="flex items-center gap-3 mb-4">
             <span className="text-white/30 text-xs font-mono">03</span>
             <SmallCaps className="text-white/60">THEME // 本期主题</SmallCaps>
@@ -1263,7 +1289,7 @@ function SetupScreen({
               );
             })}
           </div>
-        </section>
+        </section>}
       </main>
 
       <footer className="interview-bottom-bar">
