@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, ChevronRight, Clock3, ImagePlus, Plus, RefreshCw, Send, Settings2, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Clock3, Plus, RefreshCw, Send, Settings2, Trash2, X } from "lucide-react";
 import { loadCharacters } from "@/lib/character-storage";
-import { generateBoxAnswer, generateBoxQuestions, generateBoxTopic } from "@/lib/question-box-engine";
+import { generateBoxAnswers, generateBoxQuestions, generateBoxTopic, translateBoxUserAnswer } from "@/lib/question-box-engine";
+import { resolveUserIdentity, USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
 import { emptyBoxState, loadBoxState, newBoxId, saveBoxState, type BoxProfile, type BoxQuestion, type BoxSession, type BoxState, type BoxTopicMode } from "@/lib/question-box-storage";
 import styles from "./question-box-app.module.css";
 
 // Visual preview only. Turn off when the real cards are approved; never persisted or sent to an API.
 const SHOW_QUESTION_BOX_DEMO = true;
-type Page = "home" | "box" | "question" | "archive";
-type Modal = "user" | "characters" | "delivery" | "participants" | null;
+type Page = "home" | "box" | "archive";
+type Modal = "user" | "characters" | "delivery" | "participants" | "refresh" | null;
 const presetHours = [3, 12, 24, 72];
 const pick = <T,>(rows: T[]) => rows[Math.floor(Math.random() * rows.length)];
 const randomCount = (max: number) => 1 + Math.floor(Math.random() * Math.max(1, max));
@@ -35,10 +36,12 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
   const [page, setPage] = useState<Page>("home");
   const [modal, setModal] = useState<Modal>(null);
   const [drawer, setDrawer] = useState(false);
-  const [editOwner, setEditOwner] = useState("user");
+  const [editOwner, setEditOwner] = useState<string | null>(null);
+  const [charactersExpanded, setCharactersExpanded] = useState(false);
+  const [userIdentity, setUserIdentity] = useState(() => resolveUserIdentity(undefined, "question_box"));
   const [now, setNow] = useState(() => Date.now());
   const [boxId, setBoxId] = useState<string | null>(null);
-  const [questionId, setQuestionId] = useState<string | null>(null);
+  const [expandedQuestion, setExpandedQuestion] = useState<string | null>(null);
   const [demoView, setDemoView] = useState(false);
   const [busy, setBusy] = useState(false);
   const [topic, setTopic] = useState("");
@@ -53,6 +56,7 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
   const characters = useMemo(() => loadCharacters(), []);
   useEffect(() => saveBoxState(state), [state]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => { const reload = () => setUserIdentity(resolveUserIdentity(undefined, "question_box")); window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, reload); return () => window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, reload); }, []);
 
   const demo = useMemo<BoxSession>(() => ({ id: "__question_box_demo__", ownerId: "user", startsAt: Date.now() - 3600000, endsAt: Date.now() + 18 * 3600000, topicMode: "custom", topic: "最近有什么想问的？", maxQuestions: 5, lastArrivalAt: Date.now(), questions: [
     { id: "demo_1", recipientId: "user", senderName: "匿名", text: "如果能重新过最近的一天，你会选哪天？", createdAt: Date.now() - 1400000 },
@@ -62,16 +66,15 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
   const closedBoxes = state.sessions.filter(box => box.endsAt <= now).sort((a, b) => b.endsAt - a.endsAt);
   const showDemo = SHOW_QUESTION_BOX_DEMO && activeBoxes.length === 0;
   const box = demoView ? demo : state.sessions.find(row => row.id === boxId) || null;
-  const question = box?.questions.find(row => row.id === questionId) || null;
   const boxOpen = !!box && box.endsAt > now;
-  const name = (ownerId: string) => ownerId === "user" ? "U" : characters.find(c => c.id === ownerId)?.name || "已移除的角色";
-  const fallbackAvatar = (ownerId: string) => ownerId === "user" ? "" : characters.find(c => c.id === ownerId)?.avatar || "";
+  const name = (ownerId: string) => ownerId === "user" ? userIdentity?.name || "U" : characters.find(c => c.id === ownerId)?.name || "已移除的角色";
+  const fallbackAvatar = (ownerId: string) => ownerId === "user" ? userIdentity?.avatarUrl || "" : characters.find(c => c.id === ownerId)?.avatar || "";
   const profile = (ownerId: string, archived = false, row?: BoxSession): BoxProfile => archived ? row?.profileSnapshot || {} : state.profiles[ownerId] || {};
   const display = (ownerId: string, archived = false, row?: BoxSession) => profile(ownerId, archived, row).nickname?.trim() || name(ownerId);
   const updateBox = (id: string, change: (row: BoxSession) => BoxSession) => setState(prev => ({ ...prev, sessions: prev.sessions.map(row => row.id === id ? change(row) : row) }));
   const setOwnerProfile = (id: string, change: Partial<BoxProfile>) => setState(prev => ({ ...prev, profiles: { ...prev.profiles, [id]: { ...prev.profiles[id], ...change } } }));
-  const back = () => { if (drawer) { setDrawer(false); return; } if (modal) { setModal(null); return; } if (page === "question") { setPage("box"); return; } if (page === "box") { setPage(demoView || boxOpen ? "home" : "archive"); setDemoView(false); return; } if (page === "archive") { setPage("home"); return; } onClose(); };
-  const openBox = (row: BoxSession, isDemo = false) => { setDemoView(isDemo); setBoxId(row.id); setPage("box"); setQuestionId(null); };
+  const back = () => { if (drawer) { setDrawer(false); return; } if (modal) { setModal(null); return; } if (page === "box") { setPage(demoView || boxOpen ? "home" : "archive"); setDemoView(false); return; } if (page === "archive") { setPage("home"); return; } onClose(); };
+  const openBox = (row: BoxSession, isDemo = false) => { setDemoView(isDemo); setBoxId(row.id); setPage("box"); setExpandedQuestion(null); };
   const startUser = () => {
     if (state.sessions.some(row => row.ownerId === "user" && row.endsAt > Date.now())) { onNotice?.("U 的提问箱已经在开放中。"); return; }
     const hours = duration === 0 ? Number(customDuration) : duration;
@@ -96,28 +99,47 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
     setState(prev => ({ ...prev, sessions: [...rows, ...prev.sessions] })); setModal(null); setSelectedCharacters([]); setTopic(""); setPage("home");
     onNotice?.(`已为 ${rows.length} 位 C 开箱，进各自的箱子刷新后才会收到问题。`);
   };
-  const refresh = async () => {
+  const refresh = async (mode: "questions" | "answers" | "both" = "questions") => {
     const target = box; if (!target || !boxOpen || demoView || busy) return;
+    setModal(null);
     setBusy(true);
     try {
-      const count = randomCount(target.maxQuestions);
-      const actualTopic = target.topicMode === "persona" && !target.topic ? await generateBoxTopic(target.ownerId) : target.topic;
-      const batch = await generateBoxQuestions({ ...target, topic: actualTopic }, count);
-      if (Date.now() >= target.endsAt) { setNow(Date.now()); onNotice?.("本期已结束，新问题没有加入。"); return; }
-      updateBox(target.id, row => ({ ...row, topic: actualTopic || row.topic, questions: [...row.questions, ...batch], lastArrivalAt: Date.now() }));
-      onNotice?.(`收到 ${batch.length} 条新问题。`);
-    } catch (error) { onNotice?.(error instanceof Error ? error.message : "收题失败，请重试。"); } finally { setBusy(false); }
+      const messages: string[] = [];
+      if (mode !== "answers") {
+        try {
+          const count = randomCount(target.maxQuestions);
+          const actualTopic = target.topicMode === "persona" && !target.topic ? await generateBoxTopic(target.ownerId) : target.topic;
+          const batch = await generateBoxQuestions({ ...target, topic: actualTopic }, count);
+          if (Date.now() >= target.endsAt) { setNow(Date.now()); onNotice?.("本期已结束，新问题没有加入。"); return; }
+          updateBox(target.id, row => ({ ...row, topic: actualTopic || row.topic, questions: [...row.questions, ...batch], lastArrivalAt: Date.now() }));
+          messages.push(`收到 ${batch.length} 条新问题`);
+        } catch (error) { if (mode === "questions") throw error; messages.push("收题失败"); }
+      }
+      if (mode !== "questions" && target.ownerId !== "user") {
+        try {
+          const answers = await generateBoxAnswers(target);
+          if (Date.now() >= target.endsAt) { setNow(Date.now()); onNotice?.("本期已结束，没有发布新回答。"); return; }
+          const found = new Map(answers.map(answer => [answer.id, answer]));
+          if (found.size) updateBox(target.id, row => ({ ...row, questions: row.questions.map(question => {
+            const result = !question.answer && found.get(question.id);
+            return result ? { ...question, answer: { original: result.original, translated: result.translated, createdAt: Date.now() } } : question;
+          }) }));
+          messages.push(found.size ? `有 ${found.size} 条新回答` : "暂时没有新回答");
+        } catch (error) { if (mode === "answers") throw error; messages.push("查看回答失败"); }
+      }
+      onNotice?.(`${messages.join("，")}。`);
+    } catch (error) { onNotice?.(error instanceof Error ? error.message : "刷新失败，请重试。"); } finally { setBusy(false); }
   };
-  const answer = async () => {
-    if (!box || !question || demoView || !boxOpen || question.answer || busy) return;
-    const input = draft.trim(); if (box.ownerId === "user" && !input) return;
+  const answer = async (questionId: string) => {
+    if (!box || box.ownerId !== "user" || demoView || !boxOpen || busy || !draft.trim()) return;
+    const target = box; const input = draft.trim();
     setBusy(true);
     try {
-      const output = box.ownerId === "user" ? { original: input, translated: input } : await generateBoxAnswer(question);
-      if (Date.now() >= box.endsAt) { setNow(Date.now()); onNotice?.("本期已结束，回答没有发布。"); return; }
-      updateBox(box.id, row => ({ ...row, questions: row.questions.map(q => q.id === question.id ? { ...q, answer: { ...output, createdAt: Date.now() } } : q) }));
-      setDraft("");
-    } catch (error) { onNotice?.(error instanceof Error ? error.message : "回答失败，请重试。"); } finally { setBusy(false); }
+      const translated = await translateBoxUserAnswer(input);
+      if (Date.now() >= target.endsAt) { setNow(Date.now()); onNotice?.("本期已结束，回答没有发布。"); return; }
+      updateBox(target.id, row => ({ ...row, questions: row.questions.map(q => q.id === questionId && !q.answer ? { ...q, answer: { original: input, translated, createdAt: Date.now() } } : q) }));
+      setDraft(""); setExpandedQuestion(null);
+    } catch (error) { onNotice?.(error instanceof Error ? error.message : "翻译失败，请重试。"); } finally { setBusy(false); }
   };
   const deliver = async () => {
     if (!box || box.ownerId === "user" || box.endsAt <= Date.now() || demoView || !draft.trim() || busy) return;
@@ -136,7 +158,9 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
     } catch { if (Date.now() < target.endsAt) { updateBox(target.id, row => ({ ...row, questions: [...row.questions, userQuestion] })); onNotice?.("其他问题暂时生成失败，你的问题已单独投递。"); } else { setDraft(body); onNotice?.("本期已结束，问题没有投递。"); } } finally { setBusy(false); }
   };
   const eraseAll = () => { if (!window.confirm("将删除全部提问箱记录、头像和封面。确定继续？")) return; if (!window.confirm("再次确认：全部提问箱数据删除后无法恢复。")) return; setState(emptyBoxState()); setPage("home"); setBoxId(null); setDrawer(false); setDemoView(false); onNotice?.("提问箱数据已清除。"); };
-  const readImage = async (file: File | undefined, kind: "avatar" | "cover") => { if (!file) return; try { setOwnerProfile(editOwner, { [kind === "avatar" ? "avatarUrl" : "coverUrl"]: await imageData(file, kind === "cover") }); } catch (error) { onNotice?.(error instanceof Error ? error.message : "图片导入失败。"); } };
+  const deleteBox = () => { if (!box || demoView || !window.confirm("删除这一期提问箱、全部问题和回答？删除后不会再作为角色记忆读取。")) return; const id = box.id; setState(prev => ({ ...prev, sessions: prev.sessions.filter(row => row.id !== id) })); setBoxId(null); setExpandedQuestion(null); setPage(boxOpen ? "home" : "archive"); onNotice?.("本期提问箱已删除。"); };
+  const deleteQuestion = (id: string) => { if (!box || demoView || !window.confirm("删除这道问题和它的回答？")) return; updateBox(box.id, row => ({ ...row, questions: row.questions.filter(q => q.id !== id) })); if (expandedQuestion === id) setExpandedQuestion(null); };
+  const readImage = async (id: string, file: File | undefined, kind: "avatar" | "cover") => { if (!file) return; try { setOwnerProfile(id, { [kind === "avatar" ? "avatarUrl" : "coverUrl"]: await imageData(file, kind === "cover") }); } catch (error) { onNotice?.(error instanceof Error ? error.message : "图片导入失败。"); } };
   const updateParticipants = () => { if (!box || demoView || box.ownerId !== "user") return; updateBox(box.id, row => ({ ...row, participantIds: participants })); setModal(null); };
   const sessionCard = (row: BoxSession, isDemo = false) => {
     const archived = row.endsAt <= now && !isDemo;
@@ -148,32 +172,58 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
       <div className={styles.cardInfo}><span className={styles.ownerAvatar}>{avatar ? <img src={avatar} alt=""/> : display(row.ownerId, archived, row).slice(0, 1)}</span><div className={styles.ownerText}><strong>{display(row.ownerId, archived, row)}</strong><span className={styles.topic}>{row.topic || (row.topicMode === "persona" ? "主题由 TA 决定" : "随便问问")}</span></div><div className={styles.cardState}><b>{archived ? "已经关闭" : "正在开箱"}</b><small>{archived ? "已结束" : `还剩 ${left(row.endsAt, now)}`}</small></div></div>
     </button>;
   };
-  const questionCard = (row: BoxQuestion) => <button key={row.id} className={styles.questionCard} onClick={() => { setQuestionId(row.id); setPage("question"); setDraft(""); }}><span className={styles.questionTop}>匿名提问 <span>{at(row.createdAt)}</span></span><strong>{row.text}</strong><span className={row.answer ? styles.answered : styles.unanswered}>{row.answer ? "已回答" : "未回答"}</span></button>;
-  const pageTitle = page === "home" ? "提问箱" : page === "archive" ? "往期" : page === "question" ? "问题详情" : box ? display(box.ownerId, !boxOpen, box) + "的提问箱" : "提问箱";
+  const questionCard = (row: BoxQuestion) => <article key={row.id} className={styles.questionCard}>
+    <div className={styles.questionTop}><span>匿名提问</span><span>{at(row.createdAt)}</span></div>
+    <strong>{row.text}</strong>
+    {row.answer && <div className={styles.inlineAnswer}><span>{display(box!.ownerId, !boxOpen, box!)}的回答</span><p>{row.answer.original}</p>{row.answer.translated !== row.answer.original && <p className={styles.translation}>{row.answer.translated}</p>}</div>}
+    <div className={styles.questionFooter}><span className={row.answer ? styles.answered : styles.unanswered}>{row.answer ? "已回答" : "未回答"}</span><div>
+      {box?.ownerId === "user" && boxOpen && !demoView && !row.answer && <button onClick={() => { setExpandedQuestion(expandedQuestion === row.id ? null : row.id); setDraft(""); }}>{expandedQuestion === row.id ? "收起" : "写回答"}</button>}
+      {!demoView && <button aria-label="删除问题" title="删除问题" onClick={() => deleteQuestion(row.id)}><Trash2 size={15}/></button>}
+    </div></div>
+    {expandedQuestion === row.id && !row.answer && <div className={styles.reply}><textarea placeholder="写下你的回答…" value={draft} maxLength={1400} onChange={e => setDraft(e.target.value)}/><button disabled={!draft.trim() || busy} onClick={() => void answer(row.id)}>{busy ? "正在处理…" : "发布回答"}</button></div>}
+  </article>;
+  const profileEditor = (ownerId: string) => {
+    const avatar = state.profiles[ownerId]?.avatarUrl || fallbackAvatar(ownerId);
+    const cover = state.profiles[ownerId]?.coverUrl;
+    return <div className={styles.profileMiniCard} key={ownerId}>
+      {ownerId !== "user" && <button className={styles.profileTitle} onClick={() => setEditOwner(editOwner === ownerId ? null : ownerId)}><span className={styles.profileTinyAvatar}>{avatar ? <img src={avatar} alt=""/> : name(ownerId).slice(0, 1)}</span><span>{display(ownerId)}</span><ChevronDown size={15} className={editOwner === ownerId ? styles.chevronOpen : ""}/></button>}
+      {editOwner === ownerId && <div className={styles.profileFields}>
+        <div className={styles.profileIdentity}><label className={styles.profileAvatar} title="点按头像更换"><span>{avatar ? <img src={avatar} alt=""/> : name(ownerId).slice(0, 1)}</span><input type="file" accept="image/*" onChange={e => { void readImage(ownerId, e.target.files?.[0], "avatar"); e.target.value = ""; }}/></label><label className={styles.profileNickname}>昵称<input placeholder={name(ownerId)} value={state.profiles[ownerId]?.nickname || ""} onChange={e => setOwnerProfile(ownerId, { nickname: e.target.value })}/></label></div>
+        <label className={styles.profileCover} style={cover ? { backgroundImage: `url(${cover})` } : undefined} title="点按封面更换"><span>提问箱封面 · 点按更换</span>{!cover && <b>Q.</b>}<input type="file" accept="image/*" onChange={e => { void readImage(ownerId, e.target.files?.[0], "cover"); e.target.value = ""; }}/></label>
+      </div>}
+    </div>;
+  };
+  const pageTitle = page === "home" ? "提问箱" : page === "archive" ? "往期" : box ? display(box.ownerId, !boxOpen, box) + "的提问箱" : "提问箱";
 
   return <div className={styles.app}>
     <header className={styles.header}><button aria-label="返回" onClick={back}><ArrowLeft size={21}/></button><strong>{pageTitle}</strong><div className={styles.headerActions}>{page === "home" && <button aria-label="刷新 C 的提问箱" title="为 C 开启提问箱" onClick={() => { setSelectedCharacters([]); setTopic(""); setTopicMode("persona"); setDuration(-1); setModal("characters"); }}><RefreshCw size={19}/></button>}<button aria-label="提问箱设置" onClick={() => setDrawer(true)}><Settings2 size={20}/></button></div></header>
     <main className={styles.main}>
       {page === "home" && <><div className={styles.pageLead}><span>OPEN NOW</span><h1>正在开箱</h1><p>想回答的时候再回答。</p></div>{activeBoxes.map(row => sessionCard(row))}{showDemo && <>{sessionCard(demo, true)}<p className={styles.demoNote}>这张示意卡只用于看界面，不会收题或保存数据。</p></>}{!activeBoxes.length && !showDemo && <p className={styles.empty}>现在没有开放的提问箱。</p>}</>}
       {page === "archive" && <><div className={styles.pageLead}><span>PAST BOXES</span><h1>往期</h1><p>已经关闭的问题和回答都留在这里。</p></div>{closedBoxes.map(row => sessionCard(row))}{!closedBoxes.length && <p className={styles.empty}>还没有往期提问箱。</p>}</>}
-      {page === "box" && box && <>{sessionCard(box, demoView)}<div className={styles.boxMeta}><span><Clock3 size={14}/> {at(box.startsAt)} — {at(box.endsAt)}</span>{!demoView && box.ownerId === "user" && boxOpen && <button onClick={() => { setParticipants(box.participantIds); setModal("participants"); }}>本期提问者 <ChevronRight size={14}/></button>}</div><div className={styles.sectionTitle}><strong>收到的问题</strong><span>{box.questions.length}</span></div>{[...box.questions].reverse().map(questionCard)}{!box.questions.length && <p className={styles.empty}>现在还是空箱。点刷新，看看谁来提问。</p>}{demoView && <p className={styles.demoNote}>界面示意：正式开箱后，刷新和回答才会生效。</p>}{boxOpen && !demoView && <div className={styles.boxActions}><button disabled={busy} onClick={() => void refresh()}><RefreshCw size={17} className={busy ? styles.spin : ""}/>{busy ? "正在收题" : "刷新"}</button>{box.ownerId !== "user" && <button disabled={busy} onClick={() => { setDraft(""); setDeliveryMode("solo"); setModal("delivery"); }}><Send size={17}/>投递</button>}</div>}</>}
-      {page === "question" && box && question && <><div className={styles.detail}><span className={styles.muted}>匿名提问 · {at(question.createdAt)}</span><h2>{question.text}</h2><span className={question.answer ? styles.answered : styles.unanswered}>{question.answer ? "已回答" : "未回答"}</span>{question.answer && <div className={styles.answer}><strong>{display(box.ownerId, !boxOpen, box)}的回答</strong><p>{question.answer.original}</p>{question.answer.translated !== question.answer.original && <p className={styles.translation}>{question.answer.translated}</p>}</div>}</div>{boxOpen && !question.answer && !demoView && (box.ownerId === "user" ? <div className={styles.reply}><textarea placeholder="写下你的回答…" value={draft} onChange={e => setDraft(e.target.value)}/><button disabled={!draft.trim() || busy} onClick={() => void answer()}>发布回答</button></div> : <button className={styles.primary} disabled={busy} onClick={() => void answer()}>{busy ? "正在回答…" : `让 ${display(box.ownerId)} 回答`}</button>)}{!demoView && <button className={styles.deleteQuestion} onClick={() => { if (!window.confirm("删除这道问题和它的回答？")) return; updateBox(box.id, row => ({ ...row, questions: row.questions.filter(q => q.id !== question.id) })); setPage("box"); }}><Trash2 size={15}/> 删除问题</button>}</>}
+      {page === "box" && box && <>{sessionCard(box, demoView)}<div className={styles.boxMeta}><span><Clock3 size={14}/> {at(box.startsAt)} — {at(box.endsAt)}</span>{!demoView && box.ownerId === "user" && boxOpen && <button onClick={() => { setParticipants(box.participantIds); setModal("participants"); }}>本期提问者 <ChevronRight size={14}/></button>}</div><div className={styles.sectionTitle}><strong>收到的问题</strong><span>{box.questions.length}</span></div>{[...box.questions].reverse().map(questionCard)}{!box.questions.length && <p className={styles.empty}>现在还是空箱。点刷新，看看谁来提问。</p>}{demoView && <p className={styles.demoNote}>界面示意：正式开箱后，刷新和回答才会生效。</p>}{boxOpen && !demoView && <div className={styles.boxActions}><button disabled={busy} onClick={() => box.ownerId === "user" ? void refresh("questions") : setModal("refresh")}><RefreshCw size={17} className={busy ? styles.spin : ""}/>{busy ? "正在刷新" : "刷新"}</button>{box.ownerId !== "user" && <button disabled={busy} onClick={() => { setDraft(""); setDeliveryMode("solo"); setModal("delivery"); }}><Send size={17}/>投递</button>}</div>}{!demoView && <button className={styles.deleteBox} onClick={deleteBox}><Trash2 size={15}/> 删除本期提问箱</button>}</>}
     </main>
-    <nav className={styles.pillNav}><button className={page === "home" || page === "box" || page === "question" ? styles.navSelected : ""} onClick={() => { setDemoView(false); setPage("home"); }}>首页</button><button className={styles.navPlus} aria-label="开启 U 的新一期" onClick={() => { setDuration(24); setMaxQuestions(5); setTopic(""); setModal("user"); }}><Plus size={22}/></button><button className={page === "archive" ? styles.navSelected : ""} onClick={() => { setDemoView(false); setPage("archive"); }}>往期</button></nav>
+    <nav className={styles.pillNav}><button className={page === "home" || page === "box" ? styles.navSelected : ""} onClick={() => { setDemoView(false); setPage("home"); }}>首页</button><button className={styles.navPlus} aria-label="开启 U 的新一期" onClick={() => { setDuration(24); setMaxQuestions(5); setTopic(""); setModal("user"); }}><Plus size={22}/></button><button className={page === "archive" ? styles.navSelected : ""} onClick={() => { setDemoView(false); setPage("archive"); }}>往期</button></nav>
 
-    {modal && <div className={styles.scrim} onClick={() => setModal(null)}><section className={styles.modal} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}><div className={styles.modalHead}><strong>{modal === "user" ? "开启我的提问箱" : modal === "characters" ? "为 C 开启提问箱" : modal === "delivery" ? "匿名投递" : "本期提问者"}</strong><button aria-label="关闭" onClick={() => setModal(null)}><X size={18}/></button></div>
+    {modal && <div className={styles.scrim} onClick={() => setModal(null)}><section className={styles.modal} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}><div className={styles.modalHead}><strong>{modal === "user" ? "开启我的提问箱" : modal === "characters" ? "为 C 开启提问箱" : modal === "delivery" ? "匿名投递" : modal === "refresh" ? "刷新提问箱" : "本期提问者"}</strong><button aria-label="关闭" onClick={() => setModal(null)}><X size={18}/></button></div>
       {modal === "user" && <><label className={styles.field}>本期主题 <small>选填</small><input placeholder="不填就随便问问" value={topic} maxLength={100} onChange={e => setTopic(e.target.value)}/></label><DurationPicker value={duration} setValue={setDuration} custom={customDuration} setCustom={setCustomDuration}/><CountPicker value={maxQuestions} setValue={setMaxQuestions}/><p className={styles.hint}>开启后是空箱，进入箱子点刷新才会收题。</p><button className={styles.primary} onClick={startUser}>开始开箱</button></>}
       {modal === "characters" && <><p className={styles.hint}>不选择 C，就随机开启一部分尚未开箱的 C；主题和开放时长也会随机。</p><div className={styles.characterGrid}>{characters.map(c => <button key={c.id} className={selectedCharacters.includes(c.id) ? styles.characterSelected : ""} onClick={() => setSelectedCharacters(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id])}><span>{state.profiles[c.id]?.avatarUrl || c.avatar ? <img src={state.profiles[c.id]?.avatarUrl || c.avatar || ""} alt=""/> : c.name.slice(0, 1)}</span>{state.profiles[c.id]?.nickname || c.name}{selectedCharacters.includes(c.id) && <Check size={13}/>}</button>)}</div><div className={styles.field}>本期主题<div className={styles.segment}><button className={topicMode === "custom" ? styles.selected : ""} onClick={() => setTopicMode("custom")}>自己指定</button><button className={topicMode === "persona" ? styles.selected : ""} onClick={() => setTopicMode("persona")}>由 TA 定</button><button className={topicMode === "free" ? styles.selected : ""} onClick={() => setTopicMode("free")}>随便问</button></div>{topicMode === "custom" && <input placeholder="给选中的 C 设置主题" value={topic} maxLength={100} onChange={e => setTopic(e.target.value)}/>}</div><DurationPicker value={duration} setValue={setDuration} custom={customDuration} setCustom={setCustomDuration} random/><CountPicker value={maxQuestions} setValue={setMaxQuestions}/><button className={styles.primary} onClick={startCharacters}>开启提问箱</button></>}
       {modal === "delivery" && <><textarea className={styles.deliveryText} placeholder="写下想匿名问 TA 的问题…" value={draft} maxLength={600} onChange={e => setDraft(e.target.value)}/><div className={styles.segment}><button className={deliveryMode === "solo" ? styles.selected : ""} onClick={() => setDeliveryMode("solo")}>单独投递</button><button className={deliveryMode === "mixed" ? styles.selected : ""} onClick={() => setDeliveryMode("mixed")}>混入其他问题</button></div><p className={styles.hint}>两种方式对 TA 都只显示匿名；投递后不会立刻回答。</p><button className={styles.primary} disabled={!draft.trim()} onClick={() => void deliver()}>投递问题</button></>}
+      {modal === "refresh" && <><p className={styles.hint}>只看新回答不会收新问题。C 可能回答其中几题，也可能暂时不答。</p><button className={styles.refreshChoice} onClick={() => void refresh("questions")}>收新问题 <ChevronRight size={16}/></button><button className={styles.refreshChoice} onClick={() => void refresh("answers")}>看新回答 <ChevronRight size={16}/></button><button className={styles.refreshChoice} onClick={() => void refresh("both")}>一起收和看 <ChevronRight size={16}/></button></>}
       {modal === "participants" && <><p className={styles.hint}>默认每次从引入的 C 中随机抽一部分提问，也可能有陌生人。指定后只有勾选的 C 和陌生人参与。</p><button className={styles.choiceRow} onClick={() => setParticipants(undefined)}><span>随机抽取 C</span>{!participants && <Check size={16}/>}</button><div className={styles.characterGrid}>{characters.map(c => <button key={c.id} className={participants?.includes(c.id) ? styles.characterSelected : ""} onClick={() => setParticipants(prev => prev?.includes(c.id) ? prev.filter(id => id !== c.id) : [...(prev || []), c.id])}>{state.profiles[c.id]?.nickname || c.name}{participants?.includes(c.id) && <Check size={13}/>}</button>)}</div><button className={styles.primary} onClick={updateParticipants}>保存本期设置</button></>}
     </section></div>}
 
-    {drawer && <div className={styles.drawerScrim} onClick={() => setDrawer(false)}><aside className={styles.drawer} onClick={e => e.stopPropagation()}><div className={styles.drawerHead}><strong>提问箱设置</strong><button aria-label="关闭设置" onClick={() => setDrawer(false)}><X size={19}/></button></div><div className={styles.drawerBody}><span className={styles.drawerLabel}>我的</span><button className={editOwner === "user" ? styles.drawerOwnerSelected : styles.drawerOwner} onClick={() => setEditOwner("user")}>U · 我的资料 <ChevronRight size={15}/></button><span className={styles.drawerLabel}>角色设置</span>{characters.map(c => <button key={c.id} className={editOwner === c.id ? styles.drawerOwnerSelected : styles.drawerOwner} onClick={() => setEditOwner(c.id)}>{c.name}<ChevronRight size={15}/></button>)}<div className={styles.profileEdit}><strong>{name(editOwner)} · 本 App 展示</strong><p>头像、昵称与封面只在提问箱显示，不改角色人设或其他 App 资料。</p><label>昵称<input placeholder={name(editOwner)} value={state.profiles[editOwner]?.nickname || ""} onChange={e => setOwnerProfile(editOwner, { nickname: e.target.value })}/></label><div className={styles.photoRow}><span>头像</span><label><ImagePlus size={16}/> 选择图片<input type="file" accept="image/*" onChange={e => { void readImage(e.target.files?.[0], "avatar"); e.target.value = ""; }}/></label>{state.profiles[editOwner]?.avatarUrl && <button onClick={() => setOwnerProfile(editOwner, { avatarUrl: "" })}>移除</button>}</div><div className={styles.photoRow}><span>提问箱封面</span><label><ImagePlus size={16}/> 选择图片<input type="file" accept="image/*" onChange={e => { void readImage(e.target.files?.[0], "cover"); e.target.value = ""; }}/></label>{state.profiles[editOwner]?.coverUrl && <button onClick={() => setOwnerProfile(editOwner, { coverUrl: "" })}>移除</button>}</div>{state.profiles[editOwner]?.coverUrl && <img className={styles.coverPreview} src={state.profiles[editOwner].coverUrl} alt="当前提问箱封面"/>}</div><button className={styles.eraseAll} onClick={eraseAll}><Trash2 size={16}/> 清除所有提问箱数据</button></div></aside></div>}
+    {drawer && <div className={styles.drawerScrim} onClick={() => setDrawer(false)}><aside className={styles.drawer} onClick={e => e.stopPropagation()}><div className={styles.drawerHead}><strong>提问箱设置</strong><button aria-label="关闭设置" onClick={() => setDrawer(false)}><X size={19}/></button></div><div className={styles.drawerBody}>
+      <button className={styles.accordionHead} onClick={() => setEditOwner(editOwner === "user" ? null : "user")}>我的资料 <ChevronDown size={16} className={editOwner === "user" ? styles.chevronOpen : ""}/></button>
+      {editOwner === "user" && profileEditor("user")}
+      <button className={styles.accordionHead} onClick={() => { setCharactersExpanded(!charactersExpanded); setEditOwner(null); }}>角色资料 <ChevronDown size={16} className={charactersExpanded ? styles.chevronOpen : ""}/></button>
+      {charactersExpanded && (characters.length ? characters.map(c => profileEditor(c.id)) : <p className={styles.hint}>还没有引入角色。</p>)}
+      <p className={styles.hint}>这里的头像、昵称和封面只用于提问箱展示，不修改身份或人设。</p><button className={styles.eraseAll} onClick={eraseAll}><Trash2 size={16}/> 清除所有提问箱数据</button>
+    </div></aside></div>}
   </div>;
 }
 
 function DurationPicker({ value, setValue, custom, setCustom, random = false }: { value: number; setValue: (v: number) => void; custom: string; setCustom: (v: string) => void; random?: boolean }) {
-  return <div className={styles.field}>开放时长<div className={styles.segment}>{presetHours.map(hour => <button key={hour} className={value === hour ? styles.selected : ""} onClick={() => setValue(hour)}>{hour < 24 ? `${hour} 小时` : `${hour / 24} 天`}</button>)}<button className={value === 0 ? styles.selected : ""} onClick={() => setValue(0)}>自定</button>{random && <button className={value === -1 ? styles.selected : ""} onClick={() => setValue(-1)}>随机</button>}</div>{value === 0 && <input type="number" min="1" max="720" value={custom} onChange={e => setCustom(e.target.value)} placeholder="小时数"/>}</div>;
+  return <div className={styles.field}>开放时长<div className={styles.segment}>{presetHours.map(hour => <button key={hour} className={value === hour ? styles.selected : ""} onClick={() => setValue(hour)}>{hour < 24 ? `${hour} 小时` : `${hour / 24} 天`}</button>)}<button className={value === 0 ? styles.selected : ""} onClick={() => setValue(0)}>自定</button>{random && <button className={value === -1 ? styles.selected : ""} onClick={() => setValue(-1)}>随机</button>}</div>{value === 0 && <label className={styles.durationInput}><input type="number" min="1" max="720" value={custom} onChange={e => setCustom(e.target.value)} placeholder="输入时长"/><span>小时</span></label>}</div>;
 }
 function CountPicker({ value, setValue }: { value: number; setValue: (v: number) => void }) {
   return <div className={styles.field}>每次最多收几题<div className={styles.segment}>{[1, 2, 3, 4, 5].map(count => <button key={count} className={value === count ? styles.selected : ""} onClick={() => setValue(count)}>{count}</button>)}</div><small>这是上限；选 5 题也可能只收到 3 题。</small></div>;

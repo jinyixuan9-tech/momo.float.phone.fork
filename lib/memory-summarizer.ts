@@ -81,7 +81,7 @@ export async function runSummarizationPipeline(
     const allEntries = filterTimelineByAllowedSources(
         loadNativeTimeline(characterId, afterTimestamp ? { afterTimestamp } : undefined),
         config.shortTermAllowedSources,
-    );
+    ).filter(entry => entry.customAppId !== "question_box"); // Question box events stay revocable when a session/question is deleted.
 
     if (allEntries.length < 4) {
         if (!options?.force) resetEventCounter(characterId);

@@ -3,6 +3,10 @@ import { loadCharacters } from "./character-storage";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadWorldBooks, resolveBinding, resolveUserIdentity } from "./settings-storage";
 import type { BoxQuestion, BoxSession } from "./question-box-storage";
 import { newBoxId } from "./question-box-storage";
+import { prepareShortTermContext } from "./short-term-assembler";
+import { loadMemoryConfig } from "./memory-storage";
+import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
+import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 
 const clean = (value: unknown, limit = 700) => typeof value === "string" ? value.trim().slice(0, limit) : "";
 function parse(raw: string): Record<string, unknown> {
@@ -17,13 +21,32 @@ async function ask(prompt: string, characterId?: string) {
   if (!api?.apiKey?.trim()) throw new Error("请先配置小手机文字 API。");
   const preset = loadPresets().find(row => row.id === slot.presetId) || null;
   const world = loadWorldBooks().filter(row => slot.worldBookIds?.includes(row.id)).map(row => `${row.name}：${row.entries.filter(entry => !entry.disable).map(entry => entry.content).join("；")}`).join("\n").slice(0, 4000);
+  const shortTerm = characterId ? prepareShortTermContext(characterId, "question_box", { tokenBudgetOverride: 1800 }) : null;
+  const memoryConfig = characterId ? loadMemoryConfig() : null;
+  const [longTerm, core] = characterId && memoryConfig ? await Promise.all([
+    retrieveMemoriesForPrompt(characterId, shortTerm?.wbActivationContext || prompt, memoryConfig).catch(() => []),
+    retrieveCoreMemoriesForPrompt(characterId, memoryConfig).catch(() => []),
+  ]) : [[], []];
+  const context = [
+    ...(shortTerm?.recentBlocks || []).filter(block => block.content).map(block => block.content),
+    core.length ? formatCoreMemories(core) : "",
+    longTerm.length ? formatLongTermMemories(longTerm) : "",
+  ].filter(Boolean).join("\n").slice(-11000);
   const output = await sendLLMRequest(api, preset, [
-    { role: "system", content: `${prompt}\n相关世界书：${world || "无"}。只输出 JSON，不能输出 Markdown。` },
+    { role: "system", content: `${prompt}\n相关世界书：${world || "无"}。${context ? `\n角色近期经历及记忆（仅供理解角色，不能用来识破匿名发问者）：\n${context}` : ""}\n只输出 JSON，不能输出 Markdown。` },
     { role: "user", content: "生成这次内容。" },
   ], [], undefined, { appId: "question_box", appTags: ["question_box", "questions"], skipOutputRegex: true });
   return parse(output);
 }
 const chinese = (text: string) => /[\u4e00-\u9fff]/.test(text) && !/[\uac00-\ud7af\u3040-\u30ff]/.test(text);
+
+export async function translateBoxUserAnswer(original: string): Promise<string> {
+  if (!/[\uac00-\ud7af\u3040-\u30ff]/.test(original)) return original;
+  const result = await ask(`把用户在提问箱里的回答准确译成自然简体中文。不要改写、增补、替用户作答。原文：${JSON.stringify(original.slice(0, 1400))}。只输出 {"translated":"中文译文"}。`);
+  const translated = clean(result.translated, 1600);
+  if (!translated || !/[\u4e00-\u9fff]/.test(translated)) throw new Error("回答翻译失败，请重试。");
+  return translated;
+}
 
 export async function generateBoxTopic(ownerId: string): Promise<string> {
   const char = loadCharacters().find(row => row.id === ownerId);
@@ -59,11 +82,22 @@ export async function generateBoxQuestions(session: BoxSession, count: number, e
   return valid;
 }
 
-export async function generateBoxAnswer(question: BoxQuestion): Promise<{ original: string; translated: string }> {
-  const char = loadCharacters().find(row => row.id === question.recipientId);
+export async function generateBoxAnswers(session: BoxSession): Promise<Array<{ id: string; original: string; translated: string }>> {
+  const char = loadCharacters().find(row => row.id === session.ownerId);
   if (!char) throw new Error("找不到回答者的角色资料。");
-  const result = await ask(`请替角色 ${char.name} 回答私人提问箱的一道匿名问题。角色人设：${char.persona.slice(0, 4200)}。提问者身份未知，不能根据后台身份、用户私聊或元数据认出；只有问题文字本身提供明确线索时，角色才可以不确定地猜。匿名问题：${question.text}。回答符合人设，可以直答、回避或婉拒；不编造现实事实。original 用角色日常使用的语言写；如不是中文，translated 必须是准确、自然的简体中文译文；中文回答时两字段相同。只输出 {"original":"回答原话","translated":"中文译文"}。`, char.id);
-  const original = clean(result.original, 1400); const translated = clean(result.translated, 1600);
-  if (!original || !translated || (!/[\u4e00-\u9fff]/.test(original) && !/[\u4e00-\u9fff]/.test(translated))) throw new Error("回答或中文翻译不完整，请重试。");
-  return { original, translated };
+  const pending = [...session.questions.filter(question => !question.answer)].sort(() => Math.random() - .5).slice(0, 15);
+  if (!pending.length) return [];
+  const list = pending.map(question => ({ id: question.id, text: question.text, askedAt: new Date(question.createdAt).toISOString() }));
+  const result = await ask(`你是角色 ${char.name}，正在查看自己提问箱里还没回答的匿名问题。人设：${char.persona.slice(0, 4200)}。现在可以结合近期聊天和经历决定回答哪些问题；可能一题、多题或一题都不答。不要仅为完成任务而强行回答，也不要无理由永久拖延。如果此前不知怎么回答，近期经历可能让你有了想法。发问者全部匿名，不能读取后台身份或推断是 U；只能根据问题文字本身的明确线索不确定地猜。问题列表：${JSON.stringify(list)}。只给出想回答的列表，每项准确填写原问题 id。回答要符合人设；original 用日常语言，如非中文 translated 给准确自然的简体中文译文，中文则相同。只输出 {"answers":[{"id":"问题id","original":"回答原话","translated":"中文译文"}]}，不回答可输出空数组。`, char.id);
+  const rows = Array.isArray(result.answers) ? result.answers : [];
+  const seen = new Set<string>();
+  return rows.flatMap(item => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id : "";
+    const original = clean(row.original, 1400); const translated = clean(row.translated, 1600);
+    if (!pending.some(question => question.id === id) || seen.has(id) || !original || !translated || (!/[\u4e00-\u9fff]/.test(original) && !/[\u4e00-\u9fff]/.test(translated))) return [];
+    seen.add(id);
+    return [{ id, original, translated }];
+  });
 }

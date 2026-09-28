@@ -32,6 +32,7 @@ import { loadChatOfflineProjectionEntries } from "./chat-offline-storage";
 import { loadCheckPhoneProjectionEntries } from "./checkphone-storage";
 import { formatShoppingPaymentRequestHistory } from "./shopping-payment-request";
 import { loadCustomAppTimelineEntries } from "./custom-app-storage";
+import { loadQuestionBoxProjectionEntries } from "./question-box-memory";
 import * as smsStorage from "./sms-storage";
 import {
     canCharacterSeeMomentPost,
@@ -834,6 +835,21 @@ export function loadNativeTimeline(
     }
 
     // ── Custom app timeline events ──
+    for (const event of loadQuestionBoxProjectionEntries(characterId, { afterTimestamp: options?.afterTimestamp })) {
+        entries.push({
+            id: event.id,
+            sourceApp: "custom_app",
+            sourceDetail: "custom_app_event",
+            authorType: event.authorType,
+            timestamp: event.timestamp,
+            customAppId: "question_box",
+            customAppName: "提问箱",
+            customAppLabel: "提问箱",
+            content: formatStoredPromptEventContent(event.content, {
+                label: "提问箱", timestamp: event.timestamp, timeAware, timestampOptions,
+            }),
+        });
+    }
     const customAppEntries = loadCustomAppTimelineEntries(characterId, {
         afterTimestamp: options?.afterTimestamp,
     });
