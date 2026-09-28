@@ -13,9 +13,9 @@ import { PhotosApp } from "@/components/photos/photos-app";
 import { WeverseApp } from "@/components/weverse/weverse-app";
 import { LysnApp } from "@/components/lysn/lysn-app";
 import { SmsApp } from "@/components/sms/sms-app";
-import { PhoneApp } from "@/components/phone/phone-app";
 import { TwitterApp } from "@/components/twitter/twitter-app";
 import { TheqooApp } from "@/components/theqoo/theqoo-app";
+import { QuestionBoxApp } from "@/components/question-box/question-box-app";
 import { maybeGenerateLysnBackgroundMessage } from "@/lib/lysn-background";
 import { maybeGenerateSmsBackgroundMessage } from "@/lib/sms-background";
 import { PhoneSettingsApp } from "@/components/phone-settings-app";
@@ -128,6 +128,7 @@ import {
   ensureNativeTwitterIcon,
   ensureNativePhoneIcon,
   ensureNativeTheqooIcon,
+  ensureNativeQuestionBoxIcon,
 } from "@/lib/desktop-layout-storage";
 import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
@@ -1534,11 +1535,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           const withTwitter = ensureNativeTwitterIcon(withSms.layout, hydratedWidgets, hydratedDock, sane.folders);
           const withPhone = ensureNativePhoneIcon(withTwitter.layout, hydratedWidgets, hydratedDock, sane.folders);
           const withTheqoo = ensureNativeTheqooIcon(withPhone.layout, hydratedWidgets, hydratedDock, sane.folders);
+          const withQuestionBox = ensureNativeQuestionBoxIcon(withTheqoo.layout, hydratedWidgets, hydratedDock, sane.folders);
           setFolders(sane.folders);
-          setLayout(withTheqoo.layout);
-          if (sane.changed || withSms.changed || withTwitter.changed || withPhone.changed || withTheqoo.changed) {
+          setLayout(withQuestionBox.layout);
+          if (sane.changed || withSms.changed || withTwitter.changed || withPhone.changed || withTheqoo.changed || withQuestionBox.changed) {
             writeDesktopFolders(sane.folders);
-            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withTheqoo.layout));
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withQuestionBox.layout));
           }
           setDesktopReady(true);
           return;
@@ -1558,8 +1560,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
           const withTwitter = ensureNativeTwitterIcon(withSms.layout, hydratedWidgets, hydratedDock, hydratedFolders);
           const withPhone = ensureNativePhoneIcon(withTwitter.layout, hydratedWidgets, hydratedDock, hydratedFolders);
           const withTheqoo = ensureNativeTheqooIcon(withPhone.layout, hydratedWidgets, hydratedDock, hydratedFolders);
-          setLayout(withTheqoo.layout);
-          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withTheqoo.layout));
+          const withQuestionBox = ensureNativeQuestionBoxIcon(withTheqoo.layout, hydratedWidgets, hydratedDock, hydratedFolders);
+          setLayout(withQuestionBox.layout);
+          kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(withQuestionBox.layout));
           kvRemove(ICON_LAYOUT_STORAGE_KEY_V1);
           setDesktopReady(true);
           return;
@@ -3982,13 +3985,16 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       return <SmsApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
     if (activeApp === "phone") {
-      return <PhoneApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+      return <PhonePlaceholderApp icon={ICONS.phone} onClose={() => setActiveApp(null)} />;
     }
     if (activeApp === "twitter") {
       return <TwitterApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
     if (activeApp === "theqoo") {
       return <TheqooApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+    if (activeApp === "question_box") {
+      return <QuestionBoxApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
 
     if (activeApp === "characters") {

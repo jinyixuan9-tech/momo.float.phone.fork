@@ -109,11 +109,12 @@ export function createDefaultDesktopIconLayout(_widgets: WidgetInstance[] = []):
       col: (i % GRID_COLS) + 1,
     })),
     // 第三页：右半边 2×2（第 4~5 行、第 3~4 列），左半边留给日历组件
-    page3: PAGE_3_DEFAULT.map((id, i) => ({
+    page3: PAGE_3_DEFAULT.filter(id => id !== "question_box").map((id, i) => ({
       id,
       row: 4 + Math.floor(i / 2),
       col: 3 + (i % 2),
     })),
+    page4: [{ id: "question_box", row: 1, col: 1 }],
   } as DesktopIconLayout;
 }
 
@@ -418,6 +419,25 @@ export function ensureNativePhoneIcon(
     const cells = Array.from({ length: GRID_ROWS * GRID_COLS }, (_, i) => [Math.floor(i / GRID_COLS) + 1, i % GRID_COLS + 1]);
     const cell = cells.find(([row,col]) => !occupied[row-1]?.[col-1]); if (!cell) continue;
     next[key] = [...icons, { id: "phone", row: cell[0], col: cell[1] }]; return { layout: next, changed: true };
+  }
+  return { layout, changed: false };
+}
+
+/** Insert the native Theqoo forum app into older persisted layouts. */
+export function ensureNativeQuestionBoxIcon(
+  layout: DesktopIconLayout, widgets: WidgetInstance[] = [], dock: DesktopIconId[] = [], folders: DesktopFolderMap = {},
+): { layout: DesktopIconLayout; changed: boolean } {
+  const present = new Set<string>(dock);
+  for (const item of getDesktopIconLayoutItems(layout)) present.add(item.id);
+  for (const folder of Object.values(folders)) folder.icons.forEach(id => present.add(id));
+  if (present.has("question_box")) return { layout, changed: false };
+  const next = { ...layout } as DesktopIconLayout;
+  for (let page = 3; page <= 50; page++) {
+    const key = getDesktopPageKey(page); const icons = next[key] ?? []; const occupied = buildWidgetOccupancy(widgets, page);
+    for (const icon of icons) if (icon.row >= 1 && icon.row <= GRID_ROWS && icon.col >= 1 && icon.col <= GRID_COLS) occupied[icon.row - 1][icon.col - 1] = true;
+    const cells = Array.from({ length: GRID_ROWS * GRID_COLS }, (_, i) => [Math.floor(i / GRID_COLS) + 1, i % GRID_COLS + 1]);
+    const cell = cells.find(([row,col]) => !occupied[row-1]?.[col-1]); if (!cell) continue;
+    next[key] = [...icons, { id: "question_box", row: cell[0], col: cell[1] }]; return { layout: next, changed: true };
   }
   return { layout, changed: false };
 }

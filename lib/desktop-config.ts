@@ -9,6 +9,7 @@ export type IconId =
   | "phone"
   | "twitter"
   | "theqoo"
+  | "question_box"
   | "diary"
   | "music"
   | "reading"
@@ -70,7 +71,7 @@ export const PAGE_2_DEFAULT: IconId[] = [
 ];
 
 // 第三页默认图标：右半边 2×2 排布（左半边留给日历组件），位置见 createDefaultDesktopIconLayout
-export const PAGE_3_DEFAULT: IconId[] = ["qa", "resource_hub", "sms", "twitter", "phone", "theqoo"];
+export const PAGE_3_DEFAULT: IconId[] = ["qa", "resource_hub", "sms", "twitter", "phone", "theqoo", "question_box"];
 
 export const DOCK_DEFAULT: IconId[] = ["settings", "theme", "resources", "characters"];
 
@@ -83,6 +84,7 @@ export const ICONS: Record<IconId, IconMeta> = {
   phone: { id: "phone", label: "电话", tone: "#34c759", placeholder: false },
   twitter: { id: "twitter", label: "推特", tone: "#1d9bf0", placeholder: false },
   theqoo: { id: "theqoo", label: "Theqoo", tone: "#315777", placeholder: false },
+  question_box: { id: "question_box", label: "提问箱", tone: "#d9c8fa", placeholder: false },
   diary: { id: "diary", label: "手记", tone: "var(--c-icon-violet)", placeholder: false },
   music: { id: "music", label: "\u97F3\u4E50", tone: "var(--c-icon-coral)", placeholder: false },
   reading: { id: "reading", label: "\u9605\u8BFB", tone: "var(--c-icon-amber)", placeholder: false },
