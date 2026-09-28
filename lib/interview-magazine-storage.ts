@@ -1,5 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import type { InterviewProgramme } from "./interview-magazine-types";
+import { BUILTIN_INTERVIEW_PROGRAMMES, type InterviewHost, type InterviewProgramme } from "./interview-magazine-types";
 import {
   INTERVIEW_MAGAZINE_DEFAULT_HOST_PROMPT,
   INTERVIEW_MAGAZINE_DEFAULT_MEMORY_PROMPT,
@@ -16,15 +16,40 @@ const INTERVIEW_DRAFTS_KEY = "ai_phone_interview_magazine_drafts_v1";
 const INTERVIEW_HOST_PROMPT_KEY = "ai_phone_interview_magazine_host_prompt_v1";
 const INTERVIEW_MEMORY_PROMPT_KEY = "ai_phone_interview_magazine_memory_prompt_v1";
 const INTERVIEW_PROGRAMMES_KEY = "ai_phone_interview_magazine_programmes_v1";
+const INTERVIEW_HOSTS_KEY = "ai_phone_interview_magazine_hosts_v2";
 registerKvMigration(INTERVIEW_PROGRAMMES_KEY);
+registerKvMigration(INTERVIEW_HOSTS_KEY);
+
+export function loadInterviewHostOverrides(): InterviewHost[] {
+  try {
+    const parsed: unknown = JSON.parse(kvGet(INTERVIEW_HOSTS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is InterviewHost => Boolean(item && typeof item.id === "string" && typeof item.name === "string" && typeof item.language === "string" && typeof item.direction === "string")) : [];
+  } catch { return []; }
+}
+
+export function saveInterviewHostOverrides(hosts: InterviewHost[]): void {
+  kvSet(INTERVIEW_HOSTS_KEY, JSON.stringify(hosts));
+}
 
 export function loadInterviewProgrammes(): InterviewProgramme[] {
   try {
     const raw = kvGet(INTERVIEW_PROGRAMMES_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((item): item is InterviewProgramme =>
+    const saved = Array.isArray(parsed) ? parsed.filter((item): item is InterviewProgramme =>
       Boolean(item && typeof item.id === "string" && typeof item.name === "string" && typeof item.direction === "string")) : [];
-  } catch { return []; }
+    const legacyHost = loadInterviewHostPrompt();
+    const legacyMemory = loadInterviewMemoryPrompt();
+    return [...BUILTIN_INTERVIEW_PROGRAMMES.map((builtin) => {
+      const edited = saved.find(item => item.id === builtin.id);
+      return {
+        ...builtin,
+        ...(builtin.id === "interview" && !edited && legacyHost !== INTERVIEW_MAGAZINE_DEFAULT_HOST_PROMPT ? { hostPrompt: legacyHost } : {}),
+        ...(builtin.id === "interview" && !edited && legacyMemory !== INTERVIEW_MAGAZINE_DEFAULT_MEMORY_PROMPT ? { memoryPrompt: legacyMemory } : {}),
+        ...edited,
+        hostRule: builtin.hostRule,
+      };
+    }), ...saved.filter((item) => item.id.startsWith("programme_"))];
+  } catch { return BUILTIN_INTERVIEW_PROGRAMMES; }
 }
 
 export function saveInterviewProgrammes(programmes: InterviewProgramme[]): void {

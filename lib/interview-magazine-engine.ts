@@ -19,11 +19,12 @@ import {
   resolveUserIdentity,
 } from "./settings-storage";
 import type { ApiConfig, PresetConfig, RegexConfig, WorldBookConfig } from "./settings-types";
-import { loadInterviewHostPrompt, loadInterviewMemoryPrompt } from "./interview-magazine-storage";
+import { loadInterviewMemoryPrompt } from "./interview-magazine-storage";
 import {
   INTERVIEW_MAGAZINE_APP_ID,
   INTERVIEW_MAGAZINE_HOST_NAME,
   BUILTIN_INTERVIEW_HOSTS,
+  type InterviewHost,
   type InterviewProgramme,
   type InterviewArticle,
   type InterviewCharacterSnapshot,
@@ -48,6 +49,9 @@ type InterviewContext = {
   includeUser: boolean;
   hostCharacterId?: string;
   hostName: string;
+  hostPreset?: InterviewHost;
+  hostPresent: boolean;
+  hostCharacterIds: string[];
   guests: InterviewGuestContext[];
   primaryGuest: InterviewGuestContext;
   character: Character;
@@ -73,7 +77,7 @@ type HostQuestionResult = {
   reactions?: string[];
 };
 
-export type InterviewRunOptions = { programme?: InterviewProgramme; hostCharacterId?: string; hostPresetId?: string; includeUser?: boolean; audienceEnabled?: boolean };
+export type InterviewRunOptions = { programme?: InterviewProgramme; hostCharacterId?: string; hostCharacterIds?: string[]; hostPresetId?: string; hostOverrides?: InterviewHost[]; hostPresent?: boolean; includeUser?: boolean; audienceEnabled?: boolean };
 
 function createId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -118,7 +122,7 @@ function parseJsonLike<T>(raw: string): T | null {
 export function makeInterviewMessage(
   role: InterviewMessage["role"],
   content: string,
-  options?: Pick<InterviewMessage, "kind" | "target" | "targetCharacterId" | "targetCharacterName" | "speakerCharacterId" | "speakerName">,
+  options?: Pick<InterviewMessage, "kind" | "target" | "targetCharacterId" | "targetCharacterName" | "speakerCharacterId" | "speakerName" | "audienceSource">,
 ): InterviewMessage {
   return {
     id: createId("imsg"),
@@ -130,6 +134,7 @@ export function makeInterviewMessage(
     targetCharacterName: options?.targetCharacterName,
     speakerCharacterId: options?.speakerCharacterId,
     speakerName: options?.speakerName,
+    audienceSource: options?.audienceSource,
     createdAt: new Date().toISOString(),
   };
 }
@@ -157,7 +162,8 @@ export function formatInterviewTranscript(
   return messages
     .map((message) => {
       if (message.role === "host") return `主持人 ${message.speakerName || INTERVIEW_MAGAZINE_HOST_NAME}：${message.content}`;
-      if (message.role === "audience") return `听众 ${message.speakerName || "匿名"}：${message.content}`;
+      if (message.role === "audience") return `匿名听众：${message.content}`;
+      if (message.role === "direction") return `幕后导播提示（不公开，不代表用户在场）：${message.content}`;
       if (message.role === "character") {
         const speakerName = message.speakerName
           || (message.speakerCharacterId ? characterNameById?.[message.speakerCharacterId] : undefined)
@@ -266,14 +272,19 @@ export function loadInterviewContext(characterId: string): InterviewContext {
 
 export function loadInterviewContextForGuests(characterIds: string[], userIdentityId?: string, options: InterviewRunOptions = {}): InterviewContext {
   const ids = normalizeCharacterIds(characterIds);
-  if (ids.length === 0) throw new ChatEngineError("请选择至少一位有效角色。");
   const allCharacters = loadCharacters();
+  if (ids.length === 0 && !options.includeUser) throw new ChatEngineError("请至少邀请一位角色或用户。");
+  // An existing character binding supplies the programme API when the user is the only guest.
+  // This character never enters the cast or transcript.
+  const fallbackCharacter = allCharacters.find(character => Boolean(resolveBinding(loadBindingConfig(), character.id, INTERVIEW_MAGAZINE_APP_ID).apiConfigId)) || allCharacters[0];
+  const apiIds = ids.length ? ids : fallbackCharacter ? [fallbackCharacter.id] : [];
+  if (!apiIds.length) throw new ChatEngineError("请先创建至少一位角色，为节目绑定 API。");
   const bindings = loadBindingConfig();
   const presets = loadPresets();
   const apiConfigs = loadApiConfigs();
   const allWorldBooks = loadWorldBooks();
   const allRegexes = loadRegexes();
-  const guests = ids.map((id) => {
+  const apiGuests = apiIds.map((id) => {
     const character = allCharacters.find((item) => item.id === id);
     if (!character) throw new ChatEngineError(`找不到受访角色：${id}`);
 
@@ -307,8 +318,10 @@ export function loadInterviewContextForGuests(characterIds: string[], userIdenti
     };
   });
 
-  const primaryGuest = guests[0];
+  const guests = ids.length ? apiGuests : [];
+  const primaryGuest = apiGuests[0];
   const hostGuest = guests.find((guest) => guest.character.id === options.hostCharacterId);
+  const hostPreset = options.hostOverrides?.find((host) => host.id === options.hostPresetId) || BUILTIN_INTERVIEW_HOSTS.find((host) => host.id === options.hostPresetId);
   const userIdentity = resolveInterviewUserIdentity(ids, userIdentityId);
   const userSnapshot = snapshotUserIdentity(userIdentity);
   const guestNames = guests.map((guest) => guest.character.name);
@@ -322,8 +335,11 @@ export function loadInterviewContextForGuests(characterIds: string[], userIdenti
   return {
     programme: options.programme,
     includeUser: options.includeUser !== false,
+    hostPresent: options.hostPresent !== false,
+    hostPreset,
+    hostCharacterIds: options.hostCharacterIds || (options.hostCharacterId ? [options.hostCharacterId] : []),
     hostCharacterId: hostGuest?.character.id,
-    hostName: hostGuest?.character.name || BUILTIN_INTERVIEW_HOSTS.find(host => host.id === options.hostPresetId)?.name || INTERVIEW_MAGAZINE_HOST_NAME,
+    hostName: options.hostPresent === false ? "无主持人" : hostGuest?.character.name || hostPreset?.name || INTERVIEW_MAGAZINE_HOST_NAME,
     guests,
     primaryGuest,
     character: primaryGuest.character,
@@ -332,7 +348,7 @@ export function loadInterviewContextForGuests(characterIds: string[], userIdenti
     userSnapshot,
     userName: userSnapshot?.name || "用户",
     guestNames,
-    guestListText: joinChineseNames(guestNames),
+    guestListText: guestNames.length ? joinChineseNames(guestNames) : userSnapshot?.name || "用户",
     worldBooks: primaryGuest.worldBooks,
     worldBookSnapshot: primaryGuest.worldBookSnapshot,
     guestSnapshots,
@@ -405,9 +421,9 @@ function buildHostBriefing(params: {
     `本期主题：${theme}`,
     `当前采访阶段：${phase}`,
     `本期嘉宾：${context.guestListText}`,
-    `用户参与：${context.includeUser ? context.userName : "本期不参与，不要向用户提问或描述用户在场"}`,
-    `栏目：${context.programme?.name || "在场·人物"}；风格：${context.programme?.direction || "人物对谈"}`,
-    `主持：${context.hostName}`,
+    `用户参与：${context.includeUser ? context.userName : "本期不以嘉宾身份参与；匿名弹幕不能证明用户在场，不要向用户提问或描述用户在场"}`,
+    `栏目：${context.programme?.name || "在场·人物志"}；风格：${context.programme?.direction || "人物对谈"}`,
+    `主持：${context.hostPresent ? context.hostCharacterIds.length ? context.hostCharacterIds.map(id => context.guests.find(g => g.character.id === id)?.character.name).filter(Boolean).join("、") : context.hostName : "本期无主持人，由参与者自由对谈"}`,
     "",
     "<guest_reference>",
     formatGuestCards(context),
@@ -463,19 +479,27 @@ function expandMemoryPromptMacros(prompt: string, context: InterviewContext): st
 
 function buildHostSystemPrompt(context: InterviewContext, lines: string[]): string {
   return [
-    context.hostCharacterId
-      ? `你是${context.hostName}，正在主持自己开设的「${context.programme?.name || "在场"}」。严格依据你的角色设定、本人背景和关系，像自己说话，不要扮演${INTERVIEW_MAGAZINE_HOST_NAME}。${context.guests.find(g => g.character.id === context.hostCharacterId)?.character.persona || ""}`
-      : context.hostName === INTERVIEW_MAGAZINE_HOST_NAME
-        ? expandInterviewPromptMacros(context.includeUser ? loadInterviewHostPrompt() : loadInterviewHostPrompt()
-          .replace(/，以及作为共同受访者参与对谈的\{\{user\}\}/g, "")
-          .replace(/和\{\{user\}\}/g, ""), context)
-        : `你是「在场」主持人${context.hostName}。${BUILTIN_INTERVIEW_HOSTS.find(host => host.name === context.hostName)?.direction || "自然主持"}。你负责组织节目、介绍主题、向参与角色提问，不能替他们回答。`,
+    !context.hostPresent ? "本期没有主持人。你仅负责幕后生成必要的节目组织内容或回顾，不能在公开实录中冒充主持人发言。" : context.hostCharacterId
+      ? `你是${context.hostName}，正在主持自己开设的「${context.programme?.name || "在场"}」。严格依据本人角色设定、背景和关系说话。${context.guests.find(g => g.character.id === context.hostCharacterId)?.character.persona || ""}。${context.programme?.hostStyle || ""}`
+      : `你是「在场」主持人${context.hostName}。${context.hostPreset?.direction || context.programme?.hostStyle || "自然主持"}。你只负责组织节目、串联发言，不能替嘉宾回答。`,
     `栏目风格：${context.programme?.direction || "具体自然的人物对谈"}。${context.includeUser ? "用户参加，可向用户提问。" : "用户不参与本期录制，不得向用户提问或声称用户在场。"}`,
-    context.hostCharacterId ? "主持人原话使用本人惯用语言；如非中文，intro 和 question 字段分别以「原文 | 中文翻译」输出。" : "",
+    `栏目主持提示词：${context.programme?.hostPrompt || "根据栏目风格主持，尊重真实对话。"}`,
+    `主持人的默认语言：${context.hostCharacterId ? "按角色人设自然使用" : context.hostPreset?.language || "按参与者所用语言自然使用"}。在沟通不通时自然调整，不强制嘉宾改语言。主持人的 intro、question 等台词如非中文，分别输出「原文 | 准确中文译文」；不要朗读译文。`,
     "",
     ...lines,
     "输出必须是 JSON，不要 markdown，不要解释。",
   ].join("\n");
+}
+
+function hostFallback(context: InterviewContext, theme: string, subject: string, kind: "intro" | "question"): string {
+  const language = context.hostPreset?.language || "";
+  if (language.includes("韩")) return kind === "intro"
+    ? `안녕하세요. 오늘은 ${theme}에 대해 천천히 이야기해 볼게요. | 大家好，今天我们慢慢聊聊「${theme}」。`
+    : `${subject} 씨, ${theme}라고 하면 가장 먼저 떠오르는 장면이 있나요? | ${subject}，说到「${theme}」，你最先想到的是哪个画面？`;
+  if (language.includes("日")) return kind === "intro"
+    ? `こんばんは。今日は「${theme}」について、気楽に話してみましょう。 | 晚上好，今天轻松聊聊「${theme}」。`
+    : `${subject}さん、「${theme}」と聞いて、最初に思い浮かぶのは何ですか？ | ${subject}，听到「${theme}」，你最先想到什么？`;
+  return kind === "intro" ? `欢迎来到《在场》。本期聊聊「${theme}」。` : `${subject}，关于「${theme}」，你最先想到什么？`;
 }
 
 export async function generateHostOpening(
@@ -497,20 +521,20 @@ export async function generateHostOpening(
       "",
       "请生成开场：",
       `- intro：30-60 字，符合「${context.programme?.name || "人物对谈"}」的开场白，点出主题和嘉宾${context.includeUser ? "与参与的用户" : ""}。`,
-      "- question：第一个问嘉宾的问题，35-70 字，具体、锋利、不套话。",
-      `- targetGuest：从本期参与者中选择一个回应者，优先邀请其他嘉宾：${(context.guestNames.filter(name => name !== context.hostName).length ? context.guestNames.filter(name => name !== context.hostName) : context.guestNames).join("、")}。`,
+      `- question：第一个问${context.guests.length ? "嘉宾" : "用户"}的问题，35-70 字，符合本栏目的气氛，不套话。`,
+      context.guests.length ? `- targetGuest：从本期参与角色中选择一个回应者：${context.guestNames.join("、")}。` : "- 本期只有用户作为受访者；直接向用户提问，targetGuest 留空。",
       "",
       '返回格式：{"intro":"...","question":"...","targetGuest":"..."}',
     ].join("\n"),
   );
-  const targetGuest = resolveTargetGuest(context, result?.targetCharacterId || result?.targetGuest);
+  const targetGuest = context.guests.length ? resolveTargetGuest(context, result?.targetCharacterId || result?.targetGuest) : undefined;
 
   return {
     context,
-    intro: cleanText(result?.intro, 220) || `欢迎来到《在场》。本期主题是「${theme}」，我们从一个无法绕开的细节开始。`,
-    question: cleanText(result?.question, 220) || `${targetGuest.character.name}，关于「${theme}」，你最先想到的是哪个具体瞬间？`,
-    targetCharacterId: targetGuest.character.id,
-    targetCharacterName: targetGuest.character.name,
+    intro: cleanText(result?.intro, 220) || hostFallback(context, theme, context.userName, "intro"),
+    question: cleanText(result?.question, 220) || hostFallback(context, theme, targetGuest?.character.name || context.userName, "question"),
+    targetCharacterId: targetGuest?.character.id || "",
+    targetCharacterName: targetGuest?.character.name || "",
   };
 }
 
@@ -525,8 +549,8 @@ export async function generateHostQuestion(params: {
   options?: InterviewRunOptions;
 }): Promise<{ question: string; targetCharacterId?: string; targetCharacterName?: string; reactions: string[] }> {
   const context = loadInterviewContextForGuests(normalizeCharacterIds(params.characterIds), params.userIdentityId, params.options);
-  const fallbackGuest = resolveTargetGuest(context, undefined, params.fallbackTargetCharacterId);
-  const targetLabel = params.target === "character" ? fallbackGuest.character.name : context.userName;
+  const fallbackGuest = params.target === "character" ? resolveTargetGuest(context, undefined, params.fallbackTargetCharacterId) : undefined;
+  const targetLabel = params.target === "character" ? fallbackGuest?.character.name || "嘉宾" : context.userName;
   const briefing = buildHostBriefing({
     context,
     theme: params.theme,
@@ -545,12 +569,12 @@ export async function generateHostQuestion(params: {
       params.target === "character"
         ? `请提出下一问，提问对象需要是本期嘉宾之一。默认可问：${targetLabel}。`
         : `请提出下一问，提问对象：${targetLabel}。`,
-      "- 问题必须自然承接上一轮回答。",
+      "- 问题必须自然承接上一轮回答；若用户未回应，也可自然转向其他参与者，不要机械催答。",
       "- 30-70 字。",
       "- 避免“你怎么看”“有什么感受”这类泛问。",
       params.target === "user" ? "- 向用户提问时，要把嘉宾刚才的话转成用户可回应的个人经验或判断。" : "- 向嘉宾提问时，承接上一位说话者；如果用户不参与，不要提及用户。",
       params.target === "character" ? `- targetGuest：选择下一位回应者，优先邀请其他嘉宾：${(context.guestNames.filter(name => name !== context.hostName).length ? context.guestNames.filter(name => name !== context.hostName) : context.guestNames).join("、")}。` : "",
-      params.options?.audienceEnabled ? "- reactions：根据刚刚的发言模拟 0–2 条不同听众的简短实时弹幕，口语、自然、不要剧透；仅反应已说的话，不得加入角色未公开的隐私。" : "",
+      params.options?.audienceEnabled ? "- reactions：生成 0–5 条匿名听众实时弹幕，也可以一条不生成。弹幕正文写中文，可偶尔带翻译腔或韩语、日语、英语口癖；口癖不代表听众国籍。只反应已公开发言，不剧透、不泄露隐私。角色可以偶尔猜匿名弹幕是否来自用户，但绝不能确定，也不能把弹幕当成用户作为嘉宾在场。" : "",
       "",
       params.target === "character"
         ? '返回格式：{"question":"...","targetGuest":"...","reactions":["..."]}'
@@ -561,11 +585,23 @@ export async function generateHostQuestion(params: {
     ? resolveTargetGuest(context, result?.targetCharacterId || result?.targetGuest, params.fallbackTargetCharacterId)
     : undefined;
   return {
-    question: cleanText(result?.question, 240) || `${targetLabel}，你愿意从一个更具体的细节说起吗？`,
+    question: cleanText(result?.question, 240) || hostFallback(context, params.theme, targetLabel, "question"),
     targetCharacterId: targetGuest?.character.id,
     targetCharacterName: targetGuest?.character.name,
-    reactions: params.options?.audienceEnabled ? cleanArray(result?.reactions, 2, 100) : [],
+    reactions: params.options?.audienceEnabled ? cleanArray(result?.reactions, 5, 100).filter(text => /[\u3400-\u9fff]/u.test(text)) : [],
   };
+}
+
+export async function generateInterviewAudienceReactions(params: {
+  theme: string; characterIds: string[]; userIdentityId?: string;
+  transcript: InterviewMessage[]; options: InterviewRunOptions;
+}): Promise<string[]> {
+  if (!params.options.audienceEnabled || params.transcript.length === 0) return [];
+  const context = loadInterviewContextForGuests(params.characterIds, params.userIdentityId, params.options);
+  const result = await callHostJson<{ reactions?: string[] }>(context,
+    "你只生成电台匿名听众弹幕。根据节目刚刚公开的发言，可以生成 0–5 条，也可没有。正文全部中文，可偶尔带翻译腔或日韩英语口癖，但不得据此确定发言者的国籍或身份。不能说出未公开的角色隐私。返回 JSON。",
+    `${buildHostBriefing({ context, theme: params.theme, phase: "听众实时弹幕", transcript: params.transcript.slice(-9) })}\n返回格式：{"reactions":["..."]}`);
+  return cleanArray(result?.reactions, 5, 100).filter(text => /[\u3400-\u9fff]/u.test(text));
 }
 
 export async function generateCharacterInterviewAnswer(params: {
@@ -605,7 +641,7 @@ export async function generateCharacterInterviewAnswer(params: {
     interviewOtherGuests: getOtherGuestNames(context, guest.character.id),
     interviewQuestion: params.question,
     interviewTranscript: transcript,
-    interviewPhase: "嘉宾回答主持人问题",
+    interviewPhase: context.hostPresent ? "嘉宾参与电台对谈" : "无主持人，角色彼此自然接话，主动抛话题；不要假装有主持人",
     interviewRound: String(params.round),
     interviewUserAnswer: params.lastUserAnswer || "",
     interviewCharacterAnswerHistory: characterAnswerHistory,
@@ -615,6 +651,8 @@ export async function generateCharacterInterviewAnswer(params: {
     "在场采访双语要求：请以嘉宾本人自然会使用的语言回答，保留嘉宾原话。",
     "如果原话是韩语、日语、英语等非中文，整段输出必须是“原文 | 准确中文译文”，只使用一个竖线分隔，不要附加标签、动作或主持人的话。",
     "嘉宾自然使用中文时只输出中文原话，不重复翻译。问题、系统说明和记忆摘要不需要双语。",
+    `栏目：${context.programme?.name || "在场"}。风格：${context.programme?.direction || "自然对谈"}。${context.programme?.hostPrompt || ""}`,
+    `参与者：${context.guestListText}${context.includeUser ? `、${context.userName}` : ""}。${context.includeUser ? "用户可以不回答或连续说多句；不要强制用户每轮发言。" : "用户没有以嘉宾身份参加；匿名弹幕不等于用户在场。"}幕后导播提示只影响话题，不可以当作台上发言。若用户连续几次不说话，可偶尔自然地关心一句，不能每轮催促。`,
   ].join("\n") });
 
   const raw = await sendLLMRequest(
@@ -722,7 +760,7 @@ export async function previewInterviewMagazinePromptPayload(params: {
       phase: "采访结束，编辑部将实录整理为杂志专栏",
       transcript,
     });
-    const memoryPrompt = expandMemoryPromptMacros(loadInterviewMemoryPrompt(), context);
+    const memoryPrompt = expandMemoryPromptMacros(context.programme?.memoryPrompt || loadInterviewMemoryPrompt(), context);
     const messages: LLMMessage[] = [
       {
         role: "system",
@@ -808,11 +846,11 @@ export async function composeInterviewArticle(params: {
     context,
     theme: params.theme,
     phase: "本期录制结束，整理节目回顾与声音摘录",
-    transcript: params.transcript,
+    transcript: params.transcript.filter(message => message.role !== "direction"),
   });
   const memoryPrompt = context.includeUser
-    ? expandMemoryPromptMacros(loadInterviewMemoryPrompt(), context)
-    : "只依据本期实际发言者与实录总结主题和观点。不提及用户、共同受访者或 {{user}}；不要补造未参与者。";
+    ? expandMemoryPromptMacros(context.programme?.memoryPrompt || loadInterviewMemoryPrompt(), context)
+    : `${context.programme?.memoryPrompt || ""}只依据本期实际发言者与实录总结主题和观点。不把匿名弹幕猜测写成事实；不将幕后导播提示当作用户在场。`;
   const result = await callHostJson<Partial<InterviewArticle>>(
     context,
     buildHostSystemPrompt(context, [

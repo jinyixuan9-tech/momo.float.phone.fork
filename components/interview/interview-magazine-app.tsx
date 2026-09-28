@@ -27,6 +27,7 @@ import {
   composeInterviewArticle,
   formatInterviewTranscript,
   generateCharacterInterviewAnswer,
+  generateInterviewAudienceReactions,
   generateHostOpening,
   generateHostQuestion,
   makeInterviewMessage,
@@ -36,28 +37,25 @@ import {
   deleteInterviewIssue,
   getNextInterviewIssueNumber,
   loadInterviewDrafts,
-  loadInterviewHostPrompt,
+  loadInterviewHostOverrides,
   loadInterviewIssues,
-  loadInterviewMemoryPrompt,
   loadInterviewProgrammes,
   saveInterviewProgrammes,
   saveInterviewDraft,
-  saveInterviewHostPrompt,
+  saveInterviewHostOverrides,
   saveInterviewIssue,
-  saveInterviewMemoryPrompt,
 } from "@/lib/interview-magazine-storage";
 import {
   deleteInterviewMagazineProjectionEventForIssue,
   recordInterviewMagazineProjectionEvent,
 } from "@/lib/interview-magazine-memory";
 import {
-  INTERVIEW_MAGAZINE_DEFAULT_HOST_PROMPT,
-  INTERVIEW_MAGAZINE_DEFAULT_MEMORY_PROMPT,
   INTERVIEW_MAGAZINE_HOST_NAME,
   INTERVIEW_MAGAZINE_TITLE,
   INTERVIEW_MAGAZINE_TITLE_CN,
   BUILTIN_INTERVIEW_PROGRAMMES,
   BUILTIN_INTERVIEW_HOSTS,
+  type InterviewHost,
   type InterviewProgramme,
   type InterviewDraft,
   type InterviewDraftStatus,
@@ -75,6 +73,7 @@ type Props = {
 type Screen = "home" | "setup" | "interview" | "generating" | "article";
 type InterviewPhase = "opening" | "host" | "character" | "user" | "paused" | "done" | "error";
 type InterviewResumeAction =
+  | { type: "next"; baseMessages: InterviewMessage[]; round: number; currentTheme: string }
   | { type: "opening"; theme: string }
   | { type: "awaitUser" }
   | { type: "finish"; baseMessages: InterviewMessage[] }
@@ -135,10 +134,11 @@ function hasMixedIdentityBindings(characterIds: string[]): boolean {
 }
 
 function getMaxCharacterTurns(count: number): number {
-  return Math.min(6, Math.max(3, count * 2));
+  return Math.min(12, Math.max(6, count * 3));
 }
 
 function getIssueGuestNames(issue: InterviewIssue): string[] {
+  if (issue.characterIds && issue.characterIds.length === 0) return [];
   if (issue.characterNames && issue.characterNames.length > 0) return issue.characterNames;
   if (issue.guestSnapshots && issue.guestSnapshots.length > 0) {
     return issue.guestSnapshots.map((guest) => guest.characterName);
@@ -147,18 +147,18 @@ function getIssueGuestNames(issue: InterviewIssue): string[] {
 }
 
 function getIssueParticipantText(issue: InterviewIssue): string {
-  return `${getIssueGuestNames(issue).join("、")}${issue.includeUser === false ? "" : ` · ${issue.userName || "共同受访者"}`}`;
+  return [getIssueGuestNames(issue).join("、"), issue.includeUser === false ? "" : issue.userName || "用户"].filter(Boolean).join(" · ");
 }
 
 function getDraftParticipantText(draft: InterviewDraft): string {
   const names = draft.characterNames.length > 0 ? draft.characterNames : draft.characterIds;
-  return `${names.join("、") || "嘉宾"}${draft.userName ? ` · ${draft.userName}` : ""}`;
+  return [names.join("、"), draft.includeUser === false ? "" : draft.userName || "用户"].filter(Boolean).join(" · ");
 }
 
 function getDraftStatusText(status: InterviewDraftStatus): string {
   if (status === "error") return "录制中断";
   if (status === "awaiting_user") return "等待回应";
-  if (status === "done") return "待成刊";
+  if (status === "done") return "待生成节目回顾";
   return "已暂停";
 }
 
@@ -252,26 +252,30 @@ export function InterviewMagazineApp({ onClose }: Props) {
   const [activeIssue, setActiveIssue] = useState<InterviewIssue | null>(null);
   const [theme, setTheme] = useState("");
   const [programmes, setProgrammes] = useState<InterviewProgramme[]>([]);
+  const [hostOverrides, setHostOverrides] = useState<InterviewHost[]>([]);
   const [programmeId, setProgrammeId] = useState("interview");
   const [includeUser, setIncludeUser] = useState(false);
   const [audienceEnabled, setAudienceEnabled] = useState(true);
   const [hostCharacterId, setHostCharacterId] = useState("");
-  const [hostPresetId, setHostPresetId] = useState("chen");
-  const selectedHostName = hostCharacterId ? characters.find(c => c.id === hostCharacterId)?.name || INTERVIEW_MAGAZINE_HOST_NAME : BUILTIN_INTERVIEW_HOSTS.find(item => item.id === hostPresetId)?.name || INTERVIEW_MAGAZINE_HOST_NAME;
-  const programme = [...BUILTIN_INTERVIEW_PROGRAMMES, ...programmes].find(p => p.id === programmeId) || BUILTIN_INTERVIEW_PROGRAMMES[0];
-  const runOptions = { programme, includeUser, hostCharacterId: hostCharacterId || undefined, hostPresetId, audienceEnabled };
+  const [hostCharacterIds, setHostCharacterIds] = useState<string[]>([]);
+  const [hostPresetId, setHostPresetId] = useState("jian");
+  const programme = programmes.find(p => p.id === programmeId) || BUILTIN_INTERVIEW_PROGRAMMES.find(p => p.id === programmeId) || BUILTIN_INTERVIEW_PROGRAMMES[0];
+  const availableHosts = [...BUILTIN_INTERVIEW_HOSTS, ...(!BUILTIN_INTERVIEW_PROGRAMMES.some(item => item.id === programmeId) ? [{ id: `host_${programmeId}`, programmeId, name: "栏目主持人", language: "韩语", direction: programme.hostStyle || programme.direction }] : [])].map(host => hostOverrides.find(override => override.id === host.id) || host).filter(host => host.programmeId === programmeId);
+  const hostPresent = programme.hostRule === "required" || (programme.hostRule !== "none" && (hostCharacterId !== "none"));
+  const effectiveHostId = availableHosts.some(host => host.id === hostPresetId) ? hostPresetId : availableHosts[0]?.id || hostPresetId;
+  const selectedHostName = !hostPresent ? "无主持人" : hostCharacterId && hostCharacterId !== "none" ? hostCharacterIds.length ? hostCharacterIds.map(id => characters.find(c => c.id === id)?.name).filter(Boolean).join("、") : characters.find(c => c.id === hostCharacterId)?.name || INTERVIEW_MAGAZINE_HOST_NAME : availableHosts.find(item => item.id === effectiveHostId)?.name || programme.name;
+  const runOptions = { programme, includeUser, hostPresent, hostCharacterId: hostCharacterId && hostCharacterId !== "none" ? hostCharacterId : undefined, hostCharacterIds, hostPresetId: effectiveHostId, hostOverrides, audienceEnabled };
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<string[]>([]);
   const [userIdentityId, setUserIdentityId] = useState("");
   const [messages, setMessages] = useState<InterviewMessage[]>([]);
   const [phase, setPhase] = useState<InterviewPhase>("opening");
   const [pendingLabel, setPendingLabel] = useState("");
   const [userInput, setUserInput] = useState("");
+  const [inputMode, setInputMode] = useState<"speech" | "barrage" | "direction">("speech");
   const [error, setError] = useState("");
   const [resumeAction, setResumeAction] = useState<InterviewResumeAction | null>(null);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [characterRounds, setCharacterRounds] = useState(0);
-  const [hostPrompt, setHostPrompt] = useState(INTERVIEW_MAGAZINE_DEFAULT_HOST_PROMPT);
-  const [memoryPrompt, setMemoryPrompt] = useState(INTERVIEW_MAGAZINE_DEFAULT_MEMORY_PROMPT);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composeRunRef = useRef(0);
   const resumeActionRef = useRef<InterviewResumeAction | null>(null);
@@ -280,9 +284,8 @@ export function InterviewMagazineApp({ onClose }: Props) {
   useEffect(() => {
     setIssues(loadInterviewIssues());
     setDrafts(loadInterviewDrafts());
-    setHostPrompt(loadInterviewHostPrompt());
     setProgrammes(loadInterviewProgrammes());
-    setMemoryPrompt(loadInterviewMemoryPrompt());
+    setHostOverrides(loadInterviewHostOverrides());
     const loadedCharacters = loadCharacters();
     const loadedIdentities = loadUserIdentities();
     setCharacters(loadedCharacters);
@@ -303,7 +306,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
   }, [selectedCharacterIds, userIdentities, userIdentityId]);
 
   useEffect(() => {
-    if (hostCharacterId && !selectedCharacterIds.includes(hostCharacterId)) setHostCharacterId("");
+    if (hostCharacterId && hostCharacterId !== "none" && !selectedCharacterIds.includes(hostCharacterId)) { setHostCharacterId(""); setHostCharacterIds([]); }
   }, [hostCharacterId, selectedCharacterIds]);
 
   const activeCharacters = useMemo(
@@ -314,12 +317,12 @@ export function InterviewMagazineApp({ onClose }: Props) {
   );
 
   const activeCharacter = activeCharacters[0] ?? null;
-  const maxCharacterTurns = getMaxCharacterTurns(selectedCharacterIds.length);
+  const maxCharacterTurns = getMaxCharacterTurns(Math.max(1, selectedCharacterIds.length));
 
   const bgImageUrl = activeIssue?.guestSnapshots?.[0]?.characterSnapshot?.avatar
     || activeIssue?.characterSnapshot?.avatar
     || activeCharacter?.avatar
-    || characters[0]?.avatar;
+    || (activeIssue?.characterIds?.length === 0 || selectedCharacterIds.length === 0 ? null : characters[0]?.avatar);
 
   const resetDraft = () => {
     setTheme("");
@@ -334,13 +337,25 @@ export function InterviewMagazineApp({ onClose }: Props) {
     setCharacterRounds(0);
   };
 
-  const saveProgramme = (name: string, description: string, direction: string) => {
-    const custom = { id: `programme_${Date.now()}`, name: name.trim(), description: description.trim(), direction: direction.trim() };
+  const saveProgramme = (name: string, description: string, direction: string, hostRule: InterviewProgramme["hostRule"], characterRadio: boolean, hostStyle: string) => {
+    const custom: InterviewProgramme = { id: `programme_${Date.now()}`, name: name.trim(), description: description.trim(), direction: direction.trim(), hostRule, characterRadio, hostStyle: hostStyle.trim(), hostPrompt: direction.trim(), memoryPrompt: "用第三人称总结实际播出的话题、参与者发言和关系变化；用户没有作为嘉宾参与时不要把用户写成嘉宾。不要编造未发生的经历，匿名弹幕的身份猜测不得写成事实。" };
     if (!custom.name || !custom.direction) return;
     const next = [...programmes, custom];
     saveInterviewProgrammes(next);
     setProgrammes(next);
     setProgrammeId(custom.id);
+  };
+
+  const updateProgramme = (updated: InterviewProgramme) => {
+    const next = [...programmes.filter(item => item.id !== updated.id), updated];
+    saveInterviewProgrammes(next);
+    setProgrammes(next);
+  };
+
+  const updateHost = (updated: InterviewHost) => {
+    const next = [...hostOverrides.filter(item => item.id !== updated.id), updated];
+    saveInterviewHostOverrides(next);
+    setHostOverrides(next);
   };
 
   const removeProgramme = (id: string) => {
@@ -391,7 +406,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
 
   const createCurrentDraft = (status = resolveDraftStatus()): InterviewDraft | null => {
     const trimmedTheme = theme.trim();
-    if (!trimmedTheme || selectedCharacterIds.length === 0) return null;
+    if (!trimmedTheme || (selectedCharacterIds.length === 0 && !includeUser)) return null;
     const previousDraft = activeDraftId ? drafts.find((draft) => draft.id === activeDraftId) : null;
     const now = new Date().toISOString();
     const action = status === "awaiting_user"
@@ -405,6 +420,8 @@ export function InterviewMagazineApp({ onClose }: Props) {
       programme,
       hostCharacterId: hostCharacterId || undefined,
       hostPresetId,
+      hostOverrides,
+      hostCharacterIds,
       includeUser,
       audienceEnabled,
       characterIds: selectedCharacterIds,
@@ -447,7 +464,8 @@ export function InterviewMagazineApp({ onClose }: Props) {
     setTheme(draft.theme);
     setProgrammeId(draft.programme?.id || "interview");
     setHostCharacterId(draft.hostCharacterId || "");
-    setHostPresetId(draft.hostPresetId || "chen");
+    setHostPresetId(draft.hostPresetId || "jian");
+    setHostCharacterIds(draft.hostCharacterIds || (draft.hostCharacterId ? [draft.hostCharacterId] : []));
     setIncludeUser(draft.includeUser !== false);
     setAudienceEnabled(draft.audienceEnabled !== false);
     setSelectedCharacterIds(draft.characterIds);
@@ -455,6 +473,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
     setMessages(draft.transcript);
     setCharacterRounds(draft.characterRounds);
     setUserInput(draft.userInput || "");
+    setInputMode(draft.includeUser === false ? "barrage" : "speech");
     setError(draft.error || "");
     resumeActionRef.current = action;
     setResumeAction(action);
@@ -491,310 +510,153 @@ export function InterviewMagazineApp({ onClose }: Props) {
   };
 
   const getNextCharacterId = (currentCharacterId?: string): string => {
-    const guests = selectedCharacterIds.filter(id => id !== hostCharacterId);
+    const guests = selectedCharacterIds.filter(id => !hostCharacterIds.includes(id));
     const candidates = guests.length ? guests : selectedCharacterIds;
     if (candidates.length === 0) return "";
     const currentIndex = currentCharacterId ? candidates.indexOf(currentCharacterId) : -1;
     return candidates[(currentIndex + 1 + candidates.length) % candidates.length];
   };
 
+  const audienceMessages = (reactions: string[]) => reactions.slice(0, 5).map(content => makeInterviewMessage("audience", content, { speakerName: "匿名", audienceSource: "simulated" }));
+
+  const settleTurn = async (baseMessages: InterviewMessage[], round: number, runId: number, reactions?: string[]) => {
+    if (!isInterviewRunCurrent(runId)) return;
+    let generated = reactions || [];
+    if (!reactions && audienceEnabled) {
+      try { generated = await generateInterviewAudienceReactions({ theme, characterIds: selectedCharacterIds, userIdentityId, transcript: baseMessages, options: runOptions }); }
+      catch { generated = []; } // A reaction request must not interrupt the recording.
+    }
+    if (!isInterviewRunCurrent(runId)) return;
+    const next = [...baseMessages, ...audienceMessages(generated)];
+    setMessages(next);
+    setCharacterRounds(round);
+    setPendingLabel("");
+    if (round >= maxCharacterTurns) {
+      setPhase("done");
+      clearResumeAction();
+    } else {
+      setPhase("user");
+      armResumeAction({ type: "next", baseMessages: next, round, currentTheme: theme });
+    }
+  };
+
+  const runCharacterAnswer = async (
+    question: string, baseMessages: InterviewMessage[], round: number,
+    answeringCharacterId: string, lastUserAnswer?: string, currentTheme?: string,
+    runId = interviewRunRef.current,
+  ) => {
+    const activeTheme = currentTheme || theme;
+    const answeringCharacter = characters.find(character => character.id === answeringCharacterId);
+    if (!answeringCharacter) throw new Error("找不到本轮参与的角色。");
+    setPhase("character");
+    setPendingLabel(answeringCharacter.name);
+    armResumeAction({ type: "character", question, baseMessages, round, answeringCharacterId, lastUserAnswer, currentTheme: activeTheme });
+    const answer = await generateCharacterInterviewAnswer({
+      theme: activeTheme, characterIds: selectedCharacterIds, characterId: answeringCharacterId,
+      userIdentityId, question, transcript: baseMessages, round, lastUserAnswer, options: runOptions,
+    });
+    if (!isInterviewRunCurrent(runId)) return;
+    const withAnswer = [...baseMessages, makeInterviewMessage("character", answer, { kind: "answer", speakerCharacterId: answeringCharacterId, speakerName: answeringCharacter.name })];
+    setMessages(withAnswer);
+    await settleTurn(withAnswer, round, runId);
+  };
+
   const startInterview = async () => {
     const trimmedTheme = theme.trim();
-    if (!trimmedTheme || selectedCharacterIds.length === 0) return;
+    const count = selectedCharacterIds.length;
+    const castCount = count + (includeUser ? 1 : 0);
+    const guestCount = count - hostCharacterIds.filter(id => selectedCharacterIds.includes(id)).length;
+    if (!trimmedTheme || (count === 0 && !includeUser)) return;
+    if (programme.characterRadio && (!hostPresent || !hostCharacterIds.length)) { setError("角色电台至少选一位角色主持人。"); return; }
+    if (programme.id === "roundtable" && (hostPresent ? guestCount + (includeUser ? 1 : 0) < 2 : castCount < 3)) { setError("日月闲至少要有三位参与者；有主持人时，另需两位嘉宾（角色或用户）。"); return; }
+    if (!hostPresent && count === 0) { setError("没有主持人的节目至少需要一位角色来开聊。"); return; }
     resetDraft();
     const runId = startInterviewRun();
     setTheme(trimmedTheme);
     setScreen("interview");
     setPhase("opening");
-    setPendingLabel(`主持人 ${selectedHostName}`);
+    setPendingLabel(hostPresent ? `主持人 ${selectedHostName}` : "参与者准备开播");
     armResumeAction({ type: "opening", theme: trimmedTheme });
-
     try {
+      if (!hostPresent) {
+        await runCharacterAnswer(`围绕「${trimmedTheme}」自然开场，像和身旁的人聊起话题，可以抛出一个有趣的细节。`, [], 1, selectedCharacterIds[0], undefined, trimmedTheme, runId);
+        return;
+      }
       const opening = await generateHostOpening(trimmedTheme, selectedCharacterIds, userIdentityId, runOptions);
       if (!isInterviewRunCurrent(runId)) return;
+      const firstTarget = count ? "character" : "user";
       const initialMessages = [
-        makeInterviewMessage("host", opening.intro, { kind: "intro", speakerCharacterId: hostCharacterId, speakerName: selectedHostName }),
-        makeInterviewMessage("host", opening.question, {
-          kind: "question",
-          target: "character",
-          targetCharacterId: opening.targetCharacterId,
-          targetCharacterName: opening.targetCharacterName,
-          speakerCharacterId: hostCharacterId,
-          speakerName: selectedHostName,
-        }),
+        makeInterviewMessage("host", opening.intro, { kind: "intro", speakerCharacterId: runOptions.hostCharacterId, speakerName: selectedHostName }),
+        makeInterviewMessage("host", opening.question, { kind: "question", target: firstTarget, targetCharacterId: opening.targetCharacterId, targetCharacterName: opening.targetCharacterName, speakerCharacterId: runOptions.hostCharacterId, speakerName: selectedHostName }),
       ];
       setMessages(initialMessages);
-      await runCharacterAnswer(opening.question, initialMessages, 1, opening.targetCharacterId, undefined, trimmedTheme, runId);
+      if (count) await runCharacterAnswer(opening.question, initialMessages, 1, opening.targetCharacterId || selectedCharacterIds[0], undefined, trimmedTheme, runId);
+      else { setPhase("user"); setPendingLabel(""); armResumeAction({ type: "next", baseMessages: initialMessages, round: 0, currentTheme: trimmedTheme }); }
     } catch (err) {
       if (!isInterviewRunCurrent(runId)) return;
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase("error");
-    } finally {
-      if (isInterviewRunCurrent(runId)) setPendingLabel("");
+      setError(err instanceof Error ? err.message : String(err)); setPhase("error"); setPendingLabel("");
     }
   };
 
-  const runCharacterAnswer = async (
-    question: string,
-    baseMessages: InterviewMessage[],
-    round: number,
-    answeringCharacterId: string,
-    lastUserAnswer?: string,
-    currentTheme?: string,
-    runId = interviewRunRef.current,
-  ) => {
-    const activeTheme = currentTheme ?? theme;
-    const answeringCharacter = characters.find((character) => character.id === answeringCharacterId) ?? activeCharacter;
-    setPhase("character");
-    setPendingLabel(answeringCharacter?.name || "嘉宾");
-    armResumeAction({
-      type: "character",
-      question,
-      baseMessages,
-      round,
-      answeringCharacterId,
-      lastUserAnswer,
-      currentTheme: activeTheme,
-    });
-    const answer = await generateCharacterInterviewAnswer({
-      theme: activeTheme,
-      characterIds: selectedCharacterIds,
-      characterId: answeringCharacterId,
-      userIdentityId,
-      question,
-      transcript: baseMessages,
-      round,
-      lastUserAnswer,
-      options: runOptions,
-      // @ts-ignore - legacy signature missing phase
-      phase: "嘉宾回答",
-    });
-    if (!isInterviewRunCurrent(runId)) return;
-    const withAnswer = [...baseMessages, makeInterviewMessage("character", answer, {
-      kind: "answer",
-      speakerCharacterId: answeringCharacterId,
-      speakerName: answeringCharacter?.name || "嘉宾",
-    })];
-    setMessages(withAnswer);
-    setCharacterRounds(round);
-
-    if (round >= maxCharacterTurns) {
-      setMessages(hostCharacterId ? withAnswer : [...withAnswer, makeInterviewMessage("host", "感谢收听，本期节目到这里。", { kind: "outro", speakerName: selectedHostName })]);
-      setPhase("done");
-      setPendingLabel("");
-      clearResumeAction();
-      return;
-    }
-
-    setPhase("host");
-    setPendingLabel(`主持人 ${selectedHostName}`);
-    armResumeAction(includeUser
-      ? { type: "hostToUser", baseMessages: withAnswer, currentTheme: activeTheme }
-      : { type: "hostToCharacter", baseMessages: withAnswer, lastUserAnswer: "", fallbackTargetCharacterId: getNextCharacterId(answeringCharacterId), nextRound: round + 1, currentTheme: activeTheme });
-    const nextQuestion = await generateHostQuestion({
-      theme: activeTheme,
-      characterIds: selectedCharacterIds,
-      userIdentityId,
-      transcript: withAnswer,
-      target: includeUser ? "user" : "character",
-      phase: includeUser ? "嘉宾刚刚回答完，主持人向共同受访者提问" : "嘉宾刚刚回答完，主持人向下一位角色提问，无用户参与",
-      fallbackTargetCharacterId: getNextCharacterId(answeringCharacterId),
-      options: runOptions,
-    });
-    if (!isInterviewRunCurrent(runId)) return;
-    const withReactions = [...withAnswer, ...nextQuestion.reactions.map((content, index) => makeInterviewMessage("audience", content, { speakerName: `听众 ${index + 1}` }))];
-    const targetCharacterId = nextQuestion.targetCharacterId || getNextCharacterId(answeringCharacterId);
-    const withQuestion = [...withReactions, makeInterviewMessage("host", nextQuestion.question, {
-      kind: "question", target: includeUser ? "user" : "character",
-      targetCharacterId: includeUser ? undefined : targetCharacterId,
-      targetCharacterName: includeUser ? undefined : characters.find(c => c.id === targetCharacterId)?.name,
-      speakerCharacterId: hostCharacterId,
-      speakerName: selectedHostName,
-    })];
-    setMessages(withQuestion);
-    if (includeUser) {
-      setPhase("user");
-      setPendingLabel("");
-      clearResumeAction();
-    } else {
-      await runCharacterAnswer(nextQuestion.question, withQuestion, round + 1, targetCharacterId, undefined, activeTheme, runId);
-    }
-  };
-
-  const submitUserAnswer = async () => {
+  const submitUserAnswer = () => {
     const answer = userInput.trim();
-    if (!answer || phase !== "user") return;
+    if (phase !== "user") return;
+    if (!answer) { void continueInterview(); return; }
     setUserInput("");
-    const runId = interviewRunRef.current;
-    const withUserAnswer = [...messages, makeInterviewMessage("user", answer, { kind: "answer" })];
-    setMessages(withUserAnswer);
-    setPhase("host");
-    setPendingLabel(`主持人 ${selectedHostName}`);
-    const latestSpeakerId = [...withUserAnswer].reverse().find((message) => message.role === "character")?.speakerCharacterId;
-    const fallbackTargetCharacterId = getNextCharacterId(latestSpeakerId);
-    armResumeAction({
-      type: "hostToCharacter",
-      baseMessages: withUserAnswer,
-      lastUserAnswer: answer,
-      fallbackTargetCharacterId,
-      nextRound: characterRounds + 1,
-      currentTheme: theme,
-    });
-
-    try {
-      const nextQuestion = await generateHostQuestion({
-        theme,
-        characterIds: selectedCharacterIds,
-        userIdentityId,
-        transcript: withUserAnswer,
-        target: "character",
-        phase: "用户刚刚回答完，主持人需要把问题抛回嘉宾",
-        fallbackTargetCharacterId,
-        options: runOptions,
-      });
-      if (!isInterviewRunCurrent(runId)) return;
-      const targetCharacterId = nextQuestion.targetCharacterId || fallbackTargetCharacterId;
-      const targetCharacterName = nextQuestion.targetCharacterName
-        || characters.find((character) => character.id === targetCharacterId)?.name
-        || "嘉宾";
-      const withReactions = [...withUserAnswer, ...nextQuestion.reactions.map((content, index) => makeInterviewMessage("audience", content, { speakerName: `听众 ${index + 1}` }))];
-      const withQuestion = [...withReactions, makeInterviewMessage("host", nextQuestion.question, {
-        kind: "question",
-        target: "character",
-        targetCharacterId,
-        targetCharacterName,
-        speakerCharacterId: hostCharacterId,
-        speakerName: selectedHostName,
-      })];
-      setMessages(withQuestion);
-      await runCharacterAnswer(nextQuestion.question, withQuestion, characterRounds + 1, targetCharacterId, answer, theme, runId);
-    } catch (err) {
-      if (!isInterviewRunCurrent(runId)) return;
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase("error");
-      setPendingLabel("");
-    }
+    const mode = includeUser ? inputMode : inputMode === "speech" ? "barrage" : inputMode;
+    const next = [...messages, makeInterviewMessage(mode === "speech" ? "user" : mode === "barrage" ? "audience" : "direction", answer, { kind: "answer", speakerName: mode === "barrage" ? "匿名" : mode === "direction" ? "幕后提示" : undefined, audienceSource: mode === "barrage" ? "user" : undefined })];
+    setMessages(next);
+    armResumeAction({ type: "next", baseMessages: next, round: characterRounds, currentTheme: theme });
   };
 
   const continueInterview = async () => {
     const action = resumeActionRef.current;
     if (!action) return;
-
     const runId = startInterviewRun();
-    setError("");
-    setScreen("interview");
-
+    setError(""); setScreen("interview");
     try {
-      if (action.type === "finish") {
-        setMessages(hostCharacterId ? action.baseMessages : [...action.baseMessages, makeInterviewMessage("host", "感谢收听，本期节目到这里。", { kind: "outro", speakerName: selectedHostName })]);
-        setPhase("done");
-        setPendingLabel("");
-        clearResumeAction();
-        return;
-      }
-
-      if (action.type === "awaitUser") {
-        setPhase("user");
-        setPendingLabel("");
-        clearResumeAction();
-        return;
-      }
-
-      if (action.type === "opening") {
-        setTheme(action.theme);
-        setPhase("opening");
-        setPendingLabel(`主持人 ${selectedHostName}`);
-        armResumeAction(action);
-        const opening = await generateHostOpening(action.theme, selectedCharacterIds, userIdentityId, runOptions);
-        const initialMessages = [
-          makeInterviewMessage("host", opening.intro, { kind: "intro", speakerCharacterId: hostCharacterId, speakerName: selectedHostName }),
-          makeInterviewMessage("host", opening.question, {
-            kind: "question",
-            target: "character",
-            targetCharacterId: opening.targetCharacterId,
-            targetCharacterName: opening.targetCharacterName,
-            speakerCharacterId: hostCharacterId,
-            speakerName: selectedHostName,
-          }),
-        ];
-        if (!isInterviewRunCurrent(runId)) return;
-        setMessages(initialMessages);
-        await runCharacterAnswer(opening.question, initialMessages, 1, opening.targetCharacterId, undefined, action.theme, runId);
-        return;
-      }
-
+      if (action.type === "opening") { await startInterview(); return; }
       if (action.type === "character") {
-        await runCharacterAnswer(
-          action.question,
-          action.baseMessages,
-          action.round,
-          action.answeringCharacterId,
-          action.lastUserAnswer,
-          action.currentTheme,
-          runId,
-        );
+        await runCharacterAnswer(action.question, action.baseMessages, action.round, action.answeringCharacterId, action.lastUserAnswer, action.currentTheme, runId);
         return;
       }
-
-      if (action.type === "hostToUser") {
-        setPhase("host");
-        setPendingLabel(`主持人 ${selectedHostName}`);
-        armResumeAction(action);
-        const nextQuestion = await generateHostQuestion({
-          theme: action.currentTheme,
-          characterIds: selectedCharacterIds,
-          userIdentityId,
-          transcript: action.baseMessages,
-          target: "user",
-          phase: "嘉宾刚刚回答完，主持人需要把问题转向共同受访者",
-          options: runOptions,
-        });
-        if (!isInterviewRunCurrent(runId)) return;
-        setMessages([...action.baseMessages, ...nextQuestion.reactions.map((content, index) => makeInterviewMessage("audience", content, { speakerName: `听众 ${index + 1}` })), makeInterviewMessage("host", nextQuestion.question, { kind: "question", target: "user", speakerCharacterId: hostCharacterId, speakerName: selectedHostName })]);
-        setPhase("user");
-        setPendingLabel("");
-        clearResumeAction();
+      const baseMessages = action.type === "next" ? messages : action.type === "hostToCharacter" || action.type === "hostToUser" || action.type === "finish" ? action.baseMessages : messages;
+      const round = action.type === "next" ? action.round : characterRounds;
+      if (round >= maxCharacterTurns) { setPhase("done"); clearResumeAction(); return; }
+      if (!hostPresent) {
+        const nextId = getNextCharacterId([...baseMessages].reverse().find(message => message.role === "character")?.speakerCharacterId);
+        const lastSpeech = [...baseMessages].reverse().find(message => message.role === "character" || message.role === "user" || message.role === "direction")?.content;
+        await runCharacterAnswer(`自然接住刚才的话继续聊天。${lastSpeech || `话题：「${theme}」`}`, baseMessages, round + 1, nextId, undefined, theme, runId);
         return;
       }
-
-      setPhase("host");
-      setPendingLabel(`主持人 ${selectedHostName}`);
-      armResumeAction(action);
+      setPhase("host"); setPendingLabel(`主持人 ${selectedHostName}`);
+      armResumeAction({ type: "next", baseMessages, round, currentTheme: theme });
+      // The user may speak as often as they wish; a host can occasionally address them, without blocking other guests.
+      const lastWasUserQuestion = [...baseMessages].reverse().find(message => message.role === "host" && message.kind === "question")?.target === "user";
+      const target = selectedCharacterIds.length === 0 || (includeUser && round > 0 && round % 3 === 0 && !lastWasUserQuestion) ? "user" : "character";
+      const lastCharacterId = [...baseMessages].reverse().find(message => message.role === "character")?.speakerCharacterId;
+      const fallbackTargetCharacterId = getNextCharacterId(lastCharacterId);
+      const speakingHostId = hostCharacterIds.length > 1 ? hostCharacterIds[round % hostCharacterIds.length] : runOptions.hostCharacterId;
+      const speakingHostName = speakingHostId ? characters.find(character => character.id === speakingHostId)?.name || selectedHostName : selectedHostName;
       const nextQuestion = await generateHostQuestion({
-        theme: action.currentTheme,
-        characterIds: selectedCharacterIds,
-        userIdentityId,
-        transcript: action.baseMessages,
-        target: "character",
-        phase: includeUser ? "用户刚刚回答完，主持人需要把问题抛回嘉宾" : "角色刚刚回答完，主持人需要向下一位角色提问，不得向用户提问",
-        fallbackTargetCharacterId: action.fallbackTargetCharacterId,
-        options: runOptions,
+        theme, characterIds: selectedCharacterIds, userIdentityId, transcript: baseMessages,
+        target, fallbackTargetCharacterId, options: { ...runOptions, hostCharacterId: speakingHostId, audienceEnabled: target === "user" && audienceEnabled },
+        phase: target === "user" ? "自然邀请用户分享，允许用户不回答；如果已经几轮没说话，可轻轻关心一次" : "把话题抛给下一位嘉宾，不要求用户回答；根据匿名弹幕可偶尔猜测但不能断言身份",
       });
       if (!isInterviewRunCurrent(runId)) return;
-      const targetCharacterId = nextQuestion.targetCharacterId || action.fallbackTargetCharacterId;
-      const targetCharacterName = nextQuestion.targetCharacterName
-        || characters.find((character) => character.id === targetCharacterId)?.name
-        || "嘉宾";
-      const withQuestion = [...action.baseMessages, ...nextQuestion.reactions.map((content, index) => makeInterviewMessage("audience", content, { speakerName: `听众 ${index + 1}` })), makeInterviewMessage("host", nextQuestion.question, {
-        kind: "question",
-        target: "character",
-        targetCharacterId,
-        targetCharacterName,
-        speakerCharacterId: hostCharacterId,
-        speakerName: selectedHostName,
-      })];
+      const question = makeInterviewMessage("host", nextQuestion.question, { kind: "question", target, targetCharacterId: target === "character" ? nextQuestion.targetCharacterId || fallbackTargetCharacterId : undefined, targetCharacterName: nextQuestion.targetCharacterName, speakerCharacterId: speakingHostId, speakerName: speakingHostName });
+      const withQuestion = [...baseMessages, ...audienceMessages(nextQuestion.reactions), question];
       setMessages(withQuestion);
-      await runCharacterAnswer(nextQuestion.question, withQuestion, action.nextRound, targetCharacterId, action.lastUserAnswer, action.currentTheme, runId);
+      if (target === "user") { setPhase("user"); setPendingLabel(""); setCharacterRounds(round + 1); armResumeAction({ type: "next", baseMessages: withQuestion, round: round + 1, currentTheme: theme }); }
+      else await runCharacterAnswer(nextQuestion.question, withQuestion, round + 1, nextQuestion.targetCharacterId || fallbackTargetCharacterId, undefined, theme, runId);
     } catch (err) {
       if (!isInterviewRunCurrent(runId)) return;
-      setError(err instanceof Error ? err.message : String(err));
-      setPhase("error");
-      setPendingLabel("");
+      setError(err instanceof Error ? err.message : String(err)); setPhase("error"); setPendingLabel("");
     }
   };
 
   const composeArticle = async () => {
-    if (selectedCharacterIds.length === 0 || messages.length === 0) return;
+    if ((selectedCharacterIds.length === 0 && !includeUser) || messages.length === 0) return;
     const composeRunId = composeRunRef.current + 1;
     composeRunRef.current = composeRunId;
     setScreen("generating");
@@ -817,17 +679,19 @@ export function InterviewMagazineApp({ onClose }: Props) {
         theme,
         programme,
         hostCharacterId: hostCharacterId || undefined,
-        hostPresetId,
+        hostPresetId: effectiveHostId,
+        hostOverrides,
+        hostCharacterIds,
         includeUser,
         audienceEnabled,
         characterIds: result.context.guests.map((guest) => guest.character.id),
         characterNames: result.context.guestNames,
-        characterId: result.context.character.id,
-        characterName: result.context.guestListText,
+        characterId: result.context.guests[0]?.character.id || "",
+        characterName: result.context.guests.length ? result.context.guestListText : result.context.userName,
         userName: result.context.userName,
         userIdentityId,
         guestSnapshots: result.context.guestSnapshots,
-        characterSnapshot: result.context.characterSnapshot,
+        characterSnapshot: result.context.guests.length ? result.context.characterSnapshot : { ...result.context.characterSnapshot, id: "", name: result.context.userName, avatar: null, persona: "", tags: [] },
         userSnapshot: result.context.userSnapshot,
         worldBookSnapshot: result.context.worldBookSnapshot,
         transcript: messages,
@@ -903,26 +767,27 @@ export function InterviewMagazineApp({ onClose }: Props) {
             userIdentities={userIdentities}
             selectedUserIdentityId={userIdentityId}
             theme={theme}
-            programmes={[...BUILTIN_INTERVIEW_PROGRAMMES, ...programmes]}
+            programmes={programmes.length ? programmes : BUILTIN_INTERVIEW_PROGRAMMES}
             programmeId={programmeId}
             includeUser={includeUser}
             audienceEnabled={audienceEnabled}
             hostCharacterId={hostCharacterId}
+            hostCharacterIds={hostCharacterIds}
+            hostOverrides={hostOverrides}
             hostPresetId={hostPresetId}
             onHostPresetChange={setHostPresetId}
-            onProgrammeChange={setProgrammeId}
+            onProgrammeChange={id => { setProgrammeId(id); setHostCharacterId(""); setHostCharacterIds([]); setHostPresetId(BUILTIN_INTERVIEW_HOSTS.find(host => host.programmeId === id)?.id || `host_${id}`); }}
             onProgrammeSave={saveProgramme}
+            onProgrammeUpdate={updateProgramme}
+            onHostUpdate={updateHost}
+            onHostCharacterIdsChange={setHostCharacterIds}
             onProgrammeDelete={removeProgramme}
             onIncludeUserChange={setIncludeUser}
             onAudienceEnabledChange={setAudienceEnabled}
             onHostCharacterChange={setHostCharacterId}
-            hostPrompt={hostPrompt}
-            memoryPrompt={memoryPrompt}
             onThemeChange={setTheme}
             onCharacterToggle={toggleCharacter}
             onUserIdentityChange={setUserIdentityId}
-            onHostPromptSave={(nextPrompt) => setHostPrompt(saveInterviewHostPrompt(nextPrompt))}
-            onMemoryPromptSave={(nextPrompt) => setMemoryPrompt(saveInterviewMemoryPrompt(nextPrompt))}
             onBack={() => setScreen("home")}
             onStart={startInterview}
           />
@@ -932,6 +797,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
             programmeName={programme.name}
             hostName={selectedHostName}
             hostCharacterId={hostCharacterId}
+            includeUser={includeUser}
             audienceEnabled={audienceEnabled}
             characters={activeCharacters}
             messages={messages}
@@ -940,11 +806,14 @@ export function InterviewMagazineApp({ onClose }: Props) {
             userInput={userInput}
             error={error}
             canContinue={Boolean(resumeAction)}
-            canWrap={messages.some((message) => message.role === "character")}
+            canWrap={messages.some((message) => message.role === "character" || message.role === "user")}
             maxCharacterTurns={maxCharacterTurns}
             scrollRef={scrollRef}
             onUserInputChange={setUserInput}
             onSubmitUserAnswer={submitUserAnswer}
+            onSummon={() => void continueInterview()}
+            inputMode={inputMode}
+            onInputModeChange={setInputMode}
             onContinue={continueInterview}
             onPause={pauseInterview}
             onWrap={composeArticle}
@@ -1046,7 +915,7 @@ function HomeScreen({
                 <article key={draft.id} className="interview-glass-panel interview-glass-panel-hover p-5 relative group overflow-hidden border-white/15">
                   <button type="button" className="w-full text-left" onClick={() => onOpenDraft(draft)}>
                     <div className="flex items-center gap-2 mb-3">
-                      <SmallCaps className="text-white/70">{draft.programme?.name || "在场·人物"} · {getDraftStatusText(draft.status)}</SmallCaps>
+                      <SmallCaps className="text-white/70">{draft.programme?.name || "在场·人物志"} · {getDraftStatusText(draft.status)}</SmallCaps>
                       <span className="text-white/20 text-xs">|</span>
                       <SmallCaps className="text-white/50">{new Date(draft.updatedAt).toLocaleDateString("zh-CN")}</SmallCaps>
                     </div>
@@ -1096,7 +965,7 @@ function HomeScreen({
                 <article key={issue.id} className="interview-glass-panel interview-glass-panel-hover p-5 relative group overflow-hidden">
                   <button type="button" className="w-full text-left" onClick={() => onOpenIssue(issue)}>
                     <div className="flex items-center gap-2 mb-3">
-                      <SmallCaps className="text-white/60">NO.{String(issue.issueNumber).padStart(2, "0")} · {issue.programme?.name || "在场·人物"}</SmallCaps>
+                      <SmallCaps className="text-white/60">NO.{String(issue.issueNumber).padStart(2, "0")} · {issue.programme?.name || "在场·人物志"}</SmallCaps>
                       <span className="text-white/20 text-xs">|</span>
                       <SmallCaps className="text-white/60">{issue.theme}</SmallCaps>
                     </div>
@@ -1212,21 +1081,22 @@ function SetupScreen({
   includeUser,
   audienceEnabled,
   hostCharacterId,
+  hostCharacterIds,
+  hostOverrides,
   hostPresetId,
   onHostPresetChange,
   onProgrammeChange,
   onProgrammeSave,
+  onProgrammeUpdate,
+  onHostUpdate,
+  onHostCharacterIdsChange,
   onProgrammeDelete,
   onIncludeUserChange,
   onAudienceEnabledChange,
   onHostCharacterChange,
-  hostPrompt,
-  memoryPrompt,
   onThemeChange,
   onCharacterToggle,
   onUserIdentityChange,
-  onHostPromptSave,
-  onMemoryPromptSave,
   onBack,
   onStart,
 }: {
@@ -1240,32 +1110,39 @@ function SetupScreen({
   includeUser: boolean;
   audienceEnabled: boolean;
   hostCharacterId: string;
+  hostCharacterIds: string[];
+  hostOverrides: InterviewHost[];
   hostPresetId: string;
   onHostPresetChange: (id: string) => void;
   onProgrammeChange: (id: string) => void;
-  onProgrammeSave: (name: string, description: string, direction: string) => void;
+  onProgrammeSave: (name: string, description: string, direction: string, hostRule: InterviewProgramme["hostRule"], characterRadio: boolean, hostStyle: string) => void;
+  onProgrammeUpdate: (programme: InterviewProgramme) => void;
+  onHostUpdate: (host: InterviewHost) => void;
+  onHostCharacterIdsChange: (ids: string[]) => void;
   onProgrammeDelete: (id: string) => void;
   onIncludeUserChange: (enabled: boolean) => void;
   onAudienceEnabledChange: (enabled: boolean) => void;
   onHostCharacterChange: (id: string) => void;
-  hostPrompt: string;
-  memoryPrompt: string;
   onThemeChange: (value: string) => void;
   onCharacterToggle: (value: string) => void;
   onUserIdentityChange: (value: string) => void;
-  onHostPromptSave: (value: string) => void;
-  onMemoryPromptSave: (value: string) => void;
   onBack: () => void;
   onStart: () => void;
 }) {
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
-  const [draftHostPrompt, setDraftHostPrompt] = useState(hostPrompt);
-  const [draftMemoryPrompt, setDraftMemoryPrompt] = useState(memoryPrompt);
   const [newProgrammeName, setNewProgrammeName] = useState("");
   const [newProgrammeDescription, setNewProgrammeDescription] = useState("");
   const [newProgrammeDirection, setNewProgrammeDirection] = useState("");
   const [programmeEditorOpen, setProgrammeEditorOpen] = useState(false);
-  const ready = characters.length > 0 && selectedCharacterIds.length > 0 && theme.trim().length > 0;
+  const [newHostRule, setNewHostRule] = useState<InterviewProgramme["hostRule"]>("optional");
+  const [newCharacterRadio, setNewCharacterRadio] = useState(false);
+  const [newHostStyle, setNewHostStyle] = useState("");
+  const currentProgramme = programmes.find(item => item.id === programmeId) || BUILTIN_INTERVIEW_PROGRAMMES[0];
+  const programmeHosts = [...BUILTIN_INTERVIEW_HOSTS, ...(!BUILTIN_INTERVIEW_PROGRAMMES.some(item => item.id === programmeId) ? [{ id: `host_${programmeId}`, programmeId, name: "栏目主持人", language: "韩语", direction: currentProgramme.hostStyle || currentProgramme.direction }] : [])].map(host => hostOverrides.find(override => override.id === host.id) || host).filter(host => host.programmeId === programmeId);
+  const currentHost = programmeHosts.find(host => host.id === hostPresetId) || programmeHosts[0];
+  const withHost = currentProgramme.hostRule === "required" || (currentProgramme.hostRule !== "none" && hostCharacterId !== "none");
+  const guestCount = selectedCharacterIds.length - hostCharacterIds.filter(id => selectedCharacterIds.includes(id)).length;
+  const ready = theme.trim().length > 0 && characters.length > 0 && (selectedCharacterIds.length > 0 || includeUser) && (!currentProgramme.characterRadio || (withHost && hostCharacterIds.length > 0)) && (withHost || selectedCharacterIds.length > 0) && (programmeId !== "roundtable" || (withHost ? guestCount + (includeUser ? 1 : 0) >= 2 : selectedCharacterIds.length + (includeUser ? 1 : 0) >= 3));
 
   return (
     <>
@@ -1277,7 +1154,7 @@ function SetupScreen({
           <SmallCaps className="text-white/50">PREP NEW ISSUE</SmallCaps>
           <div className="text-white font-medium">策划新节目</div>
         </div>
-        <button className="interview-icon-btn" onClick={() => { setDraftHostPrompt(hostPrompt); setDraftMemoryPrompt(memoryPrompt); setPromptEditorOpen(true); }}>
+        <button className="interview-icon-btn" onClick={() => setPromptEditorOpen(true)} title="编辑当前栏目提示词">
           <PencilLine size={18} />
         </button>
       </header>
@@ -1294,18 +1171,27 @@ function SetupScreen({
             <input className="interview-glass-input p-2" placeholder="栏目名称" value={newProgrammeName} onChange={e => setNewProgrammeName(e.target.value)} />
             <input className="interview-glass-input p-2" placeholder="一句话介绍" value={newProgrammeDescription} onChange={e => setNewProgrammeDescription(e.target.value)} />
             <textarea className="interview-glass-input p-2" placeholder="主持风格、节目形式与节奏" value={newProgrammeDirection} onChange={e => setNewProgrammeDirection(e.target.value)} />
-            <button type="button" className="text-white/90 text-sm self-end" disabled={!newProgrammeName.trim() || !newProgrammeDirection.trim()} onClick={() => { onProgrammeSave(newProgrammeName, newProgrammeDescription, newProgrammeDirection); setProgrammeEditorOpen(false); setNewProgrammeName(""); setNewProgrammeDescription(""); setNewProgrammeDirection(""); }}>保存栏目</button>
+            <label className="text-xs text-white/70">主持方式<select className="interview-glass-input p-2 block w-full mt-1" value={newHostRule} onChange={e => setNewHostRule(e.target.value as InterviewProgramme["hostRule"])}><option value="required">必须有主持</option><option value="optional">开播前选择有无主持</option><option value="none">没有主持</option></select></label>
+            <label className="text-xs text-white/70 flex items-center gap-2"><input type="checkbox" checked={newCharacterRadio} onChange={e => { setNewCharacterRadio(e.target.checked); if (e.target.checked) setNewHostRule("required"); }} />创建角色自己的电台（角色当主持人，可选多位）</label>
+            <input className="interview-glass-input p-2" placeholder="角色主持风格补充（可不填，默认按人设）" value={newHostStyle} onChange={e => setNewHostStyle(e.target.value)} />
+            <button type="button" className="text-white/90 text-sm self-end" disabled={!newProgrammeName.trim() || !newProgrammeDirection.trim()} onClick={() => { onProgrammeSave(newProgrammeName, newProgrammeDescription, newProgrammeDirection, newCharacterRadio ? "required" : newHostRule, newCharacterRadio, newHostStyle); setProgrammeEditorOpen(false); setNewProgrammeName(""); setNewProgrammeDescription(""); setNewProgrammeDirection(""); }}>保存栏目</button>
           </div>}
           {programmeId.startsWith("programme_") && <button type="button" className="text-xs text-white/40 mt-2" onClick={() => onProgrammeDelete(programmeId)}>删除此自建栏目</button>}
         </section>
         <section className="fade-in flex flex-col gap-3">
           <SmallCaps className="text-white/60">HOST // 主持方式</SmallCaps>
-          <select className="interview-glass-input p-3" value={hostCharacterId ? `character:${hostCharacterId}` : `preset:${hostPresetId}`} onChange={e => { const [type, id] = e.target.value.split(":"); if (type === "character") onHostCharacterChange(id); else { onHostCharacterChange(""); onHostPresetChange(id); } }}>
-            {BUILTIN_INTERVIEW_HOSTS.map(item => <option key={item.id} value={`preset:${item.id}`}>{item.name} · {item.direction}</option>)}
-            {characters.filter(item => selectedCharacterIds.includes(item.id)).map(item => <option key={item.id} value={`character:${item.id}`}>{item.name} · 自己开播</option>)}
+          <select className="interview-glass-input p-3" value={currentProgramme.hostRule === "none" || currentProgramme.hostRule === "optional" && hostCharacterId === "none" ? "none" : hostCharacterId && hostCharacterId !== "none" ? `character:${hostCharacterId}` : currentProgramme.characterRadio ? "" : `preset:${currentHost?.id || hostPresetId}`} onChange={e => { if (e.target.value === "none") { onHostCharacterChange("none"); onHostCharacterIdsChange([]); return; } const [type, id] = e.target.value.split(":"); if (type === "character") { onHostCharacterChange(id); onHostCharacterIdsChange([id]); } else { onHostCharacterChange(""); onHostCharacterIdsChange([]); onHostPresetChange(id); } }}>
+            {currentProgramme.characterRadio && <option value="">选择角色主持人</option>}
+            {currentProgramme.hostRule === "none" && <option value="none">本栏目无主持人</option>}
+            {currentProgramme.hostRule === "optional" && <option value="none">本场无主持人</option>}
+            {!currentProgramme.characterRadio && currentProgramme.hostRule !== "none" && programmeHosts.map(item => <option key={item.id} value={`preset:${item.id}`}>{item.name} · {item.language}</option>)}
+            {currentProgramme.hostRule !== "none" && characters.filter(item => selectedCharacterIds.includes(item.id)).map(item => <option key={item.id} value={`character:${item.id}`}>{item.name} · 自己开播</option>)}
           </select>
-          <label className="text-sm text-white/80 flex items-center gap-2"><input type="checkbox" checked={includeUser} onChange={e => onIncludeUserChange(e.target.checked)} />邀请 U 参与录制</label>
-          <label className="text-sm text-white/80 flex items-center gap-2"><input type="checkbox" checked={audienceEnabled} onChange={e => onAudienceEnabledChange(e.target.checked)} />模拟听众弹幕与评论</label>
+          {currentProgramme.characterRadio && <div className="interview-glass-panel p-3 text-sm text-white/75">选本期角色主持人（至少一位）：<div className="flex flex-wrap gap-2 mt-2">{characters.filter(item => selectedCharacterIds.includes(item.id)).map(item => <label key={item.id} className="flex items-center gap-1"><input type="checkbox" checked={hostCharacterIds.includes(item.id)} onChange={e => { const ids = e.target.checked ? [...hostCharacterIds, item.id] : hostCharacterIds.filter(id => id !== item.id); onHostCharacterIdsChange(ids); onHostCharacterChange(ids[0] || ""); }} />{item.name}</label>)}</div></div>}
+          {withHost && !hostCharacterId && currentHost && <details className="text-xs text-white/60"><summary className="cursor-pointer">编辑本栏目主持人 · {currentHost.name}</summary><div className="flex flex-col gap-2 mt-3"><input className="interview-glass-input p-2" aria-label="主持人名字" value={currentHost.name} onChange={e => onHostUpdate({ ...currentHost, name: e.target.value })} /><input className="interview-glass-input p-2" aria-label="主持人语言" value={currentHost.language} onChange={e => onHostUpdate({ ...currentHost, language: e.target.value })} /><textarea className="interview-glass-input p-2 min-h-28" aria-label="主持人风格" value={currentHost.direction} onChange={e => onHostUpdate({ ...currentHost, direction: e.target.value })} /></div></details>}
+          <label className="text-sm text-white/80 flex items-center gap-2"><input type="checkbox" checked={includeUser} onChange={e => onIncludeUserChange(e.target.checked)} />邀请用户参与录制</label>
+          <label className="text-sm text-white/80 flex items-center gap-2"><input type="checkbox" checked={audienceEnabled} onChange={e => onAudienceEnabledChange(e.target.checked)} />模拟听众弹幕与评论（每轮 0–5 条）</label>
+          {programmeId === "roundtable" && <p className="text-xs text-white/55">日月闲至少三人：有主持人时另需两位嘉宾（角色或用户）；无主持人时三位参与者。</p>}
         </section>
         <section className="fade-in">
           <div className="flex items-center gap-3 mb-4">
@@ -1337,7 +1223,7 @@ function SetupScreen({
         {includeUser && <section className="fade-in" style={{ animationDelay: '0.1s' }}>
           <div className="flex items-center gap-3 mb-4">
             <span className="text-white/30 text-xs font-mono">02</span>
-            <SmallCaps className="text-white/60">YOU // 参与身份</SmallCaps>
+            <SmallCaps className="text-white/60">用户 // 参与身份</SmallCaps>
           </div>
           <select
             className="interview-glass-input w-full px-4 py-3 appearance-none focus:outline-none"
@@ -1398,31 +1284,37 @@ function SetupScreen({
             <header className="flex justify-between items-center mb-6">
               <div>
                 <SmallCaps className="text-white/50">EDITOR PROMPTS</SmallCaps>
-                <div className="text-white text-lg mt-1">提示词设置</div>
+                <div className="text-white text-lg mt-1">{currentProgramme.name} · 提示词</div>
               </div>
               <button className="interview-icon-btn" onClick={() => setPromptEditorOpen(false)}><X size={20} /></button>
             </header>
             <div className="flex-1 overflow-y-auto flex flex-col gap-6">
               <div className="flex flex-col flex-1">
-                <SmallCaps className="text-white/50 mb-2 block flex-shrink-0">HOST PROMPT // 主持人设定</SmallCaps>
+                <SmallCaps className="text-white/50 mb-2 block flex-shrink-0">PROGRAMME // 名称与简介</SmallCaps>
+                <input className="interview-glass-input p-2 mb-2" value={currentProgramme.name} onChange={e => onProgrammeUpdate({ ...currentProgramme, name: e.target.value })} />
+                <input className="interview-glass-input p-2 mb-2" value={currentProgramme.description} onChange={e => onProgrammeUpdate({ ...currentProgramme, description: e.target.value })} />
+                <textarea className="interview-glass-input p-2 mb-2 min-h-20" value={currentProgramme.direction} onChange={e => onProgrammeUpdate({ ...currentProgramme, direction: e.target.value })} />
+                <SmallCaps className="text-white/50 mb-2 block flex-shrink-0">HOST STYLE // 主持风格补充（可留空）</SmallCaps>
+                <textarea className="interview-glass-input p-2 mb-2 min-h-16" value={currentProgramme.hostStyle || ""} onChange={e => onProgrammeUpdate({ ...currentProgramme, hostStyle: e.target.value })} />
+                <SmallCaps className="text-white/50 mb-2 block flex-shrink-0">HOST PROMPT // 本栏目提示词</SmallCaps>
                 <textarea
                   className="interview-glass-panel !rounded-xl focus:bg-white/[0.08] focus:border-white/25 focus:outline-none transition-all w-full p-4 flex-1 resize-none text-[calc(11px*var(--app-text-scale,1))] leading-relaxed"
-                  value={draftHostPrompt}
-                  onChange={(e) => setDraftHostPrompt(e.target.value)}
+                  value={currentProgramme.hostPrompt || ""}
+                  onChange={(e) => onProgrammeUpdate({ ...currentProgramme, hostPrompt: e.target.value })}
                 />
               </div>
               <div className="flex flex-col flex-1">
                 <SmallCaps className="text-white/50 mb-2 block flex-shrink-0">MEMORY // 短期记忆</SmallCaps>
                 <textarea
                   className="interview-glass-panel !rounded-xl focus:bg-white/[0.08] focus:border-white/25 focus:outline-none transition-all w-full p-4 flex-1 resize-none text-[calc(11px*var(--app-text-scale,1))] leading-relaxed"
-                  value={draftMemoryPrompt}
-                  onChange={(e) => setDraftMemoryPrompt(e.target.value)}
+                  value={currentProgramme.memoryPrompt || ""}
+                  onChange={(e) => onProgrammeUpdate({ ...currentProgramme, memoryPrompt: e.target.value })}
                 />
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-white/10">
-              <button className="px-5 py-2.5 rounded-full border border-white/10 text-white/70 text-sm" onClick={() => setPromptEditorOpen(false)}>取消</button>
-              <button className="px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white text-sm font-medium" onClick={() => { onHostPromptSave(draftHostPrompt); onMemoryPromptSave(draftMemoryPrompt); setPromptEditorOpen(false); }}>保存设置</button>
+              <button className="px-5 py-2.5 rounded-full border border-white/10 text-white/70 text-sm" onClick={() => setPromptEditorOpen(false)}>关闭</button>
+              <button className="px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white text-sm font-medium" onClick={() => setPromptEditorOpen(false)}>完成</button>
             </div>
           </div>
         </div>
@@ -1436,6 +1328,7 @@ function InterviewScreen({
   programmeName,
   hostName,
   hostCharacterId,
+  includeUser,
   audienceEnabled,
   characters,
   messages,
@@ -1449,6 +1342,9 @@ function InterviewScreen({
   scrollRef,
   onUserInputChange,
   onSubmitUserAnswer,
+  onSummon,
+  inputMode,
+  onInputModeChange,
   onContinue,
   onPause,
   onWrap,
@@ -1458,6 +1354,7 @@ function InterviewScreen({
   programmeName: string;
   hostName: string;
   hostCharacterId: string;
+  includeUser: boolean;
   audienceEnabled: boolean;
   characters: Character[];
   messages: InterviewMessage[];
@@ -1471,6 +1368,9 @@ function InterviewScreen({
   scrollRef: RefObject<HTMLDivElement | null>;
   onUserInputChange: (value: string) => void;
   onSubmitUserAnswer: () => void;
+  onSummon: () => void;
+  inputMode: "speech" | "barrage" | "direction";
+  onInputModeChange: (mode: "speech" | "barrage" | "direction") => void;
   onContinue: () => void;
   onPause: () => void;
   onWrap: () => void;
@@ -1480,7 +1380,7 @@ function InterviewScreen({
     () => Object.fromEntries(characters.map((c) => [c.id, c.name])),
     [characters],
   );
-  const guestLabel = characters.map(c => c.name).join("、") || "嘉宾";
+  const guestLabel = [characters.map(c => c.name).join("、"), includeUser ? "用户" : ""].filter(Boolean).join("、") || "嘉宾";
   const turns = messages.filter(m => m.role === 'character').length;
 
   return (
@@ -1513,24 +1413,24 @@ function InterviewScreen({
             const isSpecial = message.kind === "intro" || message.kind === "outro";
             const speakerName = message.speakerName || (message.speakerCharacterId ? characterNameById[message.speakerCharacterId] : null) || guestLabel;
 
-            if (message.role === "audience") return audienceEnabled ? <div key={message.id} className="interview-audience-line">{message.speakerName || "听众"} · {message.content}</div> : null;
+            if (message.role === "audience") return null;
+            if (message.role === "direction") return <div key={message.id} className="interview-director-hint">幕后提示 · {message.content}</div>;
 
             if (isHost) {
               return (
                 <div key={message.id} className="py-6 my-2 border-y border-white/5 bg-gradient-to-r from-transparent via-white/[0.03] to-transparent flex flex-col items-center text-center">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="w-1.5 h-1.5 bg-white/30 rotate-45"></span>
-                    <SmallCaps className="text-white/40 tracking-widest">{isSpecial && !hostCharacterId ? "NARRATOR // 旁白" : `HOST // ${message.speakerName || hostName}`}</SmallCaps>
+                    <SmallCaps className="text-white/40 tracking-widest">HOST // {message.speakerName || hostName}</SmallCaps>
                     <span className="w-1.5 h-1.5 bg-white/30 rotate-45"></span>
                   </div>
                   <p className={`text-[calc(16px*var(--app-text-scale,1))] leading-relaxed max-w-[90%] mx-auto ${isSpecial ? 'text-white/50 italic font-serif' : 'text-white/80 font-medium'}`}>
                     <InterviewBilingualAnswer text={message.content} />
                   </p>
-                  <InterviewVoiceButton text={message.content} characterId={message.speakerCharacterId || (hostCharacterId && message.kind !== "outro" ? hostCharacterId : undefined)} />
                   {message.kind === "question" && (
                     <div className="mt-4 text-[calc(11px*var(--app-text-scale,1))] font-mono text-white/30 border border-white/10 rounded-full px-3 py-1 flex items-center gap-2">
                       <span className="w-1 h-1 rounded-full bg-white/30"></span>
-                      TARGET ▹ {message.target === "user" ? "YOU" : message.targetCharacterName?.toUpperCase() || "GUEST"}
+                      提问对象 ▹ {message.target === "user" ? "用户" : message.targetCharacterName || "嘉宾"}
                     </div>
                   )}
                 </div>
@@ -1542,13 +1442,13 @@ function InterviewScreen({
             return (
               <div key={message.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
                 <div className={`interview-glass-panel p-4 max-w-[85%] ${isUser ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/10'}`}>
-                  <SmallCaps className={`mb-1 block ${isUser ? 'text-white/40 text-right' : 'text-white/60'}`}>
-                    {isUser ? 'YOU // 共同受访' : `[ ${speakerName.toUpperCase()} ]`}
+                  <SmallCaps className={`mb-1 flex items-center ${isUser ? 'text-white/40 justify-end' : 'text-white/60'}`}>
+                    {isUser ? '用户 // 共同受访' : `[ ${speakerName.toUpperCase()} ]`}
+                    {!isUser && <InterviewVoiceButton text={message.content} characterId={message.speakerCharacterId} />}
                   </SmallCaps>
                   <p className="text-[calc(15px*var(--app-text-scale,1))] leading-relaxed text-white/90 whitespace-pre-wrap">
                     {isUser ? message.content : <InterviewBilingualAnswer text={message.content} />}
                   </p>
-                  {!isUser && <InterviewVoiceButton text={message.content} characterId={message.speakerCharacterId} />}
                 </div>
               </div>
             );
@@ -1577,9 +1477,14 @@ function InterviewScreen({
         </div>
       </main>
 
+      {<div className="interview-danmaku-layer" aria-label="实时弹幕">
+        {messages.filter(message => message.role === "audience").slice(-5).map((message, index) => <span key={message.id} className="interview-danmaku" style={{ top: `${12 + index * 16}%`, animationDuration: `${9 + index * 1.4}s` }}>匿名 · {message.content}</span>)}
+      </div>}
+
       <footer className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black via-black/80 to-transparent">
         {phase === "user" ? (
           <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2 text-xs text-white/60 px-2"><label>发送方式 <select className="bg-black/70 border border-white/20 rounded-lg px-2 py-1 text-white" value={!includeUser && inputMode === "speech" ? "barrage" : inputMode} onChange={e => onInputModeChange(e.target.value as "speech" | "barrage" | "direction")}>{includeUser && <option value="speech">发言</option>}<option value="barrage">发弹幕（匿名）</option><option value="direction">发指令（幕后）</option></select></label><button type="button" className="px-3 py-1.5 rounded-full border border-white/20 text-white/80" onClick={onSummon}>召唤下一段 ›</button></div>
             <div className="interview-glass-input rounded-full p-1.5 flex items-center bg-black/40 border-white/15">
               <textarea
                 className="flex-1 bg-transparent border-none text-white text-[calc(15px*var(--app-text-scale,1))] px-4 py-2 max-h-24 resize-none focus:outline-none focus:ring-0 placeholder-white/30"
@@ -1589,10 +1494,10 @@ function InterviewScreen({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    onSubmitUserAnswer();
+                    if (userInput.trim()) onSubmitUserAnswer(); else onSummon();
                   }
                 }}
-                placeholder="发送回应..."
+                placeholder={inputMode === "direction" ? "幕后引导下一话题；空回车推进" : includeUser && inputMode === "speech" ? "可以连续发言；空回车召唤" : "匿名弹幕；空回车召唤"}
               />
               <button
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${userInput.trim() ? 'bg-white text-black' : 'bg-white/10 text-white/30'}`}
@@ -1662,7 +1567,7 @@ function GeneratingScreen({ onBack }: { onBack: () => void }) {
       <div className="flex flex-col items-center text-center fade-in relative z-50 p-8 interview-glass-panel w-4/5 max-w-sm">
         <Loader2 size={32} className="interview-spin text-white/80 mb-6" />
         <SmallCaps className="text-white/40 mb-2">COMPOSING EPISODE</SmallCaps>
-        <div className="font-display text-2xl text-white font-bold tracking-widest mb-2">IN PRESS</div>
+        <div className="font-display text-2xl text-white font-bold tracking-widest mb-2">整理节目</div>
         <p className="text-white/50 text-sm">正在整理节目回顾，请稍候...</p>
         <button className="mt-8 text-white/30 text-xs font-mono hover:text-white/60 transition-colors" onClick={onBack}>
           [ CANCEL // 取消 ]
@@ -1759,18 +1664,17 @@ function ArticleScreen({
                 [ VIEW FULL TRANSCRIPT ]
               </summary>
               <div className="mt-6 p-5 interview-glass-panel bg-white/[0.02] border-white/5 flex flex-col gap-5">
-                {issue.transcript.filter(message => message.role !== "audience").map(message => <div key={message.id} className="text-white/70 text-sm leading-relaxed">
-                  <small className="text-white/35 block mb-1">{message.role === "host" ? message.speakerName || INTERVIEW_MAGAZINE_HOST_NAME : message.role === "user" ? issue.userName : message.speakerName || issue.characterName}</small>
+                {issue.transcript.filter(message => message.role !== "audience" && message.role !== "direction").map(message => <div key={message.id} className="text-white/70 text-sm leading-relaxed">
+                  <small className="text-white/35 flex items-center mb-1">{message.role === "host" ? message.speakerName || INTERVIEW_MAGAZINE_HOST_NAME : message.role === "user" ? issue.userName : message.speakerName || issue.characterName}{message.role === "character" && <InterviewVoiceButton text={message.content} characterId={message.speakerCharacterId} />}</small>
                   <InterviewBilingualAnswer text={message.content} />
-                  {message.role !== "user" ? <InterviewVoiceButton text={message.content} characterId={message.speakerCharacterId || (message.role === "host" ? issue.hostCharacterId : undefined)} /> : null}
                 </div>)}
               </div>
             </details>
           </div>
 
-          {issue.audienceEnabled !== false && issue.transcript.some(message => message.role === "audience") && <section className="mt-12 pt-8 border-t border-white/10">
+          {issue.transcript.some(message => message.role === "audience" && (issue.audienceEnabled !== false || message.audienceSource === "user")) && <section className="mt-12 pt-8 border-t border-white/10">
             <SmallCaps className="text-white/50 block mb-4">LISTENERS // 听众评论</SmallCaps>
-            <div className="flex flex-col gap-3">{issue.transcript.filter(message => message.role === "audience").map(message => <p className="interview-audience-comment" key={message.id}><strong>{message.speakerName || "听众"}</strong> {message.content}</p>)}</div>
+            <div className="flex flex-col gap-3">{issue.transcript.filter(message => message.role === "audience" && (issue.audienceEnabled !== false || message.audienceSource === "user")).map(message => <p className="interview-audience-comment" key={message.id}><strong>匿名</strong> {message.content}</p>)}</div>
           </section>}
 
           <div className="mt-20 pt-8 border-t border-white/10 text-center">
