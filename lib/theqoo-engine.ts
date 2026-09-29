@@ -2,6 +2,7 @@ import { sendLLMRequest } from "./chat-engine";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadWorldBooks, resolveBinding } from "./settings-storage";
 import { loadOwnerCalendarPlans } from "./calendar-storage";
 import { loadCharacters } from "./character-storage";
+import { loadWeverseState } from "./weverse-storage";
 import type { TheqooComment, TheqooPost } from "./theqoo-storage";
 
 const pickText = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -16,28 +17,37 @@ function selectedWorldBookText(ids: string[]) {
 }
 
 export const THEQOO_CATEGORIES = ["뉴스", "정보", "생활", "잡담", "유머", "뷰티", "영화·방송", "아이돌"] as const;
-export type TheqooSourceSettings = { includeCalendar: boolean };
+export type TheqooSourceSettings = { includeCalendar: boolean; includeWeverseSchedule: boolean };
 
 function scheduleContext(settings: TheqooSourceSettings): string {
-  if (!settings.includeCalendar) return "";
   const now = Date.now();
   const start = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
   const end = new Date(now + 35 * 86400000).toISOString().slice(0, 10);
   const lines: string[] = [];
-  const owners: ["user" | "character", string, string][] = [
-    ["user", "self", "U"],
-    ...loadCharacters().slice(0, 12).map(char => ["character" as const, char.id, char.name] as ["character", string, string]),
-  ];
-  for (const [type, id, name] of owners) {
-    for (const plan of loadOwnerCalendarPlans(type, id)) {
-      for (const item of plan.items) {
-        if (item.date >= start && item.date <= end) {
-          lines.push(`日历(${name}) ${item.date}: ${item.title.slice(0, 80)}`);
+  if (settings.includeCalendar) {
+    const owners: ["user" | "character", string, string][] = [
+      ["user", "self", "U"],
+      ...loadCharacters().slice(0, 12).map(char => ["character" as const, char.id, char.name] as ["character", string, string]),
+    ];
+    for (const [type, id, name] of owners) {
+      for (const plan of loadOwnerCalendarPlans(type, id)) {
+        for (const item of plan.items) {
+          if (item.date >= start && item.date <= end) {
+            lines.push(`手机日历(${name}) ${item.date}: ${item.title.slice(0, 80)}`);
+          }
         }
       }
     }
   }
-  return lines.slice(0, 14).join("；");
+  if (settings.includeWeverseSchedule) {
+    const state = loadWeverseState();
+    for (const item of state.schedules) {
+      if (item.visibility !== "public" || item.startsAt < now - 7 * 86400000 || item.startsAt > now + 35 * 86400000) continue;
+      const community = state.communities.find(c => c.id === item.communityId);
+      lines.push(`WVS公开日程(${community?.name || "社区"}) ${new Date(item.startsAt).toISOString().slice(0, 10)}: ${item.title.slice(0, 80)}`);
+    }
+  }
+  return lines.slice(0, 18).join("；");
 }
 
 function getForumConfig() {
@@ -54,7 +64,7 @@ const opPolicy = `评论区规则：所有分类都允许真实的意见分歧�
 export async function generateTheqooPosts(
   worldBookIds: string[],
   keyword = "",
-  sourceSettings: TheqooSourceSettings = { includeCalendar: false },
+  sourceSettings: TheqooSourceSettings = { includeCalendar: false, includeWeverseSchedule: false },
   translationEnabled = true,
 ): Promise<TheqooPost[]> {
   const config = getForumConfig();
@@ -85,8 +95,8 @@ export async function generateTheqooPosts(
   const items: unknown[] = [];
   for (let batch = 0; batch < 3; batch++) {
     const scheduleInstruction = batch === scheduleBatch
-      ? `可选日历素材：${schedules}。日历只是时间线参考：只有明显属于公开演出、公开拍摄、公开活动、比赛、直播、正式发布等可公开事件才允许偶尔成为论坛话题；私人约会、就医、家庭安排、住址相关或明显私密事项绝不能当成公开事实或爆料。整批至多 1 篇提及日历素材，也可以完全不提。`
-      : "这批不要围绕日历生成。";
+      ? `可选关联素材：${schedules}。手机日历只作为时间线参考：只有明显属于公开演出、公开拍摄、公开活动、比赛、直播、正式发布等可公开事件才允许偶尔成为论坛话题；私人约会、就医、家庭安排、住址相关或明显私密事项绝不能当作公开事实或爆料。WVS 公开日程本身属于可公开素材，可以偶尔成为论坛讨论背景，但不要每次都讨论，也不要把未写出的细节自行补成新闻。整批至多 1 篇提及这些关联素材，也可以完全不提。`
+      : "这批不要围绕手机日历或 WVS 日程生成。";
     const raw = await sendLLMRequest(config, preset, [
       { role: "system", content: `${prompt}\n本批只生成 2 篇帖子，每篇 10 条评论；这是整次刷新中第 ${batch + 1} 批，题材和切入角度尽量不同。${scheduleInstruction}` },
       { role: "user", content: "生成这一批，只输出 JSON。" },

@@ -54,6 +54,7 @@ export type TheqooState = {
   translator: TheqooTranslatorConfig;
   worldBookIds: string[];
   includeCalendar: boolean;
+  includeWeverseSchedule: boolean;
   posts: TheqooPost[];
 };
 
@@ -120,6 +121,7 @@ export const defaultTheqooState = (): TheqooState => ({
   },
   worldBookIds: [],
   includeCalendar: false,
+  includeWeverseSchedule: false,
   posts: demoPosts,
 });
 
@@ -141,6 +143,7 @@ export function loadTheqooState(): TheqooState {
       translator,
       worldBookIds: Array.isArray(parsed.worldBookIds) ? parsed.worldBookIds : [],
       includeCalendar: parsed.includeCalendar === true,
+      includeWeverseSchedule: parsed.includeWeverseSchedule === true,
       posts: Array.isArray(parsed.posts) ? parsed.posts : demoPosts,
     };
   } catch {

@@ -119,7 +119,7 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
       const rows = await generateTheqooPosts(
         state.worldBookIds,
         searchKeyword,
-        { includeCalendar: state.includeCalendar },
+        { includeCalendar: state.includeCalendar, includeWeverseSchedule: state.includeWeverseSchedule },
         state.translationEnabled,
       );
       if (!rows.length) throw new Error("这次没有生成帖子，请重试。");
@@ -513,8 +513,9 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
     </main>}
 
     {page === "sources" && <main className={styles.content}>
-      <p className={styles.hint}>{t("캘린더는 공개 일정 후보를 가끔 참고하는 용도입니다. 개인 일정은 공개 제보처럼 사용하지 않습니다.", "日历只偶尔作为公开活动的话题参考。私人安排不会被当成论坛爆料。")}</p>
-      <label className={styles.check}><input type="checkbox" checked={state.includeCalendar} onChange={e => setState(s => ({ ...s, includeCalendar: e.target.checked }))} />{t("휴대폰 캘린더 참고", "参考手机日历")}</label>
+      <p className={styles.hint}>{t("연동된 일정은 가끔 주제 참고용으로만 사용하며, 모든 새 글에 등장하지 않습니다. 휴대폰 캘린더의 개인 일정은 공개 제보처럼 사용하지 않고, WVS는 공개 일정만 참고합니다.", "关联日程只偶尔作为话题参考，不会每次刷新都出现。手机日历中的私人安排不会被当作公开爆料；WVS 只参考公开日程。")}</p>
+      <label className={styles.check}><input type="checkbox" checked={state.includeCalendar} onChange={e => setState(s => ({ ...s, includeCalendar: e.target.checked }))} />{t("휴대폰 캘린더 연동", "参考手机日历")}</label>
+      <label className={styles.check}><input type="checkbox" checked={state.includeWeverseSchedule} onChange={e => setState(s => ({ ...s, includeWeverseSchedule: e.target.checked }))} />{t("WVS 공개 일정 연동", "参考 WVS 公开日程")}</label>
     </main>}
 
     {page === "editor" && <main className={styles.content}><div className={styles.editor}>
