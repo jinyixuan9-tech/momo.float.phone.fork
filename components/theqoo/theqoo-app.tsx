@@ -43,7 +43,13 @@ function ForumImage({ assetId }: { assetId: string }) {
   return url ? <img className={styles.postImage} src={url} alt="帖子配图" /> : null;
 }
 
-export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice?: (message: string) => void }) {
+export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onIdle }: {
+  onClose: (isBusy?: boolean) => void;
+  onNotice?: (message: string) => void;
+  visible?: boolean;
+  onBusyChange?: (isBusy: boolean) => void;
+  onIdle?: () => void;
+}) {
   const [state, setState] = useState<TheqooState>(() => loadTheqooState());
   const [category, setCategory] = useState("전체");
   const [page, setPage] = useState<Page>("home");
@@ -51,6 +57,8 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
   const [previousPage, setPreviousPage] = useState<Page>("home");
   const [keyword, setKeyword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [generationKind, setGenerationKind] = useState<"refresh" | "search" | null>(null);
+  const busyRef = useRef(false);
   const [publishing, setPublishing] = useState(false);
   const [commentBusy, setCommentBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -82,6 +90,10 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
   const zh = state.uiLanguage === "zh";
   const t = (ko: string, cn: string) => zh ? cn : ko;
   useEffect(() => saveTheqooState(state), [state]);
+  useEffect(() => {
+    onBusyChange?.(busy);
+    if (!visible && !busy) onIdle?.();
+  }, [busy, visible, onBusyChange, onIdle]);
 
   const visiblePosts = state.posts.filter(p => {
     if (page === "favorites" && !p.favorite) return false;
@@ -101,7 +113,7 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
     }
     if (page === "my") { setPage("settings"); return; }
     if (page === "settings") { setPage("home"); return; }
-    onClose();
+    onClose(busyRef.current);
   };
 
   const openPost = (p: TheqooPost) => {
@@ -113,8 +125,10 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
   const replaceImages = (post: TheqooPost, images: TheqooImage[]) => updatePost(post.id, { images, imageRef: undefined, imagePrompt: undefined });
 
   const generateBatch = async (searchKeyword: string, processPending: boolean) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setGenerationKind(processPending ? "refresh" : "search");
     try {
       const rows = await generateTheqooPosts(
         state.worldBookIds,
@@ -153,7 +167,9 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
     } catch (error) {
       onNotice?.(error instanceof Error ? error.message : "刷新失败，请重试。");
     } finally {
+      busyRef.current = false;
       setBusy(false);
+      setGenerationKind(null);
     }
   };
 
@@ -408,7 +424,7 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
         {page === "home" && <img className={styles.logoMark} src="/images/theqoo-logo.png" alt="theqoo" />}
         <span className={styles.brand}>{title}</span><span className={styles.spacer} />
         {page === "home" && <>
-          <button className={styles.icon} disabled={busy} onClick={() => void refreshPosts()} aria-label="随机刷新并处理评论"><RefreshCw size={21} /></button>
+          <button className={styles.icon} disabled={busy} onClick={() => void refreshPosts()} aria-label="随机刷新并处理评论"><RefreshCw size={21} className={generationKind === "refresh" ? styles.refreshSpin : undefined} /></button>
           <button className={styles.icon} onClick={() => openEditor()} aria-label="发帖"><Pencil size={21} /></button>
           <button className={styles.icon} onClick={() => setState(s => ({ ...s, uiLanguage: zh ? "ko" : "zh" }))} aria-label="切换界面语言"><Languages size={22} /></button>
           <button className={styles.icon} onClick={() => setPage("settings")} aria-label="设置"><Menu size={23} /></button>
@@ -421,7 +437,7 @@ export function TheqooApp({ onClose, onNotice }: { onClose: () => void; onNotice
       {page === "home" && <div className={styles.searchBand}><div className={styles.searchBox}>
         <Search size={18} />
         <input value={keyword} onChange={e => setKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && keyword.trim()) void searchPosts(); }} placeholder={t("검색어를 입력하세요", "输入关键词搜索")}/>
-        <button disabled={busy || !keyword.trim()} onClick={() => void searchPosts()}>{busy ? t("생성 중", "生成中") : t("검색", "搜索")}</button>
+        <button disabled={busy || !keyword.trim()} onClick={() => void searchPosts()}>{generationKind === "search" ? t("검색 중…", "搜索中…") : t("검색", "搜索")}</button>
       </div></div>}
     </header>
 

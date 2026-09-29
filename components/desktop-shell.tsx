@@ -1127,9 +1127,15 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [xiaohongshuBusy, setXiaohongshuBusy] = useState(false);
   const [shoppingMounted, setShoppingMounted] = useState(false);
   const [shoppingBusy, setShoppingBusy] = useState(false);
+  const [theqooMounted, setTheqooMounted] = useState(false);
+  const [theqooBusy, setTheqooBusy] = useState(false);
+  const [marketTheqooMounted, setMarketTheqooMounted] = useState(false);
+  const marketTheqooBusyRef = useRef(false);
+  const marketTheqooLaunchContextRef = useRef<Record<string, unknown> | null>(null);
   if (activeApp === "dwelling" && !dwellingMounted) setDwellingMounted(true);
   if (activeApp === "xiaohongshu" && !xiaohongshuMounted) setXiaohongshuMounted(true);
   if (activeApp === "shopping" && !shoppingMounted) setShoppingMounted(true);
+  if (activeApp === "theqoo" && !theqooMounted) setTheqooMounted(true);
   const [widgets, setWidgets] = useState<WidgetInstance[]>([]);
   const [incomingCall, setIncomingCall] = useState<{
     sessionId: string; type: "phone" | "voice" | "video"; charName: string; charAvatar: string | null; isGroup?: boolean; source?: "chat" | "sms";
@@ -2443,6 +2449,11 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [chatInitSessionId, setChatInitSessionId] = useState<string | null>(null);
   const [activeChatSession, setActiveChatSession] = useState<ChatSession | null>(null);
   const [customAppLaunchContext, setCustomAppLaunchContext] = useState<CustomAppLaunchState | null>(null);
+  if (activeApp === toCustomAppIconId("theqoo.float.forum") && !marketTheqooMounted) {
+    marketTheqooLaunchContextRef.current = customAppLaunchContext?.appId === "theqoo.float.forum"
+      ? customAppLaunchContext.context : null;
+    setMarketTheqooMounted(true);
+  }
   const [appMarketLaunchContext, setAppMarketLaunchContext] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     const handler = (e: Event) => {
@@ -3940,8 +3951,26 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     setShoppingMounted(false);
   }, [shoppingBusy]);
 
+  const handleCloseTheqoo = useCallback((isBusy?: boolean) => {
+    const shouldKeepMounted = isBusy ?? theqooBusy;
+    setActiveApp(null);
+    if (shouldKeepMounted) {
+      setNotice("theqoo 正在后台生成，完成后会自动保存。");
+      return;
+    }
+    setTheqooBusy(false);
+    setTheqooMounted(false);
+  }, [theqooBusy]);
+
   function closeCustomAppRunner(app: InstalledCustomApp): void {
     const launchState = customAppLaunchContext?.appId === app.id ? customAppLaunchContext : null;
+    if (app.id === "theqoo.float.forum") {
+      if (marketTheqooBusyRef.current) {
+        setNotice("theqoo 正在后台生成，完成后会自动保存。");
+      } else {
+        setMarketTheqooMounted(false);
+      }
+    }
     setCustomAppLaunchContext(null);
     if (launchState?.returnTo?.appId === "chat") {
       const sessionId = launchState.returnTo.sessionId;
@@ -4011,6 +4040,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
     const customApp = getCustomAppForIcon(activeApp);
     if (customApp) {
+      if (customApp.id === "theqoo.float.forum") return null;
       return (
         <CustomAppForegroundBoundary
           key={customApp.id}
@@ -4082,7 +4112,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       return <TwitterApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
     if (activeApp === "theqoo") {
-      return <TheqooApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+      return null;
     }
     if (activeApp === "question_box") {
       return <QuestionBoxApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
@@ -4795,7 +4825,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                   </>
                 ) : (
                   <>
-                    <section className="phone-app-pane" style={activeApp === "dwelling" || activeApp === "xiaohongshu" || activeApp === "shopping" ? { display: "none" } : undefined}>
+                    <section className="phone-app-pane" style={activeApp === "dwelling" || activeApp === "xiaohongshu" || activeApp === "shopping" || activeApp === "theqoo" || activeApp === toCustomAppIconId("theqoo.float.forum") ? { display: "none" } : undefined}>
                       {renderAppBody()}
                     </section>
                     {/* DwellingApp stays mounted while generating — auto-unmounts when idle */}
@@ -4841,6 +4871,49 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                     />
                   </section>
                 )}
+                {theqooMounted && (
+                  <section className="phone-app-pane" style={activeApp !== "theqoo" ? { display: "none" } : undefined}>
+                    <TheqooApp
+                      onClose={handleCloseTheqoo}
+                      onNotice={setNotice}
+                      visible={activeApp === "theqoo"}
+                      onBusyChange={setTheqooBusy}
+                      onIdle={() => {
+                        if (activeApp !== "theqoo") {
+                          setTheqooBusy(false);
+                          setTheqooMounted(false);
+                        }
+                      }}
+                    />
+                  </section>
+                )}
+                {marketTheqooMounted && (() => {
+                  const app = customApps.find(item => item.id === "theqoo.float.forum");
+                  return app ? (
+                    <section className="phone-app-pane" style={activeApp !== toCustomAppIconId(app.id) ? { display: "none" } : undefined}>
+                      <CustomAppForegroundBoundary
+                        appName={app.name}
+                        appId={app.id}
+                        appVersion={app.version}
+                        manifestId={app.manifest?.id}
+                        onClose={() => closeCustomAppRunner(app)}
+                      >
+                        <CustomAppRunner
+                          app={app}
+                          launchContext={marketTheqooLaunchContextRef.current}
+                          onClose={() => closeCustomAppRunner(app)}
+                          onNotice={setNotice}
+                          onBackgroundActivityChange={active => {
+                            marketTheqooBusyRef.current = active;
+                            if (!active && activeAppRef.current !== toCustomAppIconId(app.id)) {
+                              setMarketTheqooMounted(false);
+                            }
+                          }}
+                        />
+                      </CustomAppForegroundBoundary>
+                    </section>
+                  ) : null;
+                })()}
               </div>
 
               {!activeApp ? (

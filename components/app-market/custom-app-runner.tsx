@@ -92,6 +92,7 @@ type CustomAppRunnerProps = {
   app: InstalledCustomApp;
   onClose: () => void;
   onNotice?: (message: string) => void;
+  onBackgroundActivityChange?: (active: boolean) => void;
   launchContext?: Record<string, unknown> | null;
   embedded?: boolean;
   backgroundEvent?: {
@@ -349,7 +350,8 @@ html, body { min-height: 100%; }
       getCapabilities: function(){ return request('app.getCapabilities'); },
       getLaunchContext: function(){ return Promise.resolve(launchContext); },
       getAssetUrl: function(path){ return request('app.getAssetUrl', { path: path }); },
-      close: function(){ return request('app.close'); }
+      close: function(){ return request('app.close'); },
+      setBackgroundActivity: function(active){ return request('app.setBackgroundActivity', { active: !!active }); }
     },
     db: {
       create: function(collection, data){ return request('db.create', { collection: collection, data: data }); },
@@ -799,6 +801,7 @@ export function CustomAppRunner({
   app,
   onClose,
   onNotice,
+  onBackgroundActivityChange,
   launchContext,
   embedded = false,
   backgroundEvent,
@@ -1099,6 +1102,10 @@ export function CustomAppRunner({
     }
     if (action === "app.close") {
       onClose();
+      return true;
+    }
+    if (action === "app.setBackgroundActivity") {
+      onBackgroundActivityChange?.(record.active === true);
       return true;
     }
     if (action === "app.getAssetUrl") {
@@ -1849,7 +1856,7 @@ export function CustomAppRunner({
     }
 
     throw new Error(`未知 AiPhone 动作：${action}`);
-  }, [app, backgroundEvent, backgroundTool, declaredEvents, declaredToolKeys, getFrameAudioChannel, launchContext, onClose, onNotice, postBackgroundEventIfReady, postBackgroundToolIfReady, postHostEvent, requireAnyPermission, requirePermission]);
+  }, [app, backgroundEvent, backgroundTool, declaredEvents, declaredToolKeys, getFrameAudioChannel, launchContext, onClose, onNotice, onBackgroundActivityChange, postBackgroundEventIfReady, postBackgroundToolIfReady, postHostEvent, requireAnyPermission, requirePermission]);
 
   useEffect(() => {
     if (isBackgroundRunner) return undefined;
