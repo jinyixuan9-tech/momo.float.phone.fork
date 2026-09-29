@@ -32,6 +32,7 @@ import {
   setCharacterCurrentTraits,
   setPhotoLibraryPreferences,
   updatePhotoRecord,
+  updatePhotoRecords,
 } from "@/lib/photo-library-storage";
 import { analyzePhotos, analyzePhotosInBackground, photoTraitsTextForCharacter } from "@/lib/photo-library-vision";
 import { photoUsageLabel } from "@/lib/photo-library-usage";
@@ -378,6 +379,26 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     updatePhotoRecord(detailPhoto.id, patch);
   };
 
+  const releaseDetailPhoto = () => {
+    if (!detailPhoto) return;
+    const updated = updatePhotoRecord(detailPhoto.id, { releasedAt: Date.now() });
+    if (updated) onNotice?.("已放出这张照片；它可以重新参与相册匹配，原使用记录仍保留。");
+  };
+
+  const unstackDetailPhoto = () => {
+    if (!detailPhoto) return;
+    if (detailPhoto.stackId) {
+      updatePhotoRecord(detailPhoto.id, { stackId: undefined });
+      onNotice?.("已从套图移出，照片会单独显示。");
+      return;
+    }
+    const members = photos.filter((photo) => photo.stackId === detailPhoto.id);
+    if (!members.length) return;
+    updatePhotoRecords(members.map((photo) => ({ ...photo, stackId: undefined, updatedAt: Date.now() })));
+    setExpandedStackId(null);
+    onNotice?.(`已拆开套图，${members.length + 1} 张照片会单独显示。`);
+  };
+
   const markManual = (field: string): string[] => Array.from(new Set([...(detailPhoto?.manualFields ?? []), field]));
 
   const updateDetailManual = (field: string, patch: Partial<PhotoRecord>) => {
@@ -533,6 +554,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
 
   if (detailPhoto) {
     const imageUrl = imageMap[detailPhoto.assetId];
+    const activeUsage = detailPhoto.usageHistory.filter((usage) => usage.usedAt > (detailPhoto.releasedAt || 0));
+    const stackMemberCount = photos.filter((photo) => photo.stackId === detailPhoto.id).length;
     return (
       <section className="photos-app photos-detail-view">
         <header className="photos-topbar">
@@ -716,16 +739,17 @@ export function PhotosApp({ onClose, onNotice }: Props) {
           <section className="photos-inspector-card">
             <div className="photos-inspector-heading"><strong>系列与套图</strong></div>
             <label className="photos-edit-row"><span>系列名称</span><input value={detailPhoto.seriesId || ""} placeholder="如：王子套" onChange={(event) => updateDetail({ seriesId: event.target.value })} /></label>
-            <label className="photos-edit-row"><span>加入套图</span><select value={detailPhoto.stackId || ""} onChange={(event) => updateDetail({ stackId: event.target.value || undefined })}>
+            <label className="photos-edit-row"><span>套图归属</span><select value={detailPhoto.stackId || ""} onChange={(event) => updateDetail({ stackId: event.target.value || undefined })}>
               <option value="">单张展示</option>
               {photos.filter((item) => item.id !== detailPhoto.id && !item.stackId && (scope ? scopedPhotos.includes(item) : true)).map((item) => <option key={item.id} value={item.id}>{item.seriesId || item.subject || item.originalName || "照片"} · {formatPhotoDate(item.createdAt)}</option>)}
             </select></label>
-            <span className="photos-note">也可以在图库中把照片拖到封面上叠成套图。</span>
+            {detailPhoto.stackId || stackMemberCount > 0 ? <button type="button" className="photos-detail-action" onClick={unstackDetailPhoto}>{detailPhoto.stackId ? "从套图移出，单独显示" : `拆开整个套图（${stackMemberCount + 1} 张）`}</button> : null}
+            <span className="photos-note">套图只影响展示，不影响每张照片的使用记录。也可以把照片拖到封面上叠成套图。</span>
           </section>
           <section className="photos-inspector-card">
-            <div className="photos-inspector-heading"><strong>使用记录</strong><span>放出后可重新匹配各渠道</span></div>
-            {detailPhoto.usageHistory.length ? detailPhoto.usageHistory.map((usage, index) => <div className="photos-usage-row" key={`${usage.usedAt}_${index}`}><span>{photoUsageLabel(usage.channel)} · {characterById.get(usage.characterId)?.name || usage.characterId}</span><time>{formatPhotoDate(usage.usedAt)}</time></div>) : <span className="photos-note">还没有发布过</span>}
-            {detailPhoto.usageHistory.length ? <button type="button" className="photos-mini-action" onClick={() => updateDetail({ releasedAt: Date.now() })}>手动放出这张照片</button> : null}
+            <div className="photos-inspector-heading"><strong>使用记录</strong><span>{activeUsage.length ? `本轮已用于 ${activeUsage.length} 次 · 可手动放出` : detailPhoto.releasedAt ? "已放出 · 可重新参与匹配" : "还没有发布过"}</span></div>
+            {detailPhoto.usageHistory.length ? detailPhoto.usageHistory.map((usage, index) => <div className="photos-usage-row" key={`${usage.usedAt}_${index}`}><span>{photoUsageLabel(usage.channel)} · {characterById.get(usage.characterId)?.name || usage.characterId}{usage.usedAt <= (detailPhoto.releasedAt || 0) ? " · 上轮记录" : ""}</span><time>{formatPhotoDate(usage.usedAt)}</time></div>) : <span className="photos-note">还没有发布过</span>}
+            {activeUsage.length ? <button type="button" className="photos-detail-action" onClick={releaseDetailPhoto}>放出照片，允许再次匹配</button> : detailPhoto.releasedAt ? <span className="photos-release-status">✓ 已放出，原发布记录已保留</span> : null}
           </section>
         </main>
       </section>

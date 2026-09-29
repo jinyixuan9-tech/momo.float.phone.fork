@@ -173,6 +173,8 @@
 .photos-pool-name small { color: #888; font-size: 11px; }
 .photos-usage-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eee; font-size: 12px; }
 .photos-usage-row time, .photos-note { color: #888; font-size: 11px; }
+.photos-detail-action { display: block; width: 100%; margin: 12px 0 8px; border: 0; border-radius: 11px; padding: 11px 12px; background: #f0f0f4; color: #1768c6; text-align: center; font: inherit; font-size: 12px; font-weight: 650; }
+.photos-release-status { display: block; margin-top: 10px; color: #23864e; font-size: 12px; font-weight: 650; }
 
 .photos-empty {
   min-height: 390px;
