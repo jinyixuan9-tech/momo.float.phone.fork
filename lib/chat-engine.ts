@@ -79,6 +79,7 @@ import { formatCustomAppChatDirectivesForPrompt } from "./custom-app-chat-direct
 import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
+import { activeListenSession } from "./together-listening";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext } from "./character-time";
@@ -1985,6 +1986,17 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
+    const listening = activeListenSession();
+    if (resolvedAppId === "chat" && listening?.characterId === character.id) {
+        llmMessages.push({
+            role: "system",
+            content: [
+                `你正在与用户一起听歌，已开始 ${Math.floor((Date.now() - listening.startedAt) / 60000)} 分钟。音乐播放以小手机现有 Music 播放器为准。`,
+                `最近一起听记录：${listening.entries.slice(-12).map(entry => `${entry.by === "user" ? "用户" : "你"}：${entry.text}`).join("；") || "暂无"}。`,
+                "你和用户都可以点歌、换歌。自然地回应当前聊天；主动换歌至少间隔 3 分钟，用户明确要求则不受此限制。不要声称与现实中的另一台设备同步播放。",
+            ].join("\n"),
+        });
+    }
     const senderWallet = loadWalletState(character.id);
     llmMessages.push({ role: "system", content: `如果自然聊天中发送转账或红包，使用角色的钱包设定：默认结算币种 ${senderWallet.primaryCurrency}，其他常用币种 ${(senderWallet.commonCurrencies || []).join("、") || "无"}。发送时务必在富媒体金额中写出实际币种 ISO（例如 [转账:KRW 1000:留言]），金额与币种必须对应真实扣款，绝不省略 ISO 或默认假定人民币。角色当前可用资金：${getWalletVisibleCurrencies(senderWallet).map(currency => `${currency} ${formatCurrencyAmount(getWalletCurrencyBalance(senderWallet, currency), currency)}`).join("；")}。币种随人物所在地和场景选择，不得超过可用余额。` });
     if (!session.isGroup && resolvedAppId === "chat" && !effectiveAppTags.includes("voice") && !effectiveAppTags.includes("video")) {

@@ -282,7 +282,7 @@ export default function MusicPlayer() {
 
     // Sync liked state with current track
     useEffect(() => {
-        setLiked(player.currentTrack?.liked ?? false);
+        setLiked(isNeteaseTrack ? Boolean(getTrackPlaylistId(neteaseId)) : Boolean(player.currentTrack?.liked));
     }, [player.currentTrack?.id, player.currentTrack?.liked]);
 
     // Clear add result after 2s
@@ -295,13 +295,15 @@ export default function MusicPlayer() {
     const handleLike = useCallback(async () => {
         if (!player.currentTrack) return;
         const newLiked = !liked;
-        setLiked(newLiked);
         if (newLiked) {
             // For Netease tracks, open playlist picker to add to a playlist
             if (isNeteaseTrack && isNeteaseConfigured()) {
                 setShowPlaylistPicker(true);
                 setLoadingPlaylists(true);
                 getUserPlaylists().then(p => { setPlaylists(p); setLoadingPlaylists(false); });
+            } else {
+                setLiked(true);
+                player.setTrackLiked(player.currentTrack.id, true);
             }
         } else {
             // Unlike — remove from Netease playlist if previously added
@@ -309,10 +311,13 @@ export default function MusicPlayer() {
                 const pid = getTrackPlaylistId(neteaseId);
                 if (pid) {
                     const result = await removeTracksFromPlaylist(pid, [neteaseId]);
+                    if (!result.ok) { setAddResult(result); return; }
                     removeTrackPlaylistRecord(neteaseId);
                     setAddResult(result);
                 }
             }
+            setLiked(false);
+            player.setTrackLiked(player.currentTrack.id, false);
         }
     }, [liked, player.currentTrack, isNeteaseTrack, neteaseId]);
 
@@ -321,6 +326,8 @@ export default function MusicPlayer() {
         const result = await addTracksToPlaylist(playlist.id, [neteaseId]);
         if (result.ok) {
             recordTrackPlaylist(neteaseId, playlist.id);
+            if (player.currentTrack) player.setTrackLiked(player.currentTrack.id, true);
+            setLiked(true);
         }
         setAddResult(result);
         setShowPlaylistPicker(false);

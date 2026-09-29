@@ -26,6 +26,8 @@ import {
 } from "@/lib/music-service";
 import { clearMusicCloudSyncData } from "@/lib/chat-engine";
 import MusicCommentsPage from "./music-comments";
+import TogetherListeningPanel from "./together-listening-panel";
+import { activeListenSession } from "@/lib/together-listening";
 import {
     loadMusicBg, saveMusicBg, clearMusicBg, fileToCompressedDataUrl, appBgStyle,
     MUSIC_BG_EVENT, type MusicBgConfig, type MusicPlayerBgMode,
@@ -40,6 +42,12 @@ export default function MusicApp({ onClose }: Props) {
     const [tab, setTab] = useState<TabId>("local");
     const [hasNetease, setHasNetease] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
+    const [showTogether, setShowTogether] = useState(() => Boolean(activeListenSession()));
+    useEffect(() => {
+        const open = () => setShowTogether(true);
+        window.addEventListener("together-listening-open", open);
+        return () => window.removeEventListener("together-listening-open", open);
+    }, []);
     const [showCssEditor, setShowCssEditor] = useState(false);
     const [customCss, setCustomCss] = useState("");
     const [activePlaylist, setActivePlaylist] = useState<NeteasePlaylist | null>(null);
@@ -310,6 +318,7 @@ export default function MusicApp({ onClose }: Props) {
                     {dailyView ? "每日推荐" : activePlaylist && tab === "recommend" ? "歌单详情" : tab === "recommend" ? "" : tab === "search" ? "搜索" : tab === "mine" ? "我的" : "本地音乐"}
                 </div>
                 <div className="music-header-right">
+                    <button className="music-header-action" onClick={() => setShowTogether(true)} title="一起听" aria-label="一起听">♫</button>
                     <button className="music-header-action" onClick={() => setShowSettings(true)} title="设置">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -319,6 +328,7 @@ export default function MusicApp({ onClose }: Props) {
             </div>
 
             {/* Tab content */}
+            {showTogether && <TogetherListeningPanel onClose={() => setShowTogether(false)} />}
             {tab === "recommend" && hasNetease && (dailyView ? (
                 <DailySongsPage
                     songs={dailyView}

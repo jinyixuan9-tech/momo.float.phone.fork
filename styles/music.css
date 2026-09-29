@@ -4986,3 +4986,32 @@
     font-size: calc(9px*var(--app-text-scale,1));
     color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
 }
+/* Together listening lives above the existing Music screen and uses its player. */
+.together-sheet {
+    position: absolute; z-index: 60; inset: 66px 10px 82px;
+    display: flex; flex-direction: column; gap: 14px; overflow: auto;
+    padding: 18px; border-radius: 24px;
+    background: rgba(20, 21, 31, .96); color: #fff;
+    box-shadow: 0 12px 38px rgba(0,0,0,.32);
+}
+.together-sheet button { color: inherit; cursor: pointer; }
+.together-sheet-header, .together-active, .together-buttons, .together-request { display: flex; align-items: center; gap: 10px; }
+.together-sheet-header { justify-content: space-between; font-size: 19px; }
+.together-sheet-header button { border: 0; background: transparent; font-size: 26px; }
+.together-active { padding: 14px; background: rgba(255,255,255,.11); border-radius: 16px; flex-wrap: wrap; }
+.together-active span { flex: 1; min-width: 90px; }
+.together-active button, .together-request button, .together-buttons button { border: 0; border-radius: 12px; padding: 9px 12px; background: rgba(255,255,255,.15); }
+.together-people { display: flex; flex-wrap: wrap; gap: 10px; }
+.together-people p { width: 100%; }
+.together-people button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 12px; padding: 8px; background: rgba(255,255,255,.12); }
+.together-people img { width: 30px; height: 30px; object-fit: cover; border-radius: 50%; }
+.together-controls { display: grid; gap: 12px; }
+.together-buttons { flex-wrap: wrap; }
+.together-request input { flex: 1; min-width: 0; border: 1px solid #777; border-radius: 12px; padding: 10px; color: #fff; background: rgba(255,255,255,.09); }
+.together-request button:disabled { opacity: .5; }
+.together-history { border-top: 1px solid #555; overflow: auto; min-height: 90px; }
+.together-history h3 { font-size: 14px; margin: 12px 0; }
+.together-history p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.together-history p span { opacity: .65; }
+.together-sessions { display: grid; gap: 6px; }
+.together-sessions button { border: 0; border-radius: 10px; text-align: left; padding: 10px; background: rgba(255,255,255,.08); }

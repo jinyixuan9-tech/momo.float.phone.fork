@@ -51,6 +51,7 @@ import type { NoteWallBoard, NoteWallComment, NoteWallNote, NoteWallSize } from 
 import { findNoteWallPlacement, normalizeNoteWallSize } from "./notewall-utils";
 import { recordNoteWallCommentEvent, recordNoteWallNoteEvent } from "./notewall-memory";
 import { getMusicControlBridge } from "./music-control-bridge";
+import { activeListenSession, canCharacterChangeListenTrack, creditCharacterListenTrack, endListenSession, markNextListenTrackAsCharacter, recordListenEntry, startListenSession } from "./together-listening";
 import { loadAllTracks, type MusicTrack } from "./music-storage";
 import {
     checkLoginStatus,
@@ -1014,7 +1015,9 @@ function isNoteWallToolName(name: string): boolean {
 }
 
 function isMusicControlToolName(name: string): boolean {
-    return name === "查看音乐状态"
+    return name === "开始一起听"
+        || name === "结束一起听"
+        || name === "查看音乐状态"
         || name === "查看音乐库概览"
         || name === "查看歌单歌曲"
         || name === "搜索音乐"
@@ -1833,7 +1836,7 @@ async function executeNoteWallTool(call: ToolCall, context?: ToolExecutionContex
 
 async function executeMusicControlTool(call: ToolCall, context?: ToolExecutionContext): Promise<ToolResult> {
     const capability = getInternalCapability(MUSIC_CONTROL_CAPABILITY_ID);
-    if (!capability || !capability.enabled || capability.mode === "off") {
+    if (!capability || ((!capability.enabled || capability.mode === "off") && !(context?.appId === "chat" && context.characterId && activeListenSession()?.characterId === context.characterId))) {
         return {
             name: call.name,
             success: false,
@@ -1857,6 +1860,17 @@ async function executeMusicControlTool(call: ToolCall, context?: ToolExecutionCo
 
     try {
         switch (call.name) {
+            case "开始一起听": {
+                if (!context?.characterId || context.appId !== "chat") return { name: call.name, success: false, error: "请在角色私聊中发起一起听" };
+                startListenSession(context.characterId);
+                recordListenEntry("character", "发起一起听");
+                return musicToolSuccess(call.name, "已进入一起听，可在 Music 中点歌", { continueConversation: false, persistToHistory: false, userNotice: "已开始一起听" });
+            }
+            case "结束一起听": {
+                if (!context?.characterId || activeListenSession()?.characterId !== context.characterId) return { name: call.name, success: false, error: "当前没有与你的一起听会话" };
+                endListenSession();
+                return musicToolSuccess(call.name, "一起听已结束", { continueConversation: false, persistToHistory: false, userNotice: "一起听已结束" });
+            }
             case "查看音乐状态":
                 return executeMusicStatusTool(call.name);
             case "查看音乐库概览":
@@ -1866,11 +1880,11 @@ async function executeMusicControlTool(call: ToolCall, context?: ToolExecutionCo
             case "搜索音乐":
                 return await executeMusicSearchTool(call.args);
             case "播放音乐":
-                return await executeMusicPlayTool(call.args);
+                return await executeMusicPlayTool(call.args, context);
             case "加入播放列表":
-                return await executeMusicQueueTool(call.args);
+                return await executeMusicQueueTool(call.args, context);
             case "切换音乐":
-                return executeMusicSwitchTool(call.args);
+                return executeMusicSwitchTool(call.args, context);
         }
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -2435,9 +2449,12 @@ async function executeMusicSearchTool(args: Record<string, unknown>): Promise<To
     });
 }
 
-async function executeMusicPlayTool(args: Record<string, unknown>): Promise<ToolResult> {
+async function executeMusicPlayTool(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
     const { result, bridge } = getMusicBridgeResult("播放音乐");
     if (result || !bridge) return result!;
+    const listen = activeListenSession();
+    const fromParticipant = listen?.characterId === context?.characterId;
+    if (fromParticipant && !args.requestedByUser && !canCharacterChangeListenTrack()) return { name: "播放音乐", success: false, error: "一起听中主动换歌还需间隔 3 分钟；用户明确点歌可传 requestedByUser=true" };
 
     const source = cleanToolString(args.source, 20);
     const songId = args.songId ?? args.song_id ?? args.id;
@@ -2447,6 +2464,7 @@ async function executeMusicPlayTool(args: Record<string, unknown>): Promise<Tool
         const track = await resolveMusicTrackById(source, songId);
         if (!track) return { name: "播放音乐", success: false, error: "没有找到指定歌曲" };
         const played = await bridge.playTrack(track);
+        if (played.ok && played.track && fromParticipant) creditCharacterListenTrack(played.track);
         return musicToolSuccess("播放音乐", played, {
             continueConversation: false,
             persistToHistory: false,
@@ -2456,6 +2474,7 @@ async function executeMusicPlayTool(args: Record<string, unknown>): Promise<Tool
 
     if (!query) return { name: "播放音乐", success: false, error: "缺少 query 或 songId" };
     const played = await bridge.playByQuery(query);
+    if (played.ok && played.track && fromParticipant) creditCharacterListenTrack(played.track);
     return musicToolSuccess("播放音乐", played, {
         continueConversation: false,
         persistToHistory: false,
@@ -2463,9 +2482,11 @@ async function executeMusicPlayTool(args: Record<string, unknown>): Promise<Tool
     });
 }
 
-async function executeMusicQueueTool(args: Record<string, unknown>): Promise<ToolResult> {
+async function executeMusicQueueTool(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
     const { result, bridge } = getMusicBridgeResult("加入播放列表");
     if (result || !bridge) return result!;
+    const listen = activeListenSession();
+    if (listen?.characterId === context?.characterId && args.playFirst && !args.requestedByUser && !canCharacterChangeListenTrack()) return { name: "加入播放列表", success: false, error: "一起听中主动换歌还需间隔 3 分钟" };
 
     const limit = clampToolInteger(args.limit, 1, 50, 10);
     const replace = Boolean(args.replace);
@@ -2490,6 +2511,7 @@ async function executeMusicQueueTool(args: Record<string, unknown>): Promise<Too
 
     if (tracks.length === 0) return { name: "加入播放列表", success: false, error: "没有找到可加入播放列表的歌曲" };
     const queued = await bridge.addToQueue(tracks, { replace, playFirst });
+    if (queued.ok && playFirst && listen?.characterId === context?.characterId) creditCharacterListenTrack(tracks[0]);
     return musicToolSuccess("加入播放列表", {
         ...queued,
         queue: queued.queue.slice(0, 30).map(formatMusicTrackForTool),
@@ -2501,11 +2523,15 @@ async function executeMusicQueueTool(args: Record<string, unknown>): Promise<Too
     });
 }
 
-function executeMusicSwitchTool(args: Record<string, unknown>): ToolResult {
+function executeMusicSwitchTool(args: Record<string, unknown>, context?: ToolExecutionContext): ToolResult {
     const { result, bridge } = getMusicBridgeResult("切换音乐");
     if (result || !bridge) return result!;
     const action = cleanToolString(args.action ?? args.type, 20);
     const normalizedAction = action === "previous" ? "prev" : action === "play" ? "resume" : action;
+    const listen = activeListenSession();
+    const fromParticipant = listen?.characterId === context?.characterId;
+    if (fromParticipant && (normalizedAction === "next" || normalizedAction === "prev") && !args.requestedByUser && !canCharacterChangeListenTrack()) return { name: "切换音乐", success: false, error: "一起听中主动换歌还需间隔 3 分钟" };
+    if ((normalizedAction === "next" || normalizedAction === "prev") && (!bridge.getState().currentTrack || bridge.getState().queue.length === 0)) return { name: "切换音乐", success: false, error: "当前没有可切换的歌曲" };
     const labels: Record<string, string> = {
         next: "已切到下一首",
         prev: "已切到上一首",
@@ -2515,11 +2541,15 @@ function executeMusicSwitchTool(args: Record<string, unknown>): ToolResult {
     };
     switch (normalizedAction) {
         case "next":
+            if (fromParticipant) markNextListenTrackAsCharacter();
             bridge.next();
+            if (fromParticipant) recordListenEntry("character", "切到下一首");
             break;
         case "prev":
         case "previous":
+            if (fromParticipant) markNextListenTrackAsCharacter();
             bridge.prev();
+            if (fromParticipant) recordListenEntry("character", "切到上一首");
             break;
         case "pause":
             bridge.pause();

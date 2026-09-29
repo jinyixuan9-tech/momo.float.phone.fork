@@ -24,6 +24,7 @@ import { PhoneChatApp } from "@/components/chat/phone-chat-app";
 import { PhonePlaceholderApp } from "@/components/phone-placeholder-app";
 import MusicApp from "@/components/music/music-app";
 import MusicPlayer from "@/components/music/music-player";
+import { useListenSessions } from "@/lib/together-listening";
 import MusicFloat from "@/components/music/music-float";
 import MiniAppWindow from "@/components/music/mini-app-window";
 import { PhoneCalendarApp } from "@/components/calendar-app";
@@ -1052,6 +1053,23 @@ const MusicShellOverlays = memo(function MusicShellOverlays({
 });
 
 export function DesktopShell({ initialThemeProfile, initialThemeAssets }: DesktopShellProps) {
+  const listeningSessions = useListenSessions();
+  const listeningSession = listeningSessions.find(s => !s.endedAt) || null;
+  const [listeningNow, setListeningNow] = useState(Date.now());
+  useEffect(() => {
+    if (!listeningSession) return;
+    setListeningNow(Date.now());
+    const timer = window.setInterval(() => setListeningNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [listeningSession?.id]);
+  useEffect(() => {
+    const openTogether = () => {
+      setActiveApp("music");
+      window.setTimeout(() => window.dispatchEvent(new Event("together-listening-open")), 80);
+    };
+    window.addEventListener("together-listening-navigate", openTogether);
+    return () => window.removeEventListener("together-listening-navigate", openTogether);
+  }, []);
   const musicOverlayControllerRef = useRef<MusicOverlayController | null>(null);
   const handleMusicOverlayControllerChange = useCallback((controller: MusicOverlayController | null) => {
     musicOverlayControllerRef.current = controller;
@@ -4229,19 +4247,21 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                 <StatusClock />
                 <button
                   type="button"
-                  className={`status-island${chatMessageNotice || activePhoneCall || activeChatCall || incomingCall ? " status-island-active" : ""}`}
-                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : activePhoneCall || activeChatCall ? "返回通话" : chatMessageNotice ? `新消息：${chatMessageNotice.title}` : "灵动岛"}
+                  className={`status-island${chatMessageNotice || activePhoneCall || activeChatCall || incomingCall || listeningSession ? " status-island-active" : ""}`}
+                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : activePhoneCall || activeChatCall ? "返回通话" : chatMessageNotice ? `新消息：${chatMessageNotice.title}` : listeningSession ? "返回一起听" : "灵动岛"}
                   onClick={() => {
                     if (incomingCall) { setIslandExpanded(value => !value); return; }
                     if (activePhoneCall) { setActiveApp("phone"); return; }
                     if (activeChatCall) { setActiveApp("chat"); setChatInitSessionId(activeChatCall.sessionId); return; }
                     if (chatMessageNotice) setIslandExpanded(value => !value);
+                    else if (listeningSession) window.dispatchEvent(new Event("together-listening-navigate"));
                   }}
                 >
                   {incomingCall ? <span className="status-island-content"><span className="status-island-dot" />{incomingCall.charName}来电</span>
                     : activePhoneCall ? <span className="status-island-content"><span className="status-island-dot" />通话中 <span className="status-island-end">{Math.floor(islandCallSeconds / 60).toString().padStart(2, "0")}:{(islandCallSeconds % 60).toString().padStart(2, "0")}</span></span>
                     : activeChatCall ? <span className="status-island-content"><span className="status-island-dot" />Chat {activeChatCall.type === "video" ? "视频" : "语音"}{activeChatCall.phase === "ringing" ? "呼叫中" : "通话中"}</span>
                     : chatMessageNotice ? <span className="status-island-content"><span className="status-island-dot" />{chatMessageNotice.title}<span className="status-island-end">消息</span></span>
+                    : listeningSession ? <span className="status-island-content"><span className="status-island-dot" />♫ 一起听<span className="status-island-end">{Math.floor((listeningNow - listeningSession.startedAt) / 60000)}分</span></span>
                     : null}
                 </button>
                 <div className="status-right" aria-hidden>

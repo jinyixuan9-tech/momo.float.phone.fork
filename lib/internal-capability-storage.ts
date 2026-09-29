@@ -2,6 +2,7 @@ import type { InternalCapabilityConfig } from "./settings-types";
 import { isAgentComputerConfigured, isContainerComputer } from "./agent-computer";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { loadBridgeDataItems, loadBridgeShortcutActions, parseBridgeActionParameterSchema } from "./reality-bridge/storage";
+import { activeListenSession } from "./together-listening";
 
 const INTERNAL_CAPABILITIES_KEY = "ai_phone_internal_capabilities_v1";
 registerKvMigration(INTERNAL_CAPABILITIES_KEY);
@@ -182,6 +183,7 @@ const MUSIC_CONTROL_USAGE_GUIDE = [
     "- 想放某首歌 → 直接一步调「播放音乐」(传 query 即可)，禁止先调「查看音乐状态/音乐库概览/歌单歌曲」等查看动作来'勘察'。「播放音乐」自带搜索，无需任何前置查看。",
     "- 「查看××」这几个动作只在{{user}}明确问起时才用：问'我有哪些歌/歌单'→查看音乐库概览；问'现在放的是什么'→查看音乐状态。平时放歌一律不用。",
     "- 想直接放给{{user}}听 → 用「播放音乐」工具（真的会在 ta 手机上响起）；只有想'安利/推荐一首歌但不打断当前播放'时，才用 [音乐分享:歌名] 发卡片。{{user}}让你放歌时，默认用工具直接播放，不要只发分享卡片。",
+    "- {{user}}邀请你一起听，或你想主动邀请时，调用「开始一起听」；结束时用「结束一起听」。这会连接现有 Music 播放器和灵动岛。一起听时直接用播放音乐/切换音乐点歌换歌；角色主动换歌至少相隔 3 分钟，用户明确要求时可传 requestedByUser=true。不要虚构双方真实设备同步或距离。",
     "",
     "动作：播放音乐",
     "描述：按歌曲 ID 或关键词播放音乐。没有 ID 时用 query 搜索最佳可播放结果。",
@@ -189,8 +191,17 @@ const MUSIC_CONTROL_USAGE_GUIDE = [
     "  - query (string): 歌曲关键词",
     "  - source (string): local 或 netease；按 ID 播放时填写",
     "  - songId (string|number): 本地歌曲 ID 或网易云歌曲 ID",
+    "  - requestedByUser (boolean): 用户明确要求立即点歌时填 true",
     "示例：",
     '[执行动作:播放音乐({"query":"晴天"})]',
+    "",
+    "动作：开始一起听",
+    "描述：以当前角色身份加入一起听。用户邀请或你主动邀请时使用。参数：无。",
+    "[执行动作:开始一起听({})]",
+    "",
+    "动作：结束一起听",
+    "描述：结束你正在参与的一起听。参数：无。",
+    "[执行动作:结束一起听({})]",
     "",
     "动作：搜索音乐",
     "描述：搜索本地音乐和网易云音乐。",
@@ -233,6 +244,7 @@ const MUSIC_CONTROL_USAGE_GUIDE = [
     "  - limit (number): 从搜索或歌单加入多少首，1-50，默认 10",
     "  - replace (boolean): 是否替换当前播放列表，默认 false",
     "  - playFirst (boolean): 是否立即播放加入的第一首，默认 false",
+    "  - requestedByUser (boolean): 用户明确要求立即点歌时填 true",
     "示例：",
     '[执行动作:加入播放列表({"playlistId":123456,"limit":20,"replace":true,"playFirst":true})]',
     "",
@@ -240,6 +252,7 @@ const MUSIC_CONTROL_USAGE_GUIDE = [
     "描述：控制当前播放器。",
     "参数：",
     "  - action (string): next|prev|pause|resume|stop",
+    "  - requestedByUser (boolean): 用户明确要求立即换歌时填 true",
     "示例：",
     '[执行动作:切换音乐({"action":"next"})]',
     "",
@@ -428,6 +441,7 @@ const MUSIC_PLAY_PARAMETER_SCHEMA = JSON.stringify({
         query: { type: "string", description: "歌曲关键词" },
         source: { type: "string", description: "按 ID 播放时填写 local 或 netease" },
         songId: { type: ["number", "string"], description: "本地歌曲 ID 或网易云歌曲 ID" },
+        requestedByUser: { type: "boolean", description: "用户明确要求立即切歌或点歌时为 true" },
     },
 });
 
@@ -441,6 +455,7 @@ const MUSIC_QUEUE_PARAMETER_SCHEMA = JSON.stringify({
         limit: { type: "number", description: "从搜索或歌单加入多少首，1-50，默认 10" },
         replace: { type: "boolean", description: "是否替换当前播放列表，默认 false" },
         playFirst: { type: "boolean", description: "是否立即播放加入的第一首，默认 false" },
+        requestedByUser: { type: "boolean", description: "用户明确要求立即点歌时为 true" },
     },
 });
 
@@ -448,6 +463,7 @@ const MUSIC_SWITCH_PARAMETER_SCHEMA = JSON.stringify({
     type: "object",
     properties: {
         action: { type: "string", description: "next|prev|pause|resume|stop" },
+        requestedByUser: { type: "boolean", description: "用户明确要求立即切歌时为 true" },
     },
     required: ["action"],
 });
@@ -517,6 +533,8 @@ const NOTE_WALL_SUBTOOLS: InternalToolDefinition[] = [
 ];
 
 const MUSIC_CONTROL_SUBTOOLS: InternalToolDefinition[] = [
+    { name: "开始一起听", description: "与用户用现有 Music 播放器一起听歌。", parameterSchema: MUSIC_EMPTY_PARAMETER_SCHEMA },
+    { name: "结束一起听", description: "结束当前角色参与的一起听。", parameterSchema: MUSIC_EMPTY_PARAMETER_SCHEMA },
     {
         name: "播放音乐",
         description: "按歌曲 ID 或关键词播放音乐。",
@@ -1294,6 +1312,7 @@ export function getInternalCapability(id: string): InternalCapabilityConfig | nu
 export function getEnabledInternalCapabilities(appId?: string): InternalCapabilityConfig[] {
     if (appId !== "chat" && appId !== "group_chat") return [];
     return loadInternalCapabilities().filter(item => {
+        if (item.id === MUSIC_CONTROL_CAPABILITY_ID && appId === "chat" && activeListenSession()) return true;
         if (!item.enabled || item.mode === "off") return false;
         // 角色电脑是可插拔模块：没连接就不注入，模型完全看不见
         if (item.id === AGENT_COMPUTER_CAPABILITY_ID && !isAgentComputerConfigured()) return false;
