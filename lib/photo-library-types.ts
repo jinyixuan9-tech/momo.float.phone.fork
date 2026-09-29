@@ -1,11 +1,12 @@
 export type PhotoVisionStatus = "unprocessed" | "pending" | "done" | "failed";
 
-export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char" | "bubble" | "sms" | "wvs" | "other";
+export type PhotoUsageChannel = "dm_user" | "moments" | "dm_char" | "bubble" | "sms" | "wvs" | "other" | "wvs_artist" | "wvs_official" | "twitter_main" | "twitter_alt";
 
 export type PhotoUsageRecord = {
   channel: PhotoUsageChannel;
   characterId: string;
   targetId?: string;
+  accountId?: string;
   usedAt: number;
 };
 
@@ -61,6 +62,14 @@ export type PhotoRecord = {
   /** DM / 朋友圈等复用规则。 */
   usageHistory: PhotoUsageRecord[];
 
+  origin?: "upload" | "generated";
+  sourceAppId?: string;
+  sourceAccountId?: string;
+  seriesId?: string;
+  stackId?: string;
+  /** 手动放出后从该时间开始计算新一轮使用记录。 */
+  releasedAt?: number;
+
   createdAt: number;
   updatedAt: number;
 };
@@ -72,6 +81,11 @@ export type PhotoLibraryPreferences = {
   chatStrategy: PhotoSourceStrategy;
   momentsStrategy: PhotoSourceStrategy;
   resolverDebug: boolean;
+  enabledCharacterIds: string[];
+  enabledOfficialIds: string[];
+  enabledAlternateIds: string[];
+  /** 只对已经引入 Photos 的账号生效。 */
+  importedStrategy: "album_only" | "album_then_generated";
 };
 
 export type PhotoLibraryState = {

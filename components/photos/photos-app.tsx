@@ -34,16 +34,21 @@ import {
   updatePhotoRecord,
 } from "@/lib/photo-library-storage";
 import { analyzePhotos, analyzePhotosInBackground, photoTraitsTextForCharacter } from "@/lib/photo-library-vision";
+import { photoUsageLabel } from "@/lib/photo-library-usage";
+import { loadWeverseState, upsertWeverseCommunity } from "@/lib/weverse-storage";
+import { loadTwitterState, saveTwitterState } from "@/lib/twitter-storage";
 
 type Props = {
   onClose: () => void;
   onNotice?: (message: string) => void;
 };
 
-type MainTab = "library" | "people" | "shared";
+type MainTab = "library" | "people" | "shared" | "pools";
 type AlbumScope =
   | { type: "character"; characterId: string }
   | { type: "shared"; pairId: string }
+  | { type: "official"; accountId: string }
+  | { type: "alternate"; accountId: string }
   | null;
 
 type UploadDraft = {
@@ -52,6 +57,8 @@ type UploadDraft = {
   linkedCharacterIds: string[];
   aiUsable: boolean;
   shared: boolean;
+  accountId?: string;
+  accountType?: "official" | "alternate";
 };
 
 function sortPhotos(photos: PhotoRecord[]): PhotoRecord[] {
@@ -103,6 +110,8 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (nex
 
 export function PhotosApp({ onClose, onNotice }: Props) {
   const [characters, setCharacters] = useState<Character[]>(() => loadCharacters());
+  const [officialAccounts, setOfficialAccounts] = useState(() => loadWeverseState().communities);
+  const [alternateAccounts, setAlternateAccounts] = useState(() => Object.entries(loadTwitterState().accounts).filter(([id, profile]) => id.endsWith(":alt") && profile.disclosure !== "full"));
   const initialLibrary = useMemo(() => loadPhotoLibrary(), []);
   const [photos, setPhotos] = useState<PhotoRecord[]>(() => sortPhotos(initialLibrary.photos));
   const [currentTraitsByCharacter, setCurrentTraitsByCharacter] = useState(initialLibrary.currentTraitsByCharacter);
@@ -111,6 +120,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   const [tab, setTab] = useState<MainTab>("library");
   const [scope, setScope] = useState<AlbumScope>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [expandedStackId, setExpandedStackId] = useState<string | null>(null);
   const [uploadDraft, setUploadDraft] = useState<UploadDraft | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
@@ -125,6 +135,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     setPhotos(sortPhotos(state.photos));
     setCurrentTraitsByCharacter(state.currentTraitsByCharacter);
     setPreferences(state.preferences);
+    setOfficialAccounts(loadWeverseState().communities);
+    setAlternateAccounts(Object.entries(loadTwitterState().accounts).filter(([id, profile]) => id.endsWith(":alt") && profile.disclosure !== "full"));
   };
 
   useEffect(() => {
@@ -171,6 +183,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     uploadDraftRef.current = uploadDraft;
   }, [uploadDraft]);
 
+  useEffect(() => { setExpandedStackId(null); }, [scope, tab]);
+
   useEffect(() => () => {
     uploadDraftRef.current?.previewUrls.forEach((url) => URL.revokeObjectURL(url));
   }, []);
@@ -180,16 +194,24 @@ export function PhotosApp({ onClose, onNotice }: Props) {
     if (scope.type === "character") {
       return photos.filter((photo) => photo.linkedCharacterIds.includes(scope.characterId));
     }
+    if (scope.type === "official") {
+      const account = officialAccounts.find((item) => item.id === scope.accountId);
+      return photos.filter((photo) => account?.officialMediaPhotoIds?.includes(photo.id) || photo.sourceAccountId === scope.accountId);
+    }
+    if (scope.type === "alternate") {
+      const ids = loadTwitterState().alternateMediaPhotoIds[scope.accountId] || [];
+      return photos.filter((photo) => ids.includes(photo.id) || photo.sourceAccountId === scope.accountId);
+    }
     return photos.filter((photo) => photo.sharedPairIds.includes(scope.pairId));
-  }, [photos, scope]);
+  }, [photos, scope, officialAccounts]);
 
   const peopleAlbums = useMemo(() => characters
     .map((character) => {
       const items = photos.filter((photo) => photo.linkedCharacterIds.includes(character.id));
       return { character, items, cover: items[0] ?? null };
     })
-    .filter((album) => album.items.length > 0)
-    .sort((a, b) => b.items.length - a.items.length), [characters, photos]);
+    .filter((album) => preferences.enabledCharacterIds.includes(album.character.id))
+    .sort((a, b) => b.items.length - a.items.length), [characters, photos, preferences.enabledCharacterIds]);
 
   const sharedAlbums = useMemo(() => {
     const pairIds: string[] = Array.from(new Set<string>(photos.flatMap((photo) => photo.sharedPairIds)));
@@ -205,7 +227,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   }, [photos, characterById]);
 
   const openPicker = () => {
-    if (characters.length === 0) {
+    if (characters.length === 0 && scope?.type !== "official" && scope?.type !== "alternate") {
       onNotice?.("还没有角色，先创建角色再导入照片。");
       return;
     }
@@ -250,6 +272,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
       linkedCharacterIds: presetCharacterIds,
       aiUsable: true,
       shared: presetShared,
+      accountId: scope?.type === "official" || scope?.type === "alternate" ? scope.accountId : undefined,
+      accountType: scope?.type === "official" || scope?.type === "alternate" ? scope.type : undefined,
     });
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -287,7 +311,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
       onNotice?.("请先添加照片。");
       return;
     }
-    if (uploadDraft.linkedCharacterIds.length === 0) {
+    if (uploadDraft.linkedCharacterIds.length === 0 && !uploadDraft.accountId) {
       onNotice?.("至少关联一个角色。");
       return;
     }
@@ -314,6 +338,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
           aiUsable: uploadDraft.aiUsable,
           visionStatus: "unprocessed",
           usageHistory: [],
+          origin: "upload",
+          sourceAccountId: uploadDraft.accountId,
           createdAt: now + index,
           updatedAt: now + index,
         });
@@ -325,6 +351,14 @@ export function PhotosApp({ onClose, onNotice }: Props) {
 
     if (records.length > 0) {
       appendPhotoRecords(records);
+      if (uploadDraft.accountType === "official" && uploadDraft.accountId) {
+        const community = loadWeverseState().communities.find((item) => item.id === uploadDraft.accountId);
+        if (community) upsertWeverseCommunity({ ...community, officialMediaPhotoIds: [...new Set([...(community.officialMediaPhotoIds || []), ...records.map((item) => item.id)])] });
+      }
+      if (uploadDraft.accountType === "alternate" && uploadDraft.accountId) {
+        const state = loadTwitterState();
+        saveTwitterState({ ...state, alternateMediaPhotoIds: { ...state.alternateMediaPhotoIds, [uploadDraft.accountId]: [...new Set([...(state.alternateMediaPhotoIds[uploadDraft.accountId] || []), ...records.map((item) => item.id)])] } });
+      }
       analyzePhotosInBackground(records.map((record) => record.id));
     }
     uploadDraft.previewUrls.forEach((url) => URL.revokeObjectURL(url));
@@ -359,7 +393,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   const updatePersonSlot = (slotId: string, updater: (slot: PhotoPersonSlot) => PhotoPersonSlot) => {
     if (!detailPhoto) return;
     const next = (detailPhoto.people ?? []).map((slot) => slot.id === slotId ? updater(slot) : slot);
-    updateDetailManual("people", { people: next });
+    const mapped = next.map((person) => person.mappedCharacterId).filter((id): id is string => Boolean(id));
+    updateDetailManual("people", { people: next, linkedCharacterIds: [...new Set([...detailPhoto.linkedCharacterIds, ...mapped])] });
   };
 
   const reanalyzeDetail = async () => {
@@ -384,7 +419,12 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   };
 
   const updateStrategy = (value: PhotoSourceStrategy) => {
-    setPhotoLibraryPreferences({ mediaStrategy: value });
+    setPhotoLibraryPreferences({ importedStrategy: value === "album_only" ? "album_only" : "album_then_generated" });
+  };
+
+  const toggleImport = (key: "enabledCharacterIds" | "enabledOfficialIds" | "enabledAlternateIds", id: string) => {
+    const selected = preferences[key];
+    setPhotoLibraryPreferences({ [key]: selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id] });
   };
 
   const toggleDetailCharacter = (characterId: string) => {
@@ -443,6 +483,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
   const scopeTitle = (() => {
     if (!scope) return "";
     if (scope.type === "character") return characterById.get(scope.characterId)?.name || "角色相册";
+    if (scope.type === "official") return officialAccounts.find((item) => item.id === scope.accountId)?.official?.displayName || "WVS 官号";
+    if (scope.type === "alternate") return alternateAccounts.find(([id]) => id === scope.accountId)?.[1].name || "X 副号";
     const pair = parsePhotoSharedPairId(scope.pairId);
     if (!pair) return "共享相册";
     return `${characterById.get(pair[0])?.name || "角色"} & ${characterById.get(pair[1])?.name || "角色"}`;
@@ -464,17 +506,28 @@ export function PhotosApp({ onClose, onNotice }: Props) {
         </div>
       );
     }
+    const visible = expandedStackId ? items : items.filter((photo) => !photo.stackId || photo.stackId === photo.id || !items.some((candidate) => candidate.id === photo.stackId));
     return (
+      <>
+      {expandedStackId ? <button type="button" className="photos-stack-back" onClick={() => setExpandedStackId(null)}>‹ 返回套图</button> : null}
       <div className="photos-grid">
-        {items.map((photo) => (
-          <button type="button" className="photos-grid-item" key={photo.id} onClick={() => setDetailId(photo.id)}>
+        {(expandedStackId ? visible.filter((photo) => photo.id === expandedStackId || photo.stackId === expandedStackId) : visible).map((photo) => {
+          const stackCount = items.filter((item) => item.stackId === photo.id).length;
+          const used = photo.usageHistory.filter((item) => item.usedAt > (photo.releasedAt || 0));
+          const privateChannels = ["dm_user", "moments", "bubble", ...(Object.entries(loadTwitterState().accounts).some(([id, profile]) => id.endsWith(":alt") && profile.disclosure === "full") ? ["twitter_alt"] : [])] as const;
+          const publicChannels = ["wvs_artist", "twitter_main"] as const;
+          const locked = used.some((item) => item.channel === "wvs_official") || (used.some((item) => privateChannels.includes(item.channel as typeof privateChannels[number])) && privateChannels.every((channel) => used.some((item) => item.channel === channel))) || (used.some((item) => publicChannels.includes(item.channel as typeof publicChannels[number])) && publicChannels.every((channel) => used.some((item) => item.channel === channel)));
+          return <button type="button" className={`photos-grid-item${locked ? " is-used" : ""}`} key={photo.id} draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", photo.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const draggedId = event.dataTransfer.getData("text/plain"); if (draggedId && draggedId !== photo.id) updatePhotoRecord(draggedId, { stackId: photo.stackId || photo.id, seriesId: photo.seriesId }); }} onClick={() => stackCount > 0 && !expandedStackId ? setExpandedStackId(photo.id) : setDetailId(photo.id)}>
             {imageMap[photo.assetId]
               ? <img src={imageMap[photo.assetId]} alt="" loading="lazy" />
               : <span className="photos-grid-placeholder"><ImageIcon size={20} /></span>}
             {!photo.aiUsable ? <span className="photos-grid-lock">仅手动</span> : null}
-          </button>
-        ))}
+            {stackCount > 0 ? <span className="photos-grid-stack">▣ {stackCount + 1}</span> : null}
+            {used.length ? <span className="photos-grid-used">{locked ? "已暂锁" : `已用 ${used.length}`}</span> : null}
+          </button>;
+        })}
       </div>
+      </>
     );
   };
 
@@ -628,8 +681,8 @@ export function PhotosApp({ onClose, onNotice }: Props) {
                         onChange={(event) => updatePersonSlot(person.id, (slot) => ({ ...slot, mappedCharacterId: event.target.value || undefined }))}
                       >
                         <option value="">暂不匹配</option>
-                        {detailPhoto.linkedCharacterIds.map((id) => (
-                          <option key={id} value={id}>{characterById.get(id)?.name || id}</option>
+                        {characters.map((character) => (
+                          <option key={character.id} value={character.id}>{character.name}</option>
                         ))}
                       </select>
                     </label>
@@ -658,6 +711,21 @@ export function PhotosApp({ onClose, onNotice }: Props) {
           <section className="photos-meta-card">
             <span>文件</span><strong>{detailPhoto.originalName || "照片"}</strong>
             <span>识图</span><strong>{detailPhoto.visionStatus === "done" ? "已分析" : detailPhoto.visionStatus === "pending" ? "分析中" : detailPhoto.visionStatus === "failed" ? "失败" : "待分析"}</strong>
+            <span>来源</span><strong>{detailPhoto.origin === "generated" ? `${detailPhoto.sourceAppId || "未知 App"} 生图` : "传图"}</strong>
+          </section>
+          <section className="photos-inspector-card">
+            <div className="photos-inspector-heading"><strong>系列与套图</strong></div>
+            <label className="photos-edit-row"><span>系列名称</span><input value={detailPhoto.seriesId || ""} placeholder="如：王子套" onChange={(event) => updateDetail({ seriesId: event.target.value })} /></label>
+            <label className="photos-edit-row"><span>加入套图</span><select value={detailPhoto.stackId || ""} onChange={(event) => updateDetail({ stackId: event.target.value || undefined })}>
+              <option value="">单张展示</option>
+              {photos.filter((item) => item.id !== detailPhoto.id && !item.stackId && (scope ? scopedPhotos.includes(item) : true)).map((item) => <option key={item.id} value={item.id}>{item.seriesId || item.subject || item.originalName || "照片"} · {formatPhotoDate(item.createdAt)}</option>)}
+            </select></label>
+            <span className="photos-note">也可以在图库中把照片拖到封面上叠成套图。</span>
+          </section>
+          <section className="photos-inspector-card">
+            <div className="photos-inspector-heading"><strong>使用记录</strong><span>放出后可重新匹配各渠道</span></div>
+            {detailPhoto.usageHistory.length ? detailPhoto.usageHistory.map((usage, index) => <div className="photos-usage-row" key={`${usage.usedAt}_${index}`}><span>{photoUsageLabel(usage.channel)} · {characterById.get(usage.characterId)?.name || usage.characterId}</span><time>{formatPhotoDate(usage.usedAt)}</time></div>) : <span className="photos-note">还没有发布过</span>}
+            {detailPhoto.usageHistory.length ? <button type="button" className="photos-mini-action" onClick={() => updateDetail({ releasedAt: Date.now() })}>手动放出这张照片</button> : null}
           </section>
         </main>
       </section>
@@ -695,7 +763,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
               {currentTraitsByCharacter[scope.characterId]?.sourcePhotoId ? <span className="photos-current-traits-source">当前参考来自一张已选照片；你仍可继续手动修改。</span> : null}
             </section>
           ) : null}
-          {renderPhotoGrid(scopedPhotos)}
+          {scopedPhotos.length ? <>{scopedPhotos.some((item) => item.origin !== "generated") ? <><div className="photos-library-summary"><strong>传图</strong><span>{scopedPhotos.filter((item) => item.origin !== "generated").length}</span></div>{renderPhotoGrid(scopedPhotos.filter((item) => item.origin !== "generated"))}</> : null}{scopedPhotos.some((item) => item.origin === "generated") ? <><div className="photos-library-summary"><strong>生图</strong><span>{scopedPhotos.filter((item) => item.origin === "generated").length}</span></div>{renderPhotoGrid(scopedPhotos.filter((item) => item.origin === "generated"))}</> : null}</> : renderPhotoGrid(scopedPhotos)}
         </main>
         <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => handleFiles(event.target.files)} />
         {uploadDraft ? renderUploadSheet() : null}
@@ -737,7 +805,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
               </button>
             </div>
 
-            <section className="photos-sheet-section">
+            {!uploadDraft.accountId ? <section className="photos-sheet-section">
               <div className="photos-sheet-section-title">
                 <strong>关联角色</strong>
                 <span>可多选；角色身份由你决定，不交给识图模型猜</span>
@@ -759,7 +827,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
                   );
                 })}
               </div>
-            </section>
+            </section> : <section className="photos-sheet-section"><strong>{uploadDraft.accountType === "official" ? "WVS 官号专用池" : "X 副号专用池"}</strong><p>这些照片只进入当前账号的独立相册。</p></section>}
 
             {uploadDraft.linkedCharacterIds.length === 2 ? (
               <section className="photos-setting-card photos-sheet-setting">
@@ -792,7 +860,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
         </button>
         <div>
           <span>PHOTOS</span>
-          <h1>{tab === "library" ? "图库" : tab === "people" ? "人物" : "共享"}</h1>
+          <h1>{tab === "library" ? "图库" : tab === "people" ? "人物" : tab === "pools" ? "专用媒体池" : "共享"}</h1>
         </div>
         <button type="button" className="photos-add-btn" onClick={openPicker} aria-label="导入照片">
           <Plus size={20} />
@@ -806,7 +874,7 @@ export function PhotosApp({ onClose, onNotice }: Props) {
               <div className="photos-strategy-head">
                 <div>
                   <strong>媒体解析策略</strong>
-                  <span>Chat / 朋友圈 / WVS / 后续 Bubble、SMS 共用；智能混合会先查素材池，再按内容意图决定是否生图。</span>
+                  <span>只有引入的角色和账号会读取 Photos。缺图先保留文字描述，点生图才调用已配置的图片 API。</span>
                 </div>
                 {photos.some((photo) => photo.visionStatus !== "done") ? (
                   <button type="button" className="photos-mini-action" onClick={() => void analyzePendingPhotos()}>
@@ -817,10 +885,9 @@ export function PhotosApp({ onClose, onNotice }: Props) {
               </div>
               <label>
                 <span>媒体来源</span>
-                <select value={preferences.mediaStrategy} onChange={(event) => updateStrategy(event.target.value as PhotoSourceStrategy)}>
-                  <option value="album_only">强制仅相册（测试匹配）</option>
-                  <option value="generated_only">强制仅生图（测试生成）</option>
-                  <option value="album_then_generated">智能混合（推荐）</option>
+                <select value={preferences.importedStrategy} onChange={(event) => updateStrategy(event.target.value as PhotoSourceStrategy)}>
+                  <option value="album_only">仅匹配相册 · 缺图拒绝</option>
+                  <option value="album_then_generated">先匹配 · 缺图可手动生图</option>
                 </select>
               </label>
               <label>
@@ -830,6 +897,14 @@ export function PhotosApp({ onClose, onNotice }: Props) {
                   <option value="on">开启</option>
                 </select>
               </label>
+            </section>
+            <section className="photos-import-card">
+              <div className="photos-library-summary"><strong>引入角色</strong><span>{preferences.enabledCharacterIds.length}/{characters.length}</span></div>
+              <p>未引入的角色在所有 App 都沿用文字图片描述与手动生图。</p>
+              {characters.map((character) => <div className="photos-import-row" key={character.id}>
+                <CharacterAvatar character={character} size={36} /><span>{character.name}</span>
+                <Toggle checked={preferences.enabledCharacterIds.includes(character.id)} onChange={() => toggleImport("enabledCharacterIds", character.id)} label={`引入 ${character.name} 相册`} />
+              </div>)}
             </section>
             {photos.length > 0 ? (
               <div className="photos-library-summary">
@@ -891,6 +966,21 @@ export function PhotosApp({ onClose, onNotice }: Props) {
             </div>
           )
         ) : null}
+
+        {tab === "pools" ? <div className="photos-import-card">
+          <div className="photos-library-summary"><strong>WVS 官号</strong><span>专用相册</span></div>
+          {officialAccounts.map((account) => <div className="photos-import-row" key={account.id}>
+            <span className="photos-pool-icon">W</span><button type="button" className="photos-pool-name" onClick={() => setScope({ type: "official", accountId: account.id })}>{account.official?.displayName || account.name}<small>{account.officialMediaPhotoIds?.length || 0} 张 · 打开相册</small></button>
+            <Toggle checked={preferences.enabledOfficialIds.includes(account.id)} onChange={() => toggleImport("enabledOfficialIds", account.id)} label={`引入 ${account.name} 官号相册`} />
+          </div>)}
+          {!officialAccounts.length ? <p>创建 WVS Community 后会出现在这里。</p> : null}
+          <div className="photos-library-summary"><strong>X 副号</strong><span>未披露 / 有线索</span></div>
+          {alternateAccounts.map(([id, profile]) => <div className="photos-import-row" key={id}>
+            <span className="photos-pool-icon">𝕏</span><button type="button" className="photos-pool-name" onClick={() => setScope({ type: "alternate", accountId: id })}>{profile.name}<small>独立媒体池 · 打开相册</small></button>
+            <Toggle checked={preferences.enabledAlternateIds.includes(id)} onChange={() => toggleImport("enabledAlternateIds", id)} label={`引入 ${profile.name} 副号相册`} />
+          </div>)}
+          {!alternateAccounts.length ? <p>创建未披露或有线索的 X 副号后会出现在这里。完全披露的副号使用角色相册。</p> : null}
+        </div> : null}
       </main>
 
       <nav className="photos-tabbar" aria-label="Photos 导航">
@@ -902,6 +992,9 @@ export function PhotosApp({ onClose, onNotice }: Props) {
         </button>
         <button type="button" className={tab === "shared" ? "is-active" : ""} onClick={() => setTab("shared")}>
           <Link2 size={20} /><span>共享</span>
+        </button>
+        <button type="button" className={tab === "pools" ? "is-active" : ""} onClick={() => { refreshLibrary(); setTab("pools"); }}>
+          <ImageIcon size={20} /><span>专用池</span>
         </button>
       </nav>
 

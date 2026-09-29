@@ -1,7 +1,9 @@
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
 import { generateImageFromConfiguredApi } from "./image-generation-service";
 import { getPhotoResolverDebugEnabled, getPhotoSourceStrategy, recordPhotoUse, resolvePhotoForUse } from "./photo-library-resolver";
-import { loadPhotoLibrary } from "./photo-library-storage";
+import { appendPhotoRecords, appendPhotoUsage, createPhotoId, loadPhotoLibrary } from "./photo-library-storage";
+import { analyzePhotosInBackground } from "./photo-library-vision";
+import { canAutoUsePhoto } from "./photo-library-usage";
 import type { PhotoRecord, PhotoUsageChannel } from "./photo-library-types";
 
 export type MediaIntentKind = "selfie" | "portrait" | "group" | "food" | "scenery" | "object" | "pet" | "official" | "other";
@@ -29,6 +31,7 @@ export type MediaResolverRequest = {
   intentKind?: MediaIntentKind;
   channel: PhotoUsageChannel;
   targetId?: string;
+  accountId?: string;
   appId: string;
   /** auto uses the shared album strategy; generate skips the album; text saves a description without an API request. */
   mode?: "auto" | "generate" | "text";
@@ -86,6 +89,7 @@ function similarity(a: string, b: string): number {
 function photoText(photo: PhotoRecord): string {
   return [
     photo.subject,
+    photo.seriesId,
     photo.visionSummary,
     photo.appearance?.hair,
     photo.appearance?.accessories,
@@ -100,10 +104,12 @@ async function resolveCharacterPoolPhoto(request: MediaResolverRequest & { actor
   const ids = request.actor.photoIds;
   if (!ids) return null;
   const allowed = new Set(ids);
+  if (request.accountId) loadPhotoLibrary().photos.filter((photo) => photo.sourceAccountId === request.accountId).forEach((photo) => allowed.add(photo.id));
   if (!allowed.size) return null;
   const candidates = loadPhotoLibrary().photos
     .filter((photo) => allowed.has(photo.id))
     .filter((photo) => photo.aiUsable && photo.visionStatus === "done")
+    .filter((photo) => canAutoUsePhoto(photo, request.actor.characterId, request.channel, request.accountId))
     .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
     .sort((a, b) => b.score - a.score);
   const best = candidates[0];
@@ -115,10 +121,11 @@ async function resolveCharacterPoolPhoto(request: MediaResolverRequest & { actor
 
 async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor: OfficialMediaActor }): Promise<{ photo: PhotoRecord; dataUrl: string; score: number } | null> {
   const allowed = new Set(request.actor.photoIds);
+  loadPhotoLibrary().photos.filter((photo) => photo.sourceAccountId === request.actor.officialId).forEach((photo) => allowed.add(photo.id));
   const excluded = new Set(request.actor.excludedPhotoIds || []);
   const all = loadPhotoLibrary().photos;
   const preferred = request.actor.preferredPhotoId
-    ? all.find((photo) => photo.id === request.actor.preferredPhotoId && allowed.has(photo.id) && !excluded.has(photo.id) && photo.aiUsable && photo.visionStatus === "done")
+    ? all.find((photo) => photo.id === request.actor.preferredPhotoId && allowed.has(photo.id) && !excluded.has(photo.id) && photo.aiUsable && photo.visionStatus === "done" && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
     : undefined;
   if (preferred) {
     const dataUrl = await getChatImageFromIndexedDB(preferred.assetId).catch(() => null);
@@ -126,7 +133,7 @@ async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor:
   }
   const candidates = all
     .filter((photo) => allowed.has(photo.id))
-    .filter((photo) => !excluded.has(photo.id))
+    .filter((photo) => !excluded.has(photo.id) && canAutoUsePhoto(photo, request.actor.officialId, "wvs_official"))
     .filter((photo) => photo.aiUsable && photo.visionStatus === "done")
     .map((photo) => ({ photo, score: similarity(request.description, photoText(photo)) }))
     .sort((a, b) => b.score - a.score);
@@ -135,11 +142,6 @@ async function resolveOfficialPoolPhoto(request: MediaResolverRequest & { actor:
   const dataUrl = await getChatImageFromIndexedDB(best.photo.assetId).catch(() => null);
   if (!dataUrl) return null;
   return { photo: best.photo, dataUrl, score: best.score };
-}
-
-function shouldGenerateInSmartMode(intentKind: MediaIntentKind): boolean {
-  // 人物中心内容优先尊重真实相册，不匹配时宁可不挂图；生活物件/食物/风景允许补生图。
-  return !["selfie", "portrait", "group"].includes(intentKind);
 }
 
 async function generateMedia(request: MediaResolverRequest, intentKind: MediaIntentKind): Promise<MediaResolverResult | null> {
@@ -164,9 +166,13 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
   }
   const assetId = await saveChatImageToIndexedDB(generated.blob).catch(() => "");
   if (!assetId) return null;
+  const photoLibraryId = createPhotoId();
+  appendPhotoRecords([{ id: photoLibraryId, assetId, originalName: `${request.appId}-${Date.now()}.png`, linkedCharacterIds: request.actor.type === "character" && request.channel !== "twitter_alt" ? [request.actor.characterId] : [], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed", usageHistory: [{ channel: request.channel, characterId: request.actor.type === "official" ? request.actor.officialId : request.actor.characterId, accountId: request.accountId, targetId: request.targetId, usedAt: Date.now() }], origin: "generated", sourceAppId: request.appId, sourceAccountId: request.actor.type === "official" ? request.actor.officialId : request.channel === "twitter_alt" ? request.accountId : undefined, createdAt: Date.now(), updatedAt: Date.now() }]);
+  analyzePhotosInBackground([photoLibraryId]);
   return {
     imageUrl: `asset://${assetId}`,
     source: "generated",
+    photoLibraryId,
     generatedDataUrl: generated.dataUrl,
     generatedPrompt: generated.prompt,
     generatedMediaRef: generated.mediaRef,
@@ -175,7 +181,7 @@ async function generateMedia(request: MediaResolverRequest, intentKind: MediaInt
     debug: getPhotoResolverDebugEnabled() ? {
       strategy: getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other"),
       intentKind,
-      reason: "素材池未找到合适图片，按智能规则进入生图。",
+      reason: "用户手动触发生图。",
     } : undefined,
   };
 }
@@ -188,20 +194,34 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
   const description = request.description.trim();
   if (!description) return null;
   if (request.mode === "text") return { source: "text_placeholder", placeholderDescription: description };
-  const strategy = getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other");
+  const preferences = loadPhotoLibrary().preferences;
+  const imported = request.actor.type === "official"
+    ? preferences.enabledOfficialIds.includes(request.actor.officialId)
+    : request.channel === "twitter_alt" && request.accountId && request.actor.photoIds
+      ? preferences.enabledAlternateIds.includes(request.accountId)
+      : preferences.enabledCharacterIds.includes(request.actor.characterId);
+  const strategy = imported ? getPhotoSourceStrategy(request.appId === "weverse" ? "wvs" : "other") : "generated_only";
   const intentKind = request.intentKind || "other";
   const debugEnabled = getPhotoResolverDebugEnabled();
 
-  if (request.mode !== "generate" && strategy !== "generated_only") {
+  if (request.mode === "generate") {
+    if (imported && strategy === "album_only") return null;
+    return generateMedia(request, intentKind);
+  }
+  // 没引入的角色/账号完全不读取 Photos；图片先保留文字卡，等用户主动点生图。
+  if (!imported) return { source: "text_placeholder", placeholderDescription: description };
+
+  if (strategy !== "generated_only") {
     if (request.actor.type === "character") {
       if (request.actor.photoIds) {
         const poolMatch = await resolveCharacterPoolPhoto(request as MediaResolverRequest & { actor: CharacterMediaActor }).catch(() => null);
         if (poolMatch) {
+          recordPhotoUse({ ...poolMatch, reasons: [] }, { characterId: request.actor.characterId, description, channel: request.channel, targetId: request.targetId, accountId: request.accountId });
           return {
             imageUrl: `asset://${poolMatch.photo.assetId}`,
             source: "album",
             photoLibraryId: poolMatch.photo.id,
-            debug: debugEnabled ? { strategy, intentKind, reason: `命中 WVS 角色公开素材池（匹配 ${poolMatch.score.toFixed(2)}）。` } : undefined,
+            debug: debugEnabled ? { strategy, intentKind, reason: `命中账号专用素材池（匹配 ${poolMatch.score.toFixed(2)}）。` } : undefined,
           };
         }
       } else {
@@ -210,6 +230,7 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
           description,
           channel: request.channel,
           targetId: request.targetId,
+          accountId: request.accountId,
         }).catch(() => null);
         if (match) {
           recordPhotoUse(match, {
@@ -217,6 +238,7 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
             description,
             channel: request.channel,
             targetId: request.targetId,
+            accountId: request.accountId,
           });
           return {
             imageUrl: `asset://${match.photo.assetId}`,
@@ -234,6 +256,8 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
     } else {
       const match = await resolveOfficialPoolPhoto(request as MediaResolverRequest & { actor: OfficialMediaActor }).catch(() => null);
       if (match) {
+        // 官号照片仍是 Photos 中同一个记录，发布历史回写到原照片。
+        appendPhotoUsage(match.photo.id, { channel: "wvs_official", characterId: request.actor.officialId, targetId: request.targetId, usedAt: Date.now() });
         return {
           imageUrl: `asset://${match.photo.assetId}`,
           source: "album",
@@ -248,7 +272,6 @@ export async function resolveMediaForUse(request: MediaResolverRequest): Promise
     }
   }
 
-  if (request.mode !== "generate" && strategy === "album_only") return null;
-  if (request.mode !== "generate" && strategy === "album_then_generated" && !shouldGenerateInSmartMode(intentKind)) return null;
-  return generateMedia(request, intentKind);
+  if (strategy === "album_only") return null;
+  return { source: "text_placeholder", placeholderDescription: description };
 }

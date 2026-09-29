@@ -19,6 +19,10 @@ export const DEFAULT_PHOTO_LIBRARY_PREFERENCES: PhotoLibraryPreferences = {
   chatStrategy: "album_then_generated",
   momentsStrategy: "album_then_generated",
   resolverDebug: false,
+  enabledCharacterIds: [],
+  enabledOfficialIds: [],
+  enabledAlternateIds: [],
+  importedStrategy: "album_then_generated",
 };
 
 const EMPTY_STATE: PhotoLibraryState = {
@@ -73,13 +77,14 @@ function normalizeUsageHistory(value: unknown): PhotoRecord["usageHistory"] {
     if (!raw || typeof raw !== "object") return [];
     const item = raw as Record<string, unknown>;
     const channel = item.channel;
-    if (!["dm_user", "moments", "dm_char", "bubble", "sms", "wvs", "other"].includes(String(channel))) return [];
+    if (!["dm_user", "moments", "dm_char", "bubble", "sms", "wvs", "other", "wvs_artist", "wvs_official", "twitter_main", "twitter_alt"].includes(String(channel))) return [];
     if (typeof item.characterId !== "string" || !item.characterId) return [];
     const usedAt = typeof item.usedAt === "number" && Number.isFinite(item.usedAt) ? item.usedAt : Date.now();
     return [{
       channel: channel as PhotoRecord["usageHistory"][number]["channel"],
       characterId: item.characterId,
       targetId: typeof item.targetId === "string" && item.targetId ? item.targetId : undefined,
+      accountId: typeof item.accountId === "string" && item.accountId ? item.accountId : undefined,
       usedAt,
     }];
   });
@@ -127,6 +132,12 @@ function normalizePhoto(raw: unknown): PhotoRecord | null {
     visionError: cleanOptional(item.visionError, 500),
     manualFields: uniqueStrings(item.manualFields),
     usageHistory: normalizeUsageHistory(item.usageHistory),
+    origin: item.origin === "generated" ? "generated" : "upload",
+    sourceAppId: cleanOptional(item.sourceAppId, 60),
+    sourceAccountId: cleanOptional(item.sourceAccountId, 180),
+    seriesId: cleanOptional(item.seriesId, 120),
+    stackId: cleanOptional(item.stackId, 120),
+    releasedAt: typeof item.releasedAt === "number" && Number.isFinite(item.releasedAt) ? item.releasedAt : undefined,
     createdAt,
     updatedAt,
   };
@@ -166,6 +177,10 @@ function normalizeState(parsed: unknown): PhotoLibraryState {
       chatStrategy: normalizeStrategy(rawPreferences.chatStrategy ?? rawPreferences.mediaStrategy),
       momentsStrategy: normalizeStrategy(rawPreferences.momentsStrategy ?? rawPreferences.mediaStrategy),
       resolverDebug: rawPreferences.resolverDebug === true,
+      enabledCharacterIds: uniqueStrings(rawPreferences.enabledCharacterIds),
+      enabledOfficialIds: uniqueStrings(rawPreferences.enabledOfficialIds),
+      enabledAlternateIds: uniqueStrings(rawPreferences.enabledAlternateIds),
+      importedStrategy: rawPreferences.importedStrategy === "album_only" ? "album_only" : "album_then_generated",
     },
   };
 }
@@ -279,6 +294,10 @@ export function setPhotoLibraryPreferences(patch: Partial<PhotoLibraryPreference
       chatStrategy: normalizeStrategy(patch.chatStrategy ?? patch.mediaStrategy ?? current.preferences.chatStrategy),
       momentsStrategy: normalizeStrategy(patch.momentsStrategy ?? patch.mediaStrategy ?? current.preferences.momentsStrategy),
       resolverDebug: patch.resolverDebug ?? current.preferences.resolverDebug,
+      enabledCharacterIds: uniqueStrings(patch.enabledCharacterIds ?? current.preferences.enabledCharacterIds),
+      enabledOfficialIds: uniqueStrings(patch.enabledOfficialIds ?? current.preferences.enabledOfficialIds),
+      enabledAlternateIds: uniqueStrings(patch.enabledAlternateIds ?? current.preferences.enabledAlternateIds),
+      importedStrategy: patch.importedStrategy === "album_only" ? "album_only" : patch.importedStrategy === "album_then_generated" ? "album_then_generated" : current.preferences.importedStrategy,
     },
   });
 }

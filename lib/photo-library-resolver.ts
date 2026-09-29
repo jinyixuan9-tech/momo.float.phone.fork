@@ -8,12 +8,14 @@ import {
 } from "./photo-library-storage";
 import type { PhotoRecord, PhotoSourceStrategy, PhotoUsageChannel } from "./photo-library-types";
 import { appearanceToText, photoTraitsTextForCharacter } from "./photo-library-vision";
+import { canAutoUsePhoto } from "./photo-library-usage";
 
 export type PhotoResolverRequest = {
   characterId: string;
   description: string;
   channel: PhotoUsageChannel;
   targetId?: string;
+  accountId?: string;
 };
 
 export type PhotoResolverMatch = {
@@ -70,6 +72,7 @@ function photoSearchText(photo: PhotoRecord, characterId: string): string {
   return [
     photo.visionSummary,
     photo.subject,
+    photo.seriesId,
     mappedAppearance,
     appearanceToText(photo.appearance),
     peopleText,
@@ -91,6 +94,10 @@ function scorePhoto(photo: PhotoRecord, request: PhotoResolverRequest): { score:
   const semantic = similarity(request.description, search);
   let score = semantic * 10;
   const reasons = [`内容匹配 ${semantic.toFixed(2)}`];
+  if (photo.seriesId && semantic > 0.12 && state.photos.some((item) => item.id !== photo.id && item.seriesId === photo.seriesId && item.usageHistory.some((use) => use.usedAt > Date.now() - 14 * 86400000))) {
+    score += 2;
+    reasons.push(`延续系列：${photo.seriesId}`);
+  }
   const wanted = normalizeText(request.description);
   const directTerms = [photo.subject, ...(photo.visionTags ?? [])].filter((item): item is string => Boolean(item));
   const directMatches = directTerms.filter((term) => {
@@ -102,27 +109,7 @@ function scorePhoto(photo: PhotoRecord, request: PhotoResolverRequest): { score:
     reasons.push(`直接标签：${directMatches.slice(0, 3).join("、")}`);
   }
 
-  // 已公开朋友圈的照片默认不再当“新图”私聊发给 user；朋友圈自己则不重复发同图。
-  const hasMomentUse = photo.usageHistory.some((item) => item.characterId === request.characterId && item.channel === "moments");
-  const hasWvsUse = photo.usageHistory.some((item) => item.characterId === request.characterId && item.channel === "wvs");
-  const hasPublicUse = hasMomentUse || hasWvsUse;
-  const hasDmUse = photo.usageHistory.some((item) => item.characterId === request.characterId && item.channel === "dm_user" && (!request.targetId || item.targetId === request.targetId));
-  if (request.channel === "dm_user" && hasPublicUse) {
-    score -= 100;
-    reasons.push("已公开发布，排除主动私发");
-  }
-  if (request.channel === "moments" && hasMomentUse) {
-    score -= 100;
-    reasons.push("朋友圈已用过，排除重复");
-  }
-  if (request.channel === "wvs" && hasWvsUse) {
-    score -= 100;
-    reasons.push("Weverse 已用过，排除重复");
-  }
-  if (request.channel === "dm_user" && hasDmUse) {
-    score -= 3.5;
-    reasons.push("曾私发过，降权");
-  }
+  // 精确复用与公开/私人隔离由 canAutoUsePhoto 控制；同组的其他渠道允许选同一张。
 
   const current = state.currentTraitsByCharacter[request.characterId]?.text?.trim() || "";
   if (current) {
@@ -150,8 +137,7 @@ function scorePhoto(photo: PhotoRecord, request: PhotoResolverRequest): { score:
 
 export function getPhotoSourceStrategy(_context: "chat" | "moments" | "wvs" | "bubble" | "sms" | "other"): PhotoSourceStrategy {
   const preferences = loadPhotoLibrary().preferences;
-  // v0.3.4：改为一个统一媒体策略。旧 chat/moments 字段只做数据迁移兼容。
-  return preferences.mediaStrategy || preferences.chatStrategy || preferences.momentsStrategy || "album_then_generated";
+  return preferences.importedStrategy;
 }
 
 export function getPhotoResolverDebugEnabled(): boolean {
@@ -162,7 +148,8 @@ export async function resolvePhotoForUse(request: PhotoResolverRequest): Promise
   const photos = loadPhotoLibrary().photos
     .filter((photo) => photo.aiUsable)
     .filter((photo) => photo.linkedCharacterIds.includes(request.characterId))
-    .filter((photo) => photo.visionStatus === "done");
+    .filter((photo) => photo.visionStatus === "done")
+    .filter((photo) => canAutoUsePhoto(photo, request.characterId, request.channel, request.accountId));
   if (photos.length === 0) return null;
 
   const scored = photos
@@ -185,6 +172,7 @@ export function recordPhotoUse(match: PhotoResolverMatch, request: PhotoResolver
     channel: request.channel,
     characterId: request.characterId,
     targetId: request.targetId,
+    accountId: request.accountId,
     usedAt: Date.now(),
   });
 }

@@ -6,6 +6,7 @@ import type { Character } from "@/lib/character-types";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 import { createTwitterId, TWITTER_LOCALES, type TwitterCommunity, type TwitterCommunityCharacter, type TwitterProfile, type TwitterState } from "@/lib/twitter-storage";
 import { appendPhotoRecords, createPhotoId, loadPhotoLibrary } from "@/lib/photo-library-storage";
+import { analyzePhotosInBackground } from "@/lib/photo-library-vision";
 import { loadWorldBooks } from "@/lib/settings-storage";
 import styles from "./twitter-app.module.css";
 
@@ -128,8 +129,9 @@ export function TwitterManagement({ state, characters, onChange, onClose, onUser
     const files = [...(event.target.files || [])].filter(file => file.type.startsWith("image/")); event.target.value = "";
     if (!editAccount || !files.length) return;
     try {
-      const now = Date.now(); const records = await Promise.all(files.map(async (file, index) => ({ id: createPhotoId(), assetId: await saveChatImageToIndexedDB(file), originalName: file.name, linkedCharacterIds: [], sharedPairIds: [], aiUsable: false, visionStatus: "unprocessed" as const, usageHistory: [], createdAt: now + index, updatedAt: now + index })));
+      const now = Date.now(); const records = await Promise.all(files.map(async (file, index) => ({ id: createPhotoId(), assetId: await saveChatImageToIndexedDB(file), originalName: file.name, linkedCharacterIds: [], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed" as const, usageHistory: [], origin: "upload" as const, sourceAccountId: editAccount, createdAt: now + index, updatedAt: now + index })));
       appendPhotoRecords(records);
+      analyzePhotosInBackground(records.map(row => row.id));
       const accountId = editAccount;
       onChange(current => ({ ...current, alternateMediaPhotoIds: { ...current.alternateMediaPhotoIds, [accountId]: [...new Set([...(current.alternateMediaPhotoIds[accountId] || []), ...records.map(row => row.id)])] } }));
     } catch { onNotice("媒体上传失败，请重试。"); }

@@ -1140,13 +1140,15 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     let photoDescription: string | undefined;
     if (generated.photoDescription) {
       const media = await resolveMediaForUse({
-        actor: { type: "character", characterId, photoIds: community.memberProfiles[characterId]?.wvsMediaPhotoIds || [] },
+        actor: { type: "character", characterId },
         description: options?.historical ? `过去旧照 / 当时记录：${generated.photoDescription}` : generated.photoDescription,
         intentKind: generated.mediaIntent,
-        channel: "wvs",
+        channel: "wvs_artist",
         targetId: community.id,
         appId: "weverse",
       }).catch(() => null);
+      const albumPrefs = loadPhotoLibrary().preferences;
+      if (!media && albumPrefs.importedStrategy === "album_only" && albumPrefs.enabledCharacterIds.includes(characterId)) return null;
       if (media) {
         if (media.imageUrl) { imageUrl = media.imageUrl; photoDescription = generated.photoDescription; }
         photoLibraryId = media.photoLibraryId;
@@ -1204,7 +1206,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         },
         description: generated.photoDescription || "当前 Official Media Pool 里的官方素材",
         intentKind: generated.mediaIntent || "official",
-        channel: "wvs",
+        channel: "wvs_official",
         targetId: community.id,
         appId: "weverse",
       }).catch(() => null);
@@ -1353,7 +1355,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
     let photoSource: WeverseNotice["photoSource"];
     let photoDescription: string | undefined;
     if (generated.photoDescription || generated.preferredPhotoId) {
-      const media = await resolveMediaForUse({ actor: { type: "official", officialId: community.id, photoIds: community.officialMediaPhotoIds || [], preferredPhotoId: generated.preferredPhotoId }, description: generated.photoDescription || "官方公告素材", intentKind: generated.mediaIntent || "official", channel: "wvs", targetId: community.id, appId: "weverse" }).catch(() => null);
+      const media = await resolveMediaForUse({ actor: { type: "official", officialId: community.id, photoIds: community.officialMediaPhotoIds || [], preferredPhotoId: generated.preferredPhotoId }, description: generated.photoDescription || "官方公告素材", intentKind: generated.mediaIntent || "official", channel: "wvs_official", targetId: community.id, appId: "weverse" }).catch(() => null);
       if (media?.imageUrl) { imageUrl = media.imageUrl; photoDescription = generated.photoDescription; }
       if (media?.photoLibraryId) photoLibraryId = media.photoLibraryId;
       if (media && media.source !== "text_placeholder") photoSource = media.source;
@@ -2170,7 +2172,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         const assetId = await saveChatImageToIndexedDB(file);
         records.push({
           id: createPhotoId(), assetId, originalName: file.name || undefined,
-          linkedCharacterIds: [characterId], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed", usageHistory: [],
+          linkedCharacterIds: [characterId], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed", usageHistory: [], origin: "upload", sourceAppId: "weverse",
           createdAt: now + index, updatedAt: now + index,
         });
       } catch { /* 单张失败不阻断其余上传 */ }
@@ -2196,7 +2198,7 @@ export function WeverseApp({ onClose, onNotice }: Props) {
         const assetId = await saveChatImageToIndexedDB(file);
         records.push({
           id: createPhotoId(), assetId, originalName: file.name || undefined,
-          linkedCharacterIds: [], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed", usageHistory: [],
+          linkedCharacterIds: [], sharedPairIds: [], aiUsable: true, visionStatus: "unprocessed", usageHistory: [], origin: "upload", sourceAppId: "weverse", sourceAccountId: community.id,
           createdAt: now + index, updatedAt: now + index,
         });
       } catch { /* 单张失败不阻断其余上传 */ }

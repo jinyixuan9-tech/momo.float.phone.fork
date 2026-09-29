@@ -3,6 +3,7 @@ import type { CheckPhoneXPayload } from "./checkphone-config";
 import { generateTwitterText } from "./twitter-engine";
 import { generateTwitterComments } from "./twitter-world-engine";
 import { resolveMediaForUse } from "./media-resolver";
+import { loadPhotoLibrary } from "./photo-library-storage";
 import { createTwitterId, loadTwitterState, saveTwitterState, type TwitterEngagement, type TwitterPost, type TwitterState } from "./twitter-storage";
 
 const strangerAvatar = "https://imgbed.heliar.top/i/Q3w-VKasJ0oD-MB1_%E2%9A%AB%EF%B8%8F_1_see3lvy__%E6%9D%A5%E8%87%AA%E5%B0%8F%E7%BA%A2%E4%B9%A6%E7%BD%91%E9%A1%B5%E7%89%88.jpg";
@@ -71,7 +72,9 @@ export async function publishCharacterTwitterFromCheckPhone(character: Character
   let imageRef: string | undefined;
   let imageDescription: string | undefined;
   if (line.photoDescription) {
-    const media = await resolveMediaForUse({ actor: { type: "character", characterId: character.id }, description: line.photoDescription, intentKind: /自拍|人像|selfie|portrait/i.test(line.photoDescription) ? "portrait" : "other", channel: "other", appId: "twitter", targetId: id }).catch(() => null);
+    const media = await resolveMediaForUse({ actor: { type: "character", characterId: character.id }, description: line.photoDescription, intentKind: /自拍|人像|selfie|portrait/i.test(line.photoDescription) ? "portrait" : "other", channel: "twitter_main", appId: "twitter", targetId: id }).catch(() => null);
+    const prefs = loadPhotoLibrary().preferences;
+    if (!media && prefs.importedStrategy === "album_only" && prefs.enabledCharacterIds.includes(character.id)) throw new Error("这次没有适合发布的照片。");
     imageRef = media?.imageUrl?.replace(/^asset:\/\//, "");
     imageDescription = media?.placeholderDescription;
   }

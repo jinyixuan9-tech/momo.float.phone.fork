@@ -419,7 +419,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
   };
   const attachGeneratedImage = async (addToPost = true) => {
     if (!generatedPreview) return;
-    try { const ref = await saveChatImageToIndexedDB(generatedPreview); const now = Date.now(); appendPhotoRecords([{ id: createPhotoId(), assetId: ref, originalName: `X-image-${now}.png`, linkedCharacterIds: [], sharedPairIds: [], aiUsable: false, visionStatus: "unprocessed", usageHistory: [], createdAt: now, updatedAt: now }]); if (addToPost && textImagePostId) commit(current => ({ ...current, posts: current.posts.map(post => post.id === textImagePostId ? { ...post, imageRef: ref, imageDescription: undefined } : post) })); else if (addToPost) setImageRefs(current => [...current, ref].slice(0, 4)); else alert("已保存到相册。"); setImagePromptOpen(false); setTextImagePostId(null); setGeneratedPreview(null); setGeneratedPreviewUrl(""); }
+    try { const ref = await saveChatImageToIndexedDB(generatedPreview); const now = Date.now(); appendPhotoRecords([{ id: createPhotoId(), assetId: ref, originalName: `X-image-${now}.png`, linkedCharacterIds: [], sharedPairIds: [], aiUsable: false, visionStatus: "unprocessed", usageHistory: [], origin: "generated", sourceAppId: "twitter", sourceAccountId: activeAccount.endsWith(":alt") ? activeAccount : undefined, createdAt: now, updatedAt: now }]); if (addToPost && textImagePostId) commit(current => ({ ...current, posts: current.posts.map(post => post.id === textImagePostId ? { ...post, imageRef: ref, imageDescription: undefined } : post) })); else if (addToPost) setImageRefs(current => [...current, ref].slice(0, 4)); else alert("已保存到相册。"); setImagePromptOpen(false); setTextImagePostId(null); setGeneratedPreview(null); setGeneratedPreviewUrl(""); }
     catch { alert("保存图片失败。"); }
   };
   const publish = () => {
@@ -516,14 +516,12 @@ export function TwitterApp({ onClose, onNotice }: Props) {
         let photoRef: string | undefined;
         let photoCard: string | undefined;
         const photoDescription = kind === "post" && actionType !== "repost" ? lines[0]?.photoDescription : undefined;
-        if (photoDescription && actorId.endsWith(":alt")) {
-          const ids = new Set(snapshot.alternateMediaPhotoIds[actorId] || []);
-          const candidates = loadPhotoLibrary().photos.filter(photo => ids.has(photo.id));
-          const tokens = photoDescription.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
-          const ranked = candidates.map(photo => ({ photo, score: tokens.filter(token => `${photo.subject || ""} ${photo.visionSummary || ""} ${(photo.visionTags || []).join(" ")}`.toLowerCase().includes(token)).length })).sort((a, b) => b.score - a.score);
-          photoRef = ranked[0]?.photo.assetId;
-        } else if (photoDescription && !snapshot.communityCharacters[characterId]) {
-          const media = await resolveMediaForUse({ actor: { type: "character", characterId }, description: photoDescription, intentKind: /自拍|人像|selfie|portrait/i.test(photoDescription) ? "portrait" : "other", channel: "other", appId: "twitter", targetId: communityId || id }).catch(() => null);
+        if (photoDescription && !snapshot.communityCharacters[characterId]) {
+          const alternate = actorId.endsWith(":alt");
+          const isolated = alternate && snapshot.accounts[actorId]?.disclosure !== "full";
+          const media = await resolveMediaForUse({ actor: isolated ? { type: "character", characterId, photoIds: snapshot.alternateMediaPhotoIds[actorId] || [] } : { type: "character", characterId }, description: photoDescription, intentKind: /自拍|人像|selfie|portrait/i.test(photoDescription) ? "portrait" : "other", channel: alternate ? "twitter_alt" : "twitter_main", accountId: alternate ? actorId : undefined, appId: "twitter", targetId: communityId || id }).catch(() => null);
+          const prefs = loadPhotoLibrary().preferences;
+          if (!media && prefs.importedStrategy === "album_only" && (isolated ? prefs.enabledAlternateIds.includes(actorId) : prefs.enabledCharacterIds.includes(characterId))) { alert("这次没有合适的照片，角色没有发布照片。可在 Photos 补充素材或切换匹配方式。"); return; }
           photoRef = media?.imageUrl?.replace(/^asset:\/\//, "");
           photoCard = media?.placeholderDescription;
         }

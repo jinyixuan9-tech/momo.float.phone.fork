@@ -1,9 +1,11 @@
-import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
+import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 import { syncChatGeneratedImagePromptText, updateChatMessage, type ChatMessage } from "./chat-storage";
-import { generatedImageFilename, generateImageFromConfiguredApi } from "./image-generation-service";
+import { generatedImageFilename } from "./image-generation-service";
 import { updateMomentPost } from "./moments-storage";
 import type { MomentPost } from "./moments-types";
 import { resolveMediaForUse } from "./media-resolver";
+import { generateAlbumNoMatchReply } from "./photo-library-resolver";
+import { loadPhotoLibrary } from "./photo-library-storage";
 
 function errorToMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -99,6 +101,11 @@ export async function generateAndApplyChatGeneratedImage(
             useReferenceImage: effectiveUseReference,
             signal: options?.signal,
         });
+        if (!media?.imageUrl && !media?.placeholderDescription && !options?.forceGenerated && loadPhotoLibrary().preferences.enabledCharacterIds.includes(characterId || "")) {
+            const reply = await generateAlbumNoMatchReply(characterId || "", description);
+            const updated = updateChatMessage(message.id, { content: reply, mediaType: undefined, mediaUrl: undefined, mediaData: undefined });
+            if (updated) { dispatchChatMessagesUpdated(updated.sessionId, updated); return updated; }
+        }
         if (!media?.imageUrl) return saveChatImageDescription(message, description);
         const photoAssetId = media.imageUrl.startsWith("asset://") ? media.imageUrl.slice(8) : "";
         const albumUrl = media.source === "album" && photoAssetId ? await getChatImageFromIndexedDB(photoAssetId) : null;
@@ -177,23 +184,19 @@ export async function retryMomentGeneratedPhoto(
     dispatchMomentsUpdated();
 
     try {
-        const generated = await generateImageFromConfiguredApi({
-            description,
-            characterId: post.authorType === "character" ? post.authorId : undefined,
-            appId: "moments",
-            useReferenceImage: effectiveUseReference,
+        const generated = await resolveMediaForUse({
+            actor: { type: "character", characterId: post.authorId }, description,
+            channel: "moments", appId: "moments", mode: "generate", useReferenceImage: effectiveUseReference,
         });
-        if (!generated) throw new Error("生图配置未启用或不完整");
-
-        const assetId = await saveChatImageToIndexedDB(generated.blob);
+        if (!generated?.imageUrl) throw new Error("当前相册策略不允许生图，或图片 API 未返回图片");
         const updated = updateMomentPost(post.id, {
-            photoUrl: `asset://${assetId}`,
+            photoUrl: generated.imageUrl,
             photoDescription: description,
             photoUseReferenceImage: effectiveUseReference,
             photoGenerationStatus: "generated",
-            photoGenerationPrompt: generated.prompt,
+            photoGenerationPrompt: generated.generatedPrompt,
             photoSource: "generated",
-            photoLibraryId: undefined,
+            photoLibraryId: generated.photoLibraryId,
             photoGenerationError: undefined,
         });
         if (!updated) throw new Error("原朋友圈不存在，无法替换图片");
