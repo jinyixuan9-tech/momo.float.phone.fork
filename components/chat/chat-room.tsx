@@ -1136,6 +1136,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [showSettings, setShowSettings] = useState(false);
     const [showVoiceCall, setShowVoiceCall] = useState(false);
     const [showVideoCall, setShowVideoCall] = useState(false);
+    const [callAcceptedOnIsland, setCallAcceptedOnIsland] = useState(false);
     const [callMinimized, setCallMinimized] = useState(false);
     const [callInitiator, setCallInitiator] = useState<"user" | "character">("user");
     const [callInitiatorName, setCallInitiatorName] = useState<string>("");
@@ -2143,14 +2144,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     useEffect(() => {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent).detail;
-            if (detail?.sessionId === session.id) {
+            if (detail?.sessionId === session.id && detail.__fromBar) {
                 // Only handle call if this ChatRoom is currently visible
                 if (!isChatRoomElementVisible(wrapperRef.current)) return;
+                if (detail.type !== "voice" && detail.type !== "video") return;
                 setCallInitiator("character");
+                setCallInitiatorName(detail.characterName || "");
+                setCallAcceptedOnIsland(true);
                 if (detail.type === "voice") setShowVoiceCall(true);
                 else if (detail.type === "video") setShowVideoCall(true);
-                // Dismiss the global incoming-call bar (if showing)
-                window.dispatchEvent(new CustomEvent("incoming-call-dismiss"));
             }
         };
         window.addEventListener("ai-call-trigger", handler);
@@ -2508,18 +2510,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 // Filter action types
                 if (part.mediaType === "voice_call" || part.mediaType === "video_call") {
                     if (session.isSpectator) continue; // 围观群不能把用户卷进群通话
-                    const callType = part.mediaType === "voice_call" ? "voice" : "video";
-                    const isHidden = !mountedRef.current || !isChatRoomElementVisible(wrapperRef.current);
-                    if (isHidden) {
-                        window.dispatchEvent(new CustomEvent("ai-call-trigger", {
-                            detail: { sessionId: session.id, type: callType, characterName: r.characterName },
-                        }));
-                    } else {
-                        setCallInitiator("character");
-                        setCallInitiatorName(r.characterName);
-                        if (callType === "voice") setShowVoiceCall(true);
-                        else setShowVideoCall(true);
-                    }
+                    const callType = part.mediaType === "video_call" ? "video" : part.mediaData?.label === "native_phone" ? "phone" : "voice";
+                    window.dispatchEvent(new CustomEvent("ai-call-trigger", {
+                        detail: { sessionId: session.id, type: callType, characterName: r.characterName },
+                    }));
                     continue;
                 }
                 if (part.mediaType === "accept_red_packet") {
@@ -2895,7 +2889,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             /** 流式生成场景：用户已看过内容逐段长出，落库立即放出、跳过模拟打字节奏 */
             instantReveal?: boolean;
         } & GenerationRunGuard,
-    ): Promise<{ hasVisible: boolean; stateValues: StateValue[]; triggerCall?: "voice" | "video"; hasDecline?: boolean }> => {
+    ): Promise<{ hasVisible: boolean; stateValues: StateValue[]; triggerCall?: "phone" | "voice" | "video"; hasDecline?: boolean }> => {
         throwIfGenerationStopped(options);
         const responseBatchId = options?.responseBatchId || createResponseBatchId();
         const rawResponseText = options?.rawResponseText ?? aiResponseText;
@@ -2931,7 +2925,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         throwIfGenerationStopped(options);
 
         // Detect call triggers and AI media actions, filter them out
-        let triggerCall: "voice" | "video" | undefined;
+        let triggerCall: "phone" | "voice" | "video" | undefined;
         let hasDecline = false;
         const charN = character?.name || "对方";
         const userN = userIdentity?.name || "你";
@@ -2943,7 +2937,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         };
         for (const p of parts) {
             throwIfGenerationStopped(options);
-            if (p.mediaType === "voice_call") { triggerCall = "voice"; continue; }
+            if (p.mediaType === "voice_call") { triggerCall = p.mediaData?.label === "native_phone" ? "phone" : "voice"; continue; }
             if (p.mediaType === "video_call") { triggerCall = "video"; continue; }
             if (p.mediaType === "meeting_invite") {
                 // 仅允许私聊角色发起；把角色快照写进卡片，避免角色改名后旧邀请失去归属。
@@ -3134,11 +3128,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     };
 
     // Helper: handle AI-triggered call from splitAndSaveAIMessages result
-    const handleCallTrigger = (triggerCall?: "voice" | "video") => {
+    const handleCallTrigger = (triggerCall?: "phone" | "voice" | "video") => {
         if (!triggerCall) return;
-        setCallInitiator("character");
-        if (triggerCall === "voice") setShowVoiceCall(true);
-        else setShowVideoCall(true);
+        window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId: session.id, type: triggerCall } }));
     };
 
     const persistHiddenToolResult = (content?: string, toolExecutionId?: string) => {
@@ -5617,6 +5609,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 characters={groupCharacters}
                 initiator={callInitiator}
                 initiatorName={callInitiatorName}
+                answered={callAcceptedOnIsland}
                 onEnd={() => returnFromCall(() => setShowVoiceCall(false))}
             />
         );
@@ -5630,6 +5623,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 characters={groupCharacters}
                 initiator={callInitiator}
                 initiatorName={callInitiatorName}
+                answered={callAcceptedOnIsland}
                 onEnd={() => returnFromCall(() => setShowVideoCall(false))}
             />
         );
@@ -6558,8 +6552,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 	                onCloseTheaterMode={closeTheaterMode}
 	                onOpenRichModal={(modal) => { setShowPlusMenu(false); setRichModal(modal); }}
                 onOpenCustomPlusAction={handleOpenCustomPlusAction}
-                onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
-                onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
+                onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallAcceptedOnIsland(false); setCallInitiator("user"); setShowVideoCall(true); }}
+                onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallAcceptedOnIsland(false); setCallInitiator("user"); setShowVoiceCall(true); }}
                 onSendText={handleSendText}
                 onStopGeneration={clearStuckGeneration}
                 onTriggerAIResponse={triggerAIResponse}
@@ -7049,6 +7043,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     session={session}
                     character={character}
                     initiator={callInitiator}
+                    answered={callAcceptedOnIsland}
                     minimized={callMinimized}
                     onMinimize={() => setCallMinimized(true)}
                     onRestore={() => setCallMinimized(false)}
@@ -7060,6 +7055,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     session={session}
                     character={character}
                     initiator={callInitiator}
+                    answered={callAcceptedOnIsland}
                     minimized={callMinimized}
                     onMinimize={() => setCallMinimized(true)}
                     onRestore={() => setCallMinimized(false)}

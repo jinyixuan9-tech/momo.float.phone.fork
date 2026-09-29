@@ -4,6 +4,7 @@ import { createSseJsonParser } from "./sse-json";
 import { maybeAppendShortcutCapability } from "./offline-shortcut-capability";
 import { loadCharacters } from "./character-storage";
 import { loadWalletState, formatCurrencyAmount, getWalletCurrencyBalance, getWalletVisibleCurrencies } from "./wallet-storage";
+import { loadSms } from "./sms-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
 import { emitChatPluginEvent, runChatPluginTransform } from "./chat-plugin-hooks";
 import { buildChatPluginPromptFragments } from "./chat-plugin-storage";
@@ -1986,6 +1987,16 @@ export async function buildChatPromptMessages(
     });
     const senderWallet = loadWalletState(character.id);
     llmMessages.push({ role: "system", content: `如果自然聊天中发送转账或红包，使用角色的钱包设定：默认结算币种 ${senderWallet.primaryCurrency}，其他常用币种 ${(senderWallet.commonCurrencies || []).join("、") || "无"}。发送时务必在富媒体金额中写出实际币种 ISO（例如 [转账:KRW 1000:留言]），金额与币种必须对应真实扣款，绝不省略 ISO 或默认假定人民币。角色当前可用资金：${getWalletVisibleCurrencies(senderWallet).map(currency => `${currency} ${formatCurrencyAmount(getWalletCurrencyBalance(senderWallet, currency), currency)}`).join("；")}。币种随人物所在地和场景选择，不得超过可用余额。` });
+    if (!session.isGroup && resolvedAppId === "chat" && !effectiveAppTags.includes("voice") && !effectiveAppTags.includes("video")) {
+        const userNumber = loadSms().realNumber.trim();
+        llmMessages.push({ role: "system", content: [
+            "这里是封闭的虚构小手机。普通电话走 Phone App，Chat 语音和视频走 Chat 内通话，不会拨现实号码。根据上下文和你自己的意愿选择，不要仅凭‘打电话’三个字固定选某个渠道。",
+            userNumber
+                ? `用户在本机登记的可联系号码是 ${userNumber}。你可以根据关系及已知信息决定是否通过小手机 Phone 给用户拨打电话，或改用 Chat 语音/视频；号码不需要另外存进通讯录。`
+                : "用户尚未在小手机登记可联系号码。现在不能拨 Phone 电话或向用户真实号码发 SMS；如果你想用电话或短信联系，先在对话里自然问用户手机号。Chat 内语音/视频不需要手机号。",
+            "只有确实决定拨 Phone 电话时才输出 [我向用户称呼拨打了电话]；Chat 语音和视频继续使用已有的各自标记。标记里的用户称呼必须替换为当前用户名字。",
+        ].join("\n") });
+    }
     if (options?.callFormatInstruction) {
         llmMessages.push({ role: "system", content: options.callFormatInstruction });
     }

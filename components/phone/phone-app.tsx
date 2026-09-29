@@ -103,12 +103,13 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { sessionId?: string } | undefined;
+      const detail = (e as CustomEvent).detail as { sessionId?: string; answered?: boolean } | undefined;
       const session = detail?.sessionId ? findChatSessionById(detail.sessionId) : null;
       if (!session?.contactId) return;
       const character = loadCharacters().find(c => c.id === session.contactId);
       if (!character) return;
-      const incoming: ActiveCall = { id: phoneId(), characterId: character.id, number: getCharacterPhoneNumber(character.id), direction: "incoming", startedAt: Date.now(), phase: "incoming", transcript: [] };
+      const now = Date.now();
+      const incoming: ActiveCall = { id: phoneId(), characterId: character.id, number: getCharacterPhoneNumber(character.id), direction: "incoming", startedAt: now, phase: detail?.answered ? "connected" : "incoming", connectedAt: detail?.answered ? now : undefined, transcript: [] };
       activeCallRef.current = incoming; setActiveCall(incoming);
     };
     window.addEventListener("phone-open-incoming", handler);

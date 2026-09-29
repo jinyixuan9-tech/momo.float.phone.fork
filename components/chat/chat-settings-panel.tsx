@@ -38,6 +38,7 @@ import {
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { removeChatSessionCompletely } from "@/lib/chat-session-remove";
 import { triggerBlacklistReaction, triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
+import { loadSms, saveSms } from "@/lib/sms-storage";
 import { clearRequestsForCharacter, dispatchFriendRequestUpdated } from "@/lib/friend-request-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { isAgentComputerConfigured } from "@/lib/agent-computer";
@@ -847,6 +848,12 @@ export function ChatSettingsPanel({
         });
 
         if (blocked) {
+            const sms = loadSms();
+            if (sms.realNumber.trim() && sms.threads.some(thread => thread.characterId === session.contactId && thread.identityId === "real" && thread.blockedByMe)) {
+                sms.lastAutoAt[session.contactId] = 0;
+                sms.contactAttempts[session.contactId] = 0;
+                saveSms(sms);
+            }
             // Chat reconnect and SMS are parallel options: the AI may send a friend
             // request, stay quiet, or later reach the user through native SMS.
             triggerBlacklistReaction(session.contactId).catch(() => {});

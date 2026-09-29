@@ -52,12 +52,13 @@ type GroupCallScreenProps = {
     characters: Character[];
     onEnd: () => void;
     initiator?: "user" | "character";
+    answered?: boolean;
     initiatorName?: string; // 发起通话的角色名（initiator="character" 时使用）
 };
 
 // ── Component ───────────────────────────────────────
 
-export function GroupCallScreen({ type, session, characters, onEnd, initiator = "user", initiatorName }: GroupCallScreenProps) {
+export function GroupCallScreen({ type, session, characters, onEnd, initiator = "user", initiatorName, answered = false }: GroupCallScreenProps) {
     // 同 voice-call-screen：iOS 保留 Web Speech 免提 + Web Audio 播放；
     // 其余设备改按住说话 + 云端转写，播放走媒体元素。没配识别时回落旧行为。
     const iosDeviceRef = useRef(isIOSDevice());
@@ -70,7 +71,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
     const androidTextInputOnly = androidTextInputOnlyRef.current;
     const playCallAudio = iosDevice ? playAudioBlob : playAudioBlobViaMediaElement;
     const keyboardOffsetStyle = useCallKeyboardOffsetStyle();
-    const [callState, setCallState] = useState<CallState>("CONNECTING");
+    const [callState, setCallState] = useState<CallState>(answered ? "IDLE" : "CONNECTING");
     const hasConnectedRef = useRef(false);
     const [callDuration, setCallDuration] = useState(0);
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
@@ -85,7 +86,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
     const audioAbortRef = useRef<(() => void) | null>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const callStartRef = useRef<number>(0);
-    const stateRef = useRef<string>("CONNECTING");
+    const stateRef = useRef<string>(answered ? "IDLE" : "CONNECTING");
     const interimTextRef = useRef<string>("");
     const subtitleScrollRef = useRef<HTMLDivElement>(null);
     const messagesRef = useRef<ChatMessage[]>([]);
@@ -135,6 +136,10 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
 
     // Keep refs in sync
     useEffect(() => { stateRef.current = callState; }, [callState]);
+    useEffect(() => {
+        window.dispatchEvent(new CustomEvent("chat-call-state", { detail: { active: callState !== "ENDED", sessionId: session.id, type, phase: callState === "CONNECTING" ? "ringing" : "connected" } }));
+        return () => window.dispatchEvent(new CustomEvent("chat-call-state", { detail: { active: false, sessionId: session.id } }));
+    }, [callState, session.id, type]);
 
     // 来电等待接听：循环振动（开关在聊天主页，iOS 网页不支持自动无效果）
     // + 来电/致电铃声与挂断音（角色专属提示音优先，其余在"全局聊天信息 → 提示音"）
@@ -184,7 +189,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
         }
 
         let connectTimer: NodeJS.Timeout | undefined;
-        if (initiator !== "character") {
+        if (initiator !== "character" && !answered) {
             connectTimer = setTimeout(() => setCallState("IDLE"), 3000);
         }
         return () => {

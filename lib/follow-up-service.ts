@@ -935,7 +935,7 @@ export async function parseAndSaveResponse(
         : undefined;
 
     // Detect call triggers and AI media actions, filter them out (not stored as messages)
-    let triggerCall: "voice" | "video" | undefined;
+    let triggerCall: "phone" | "voice" | "video" | undefined;
     const charName = resolveFollowUpSenderName(sessionId);
 
     // 快捷动作配对消息：tool_call 存标记原文（组装器不跳过，历史上下文与模型当初
@@ -958,7 +958,7 @@ export async function parseAndSaveResponse(
 
     const filteredParts: ParsedMessagePart[] = [];
     for (const p of parts) {
-        if (p.mediaType === "voice_call") { triggerCall = "voice"; continue; }
+        if (p.mediaType === "voice_call") { triggerCall = p.mediaData?.label === "native_phone" ? "phone" : "voice"; continue; }
         if (p.mediaType === "video_call") { triggerCall = "video"; continue; }
         if (p.mediaType === "meeting_invite") {
             if (!sess || sess.isGroup || loadChatAppSettings().allowCharacterMeetingInvites !== true) continue;
@@ -991,15 +991,17 @@ export async function parseAndSaveResponse(
 
     // Save call trigger as system message (persists even when user is not in chat room)
     if (triggerCall) {
-        const callLabel = triggerCall === "voice" ? "语音通话" : "视频通话";
-        pushChatMessage({
-            sessionId,
-            role: "system",
-            content: `[我发起了${callLabel}]`,
-            createdAt: options?.createdAt,
-            responseBatchId: createResponseBatchId(),
-            rawResponseText: `[我发起了${callLabel}]`,
-        });
+        if (triggerCall !== "phone") {
+            const callLabel = triggerCall === "voice" ? "语音通话" : "视频通话";
+            pushChatMessage({
+                sessionId,
+                role: "system",
+                content: `[我发起了${callLabel}]`,
+                createdAt: options?.createdAt,
+                responseBatchId: createResponseBatchId(),
+                rawResponseText: `[我发起了${callLabel}]`,
+            });
+        }
     }
 
     if (filteredParts.length === 0) {

@@ -17,9 +17,10 @@ export async function maybeGenerateSmsBackgroundMessage(): Promise<void> {
   const candidates = loadCharacters().filter(c => {
     const thread = state.threads.find(t => t.characterId === c.id && t.identityId === "real");
     const related = !!thread || chatStatus(c.id).blocked;
-    if (!related || thread?.blockedByMe) return false;
+    // After SMS is blocked, the known real number can still be used for a Phone call.
+    if (!related || (thread?.blockedByMe && (!chatStatus(c.id).blocked || !state.realNumber.trim()))) return false;
     const recentRequest = requests.some(r => r.characterId === c.id && now-Date.parse(r.createdAt)<Math.min(interval, 3*3600_000));
-    return !recentRequest && now-(state.lastAutoAt[c.id] || 0)>interval && now-(state.contactAttempts[c.id] || 0)>Math.min(interval, 3600_000);
+    return (thread?.blockedByMe || !recentRequest) && now-(state.lastAutoAt[c.id] || 0)>interval && now-(state.contactAttempts[c.id] || 0)>Math.min(interval, 3600_000);
   });
   if (!candidates.length) return;
   const character = candidates[Math.floor(Math.random()*candidates.length)];
@@ -29,7 +30,17 @@ export async function maybeGenerateSmsBackgroundMessage(): Promise<void> {
     const thread = ensureSmsThread(initial, character.id, "real", initial.characterNumbers[character.id] || phoneFromPersona(character.persona) || "");
     const response = await generateSmsReply(thread, initial, "proactive");
     if (response.channel === "wait") return;
-    if (response.channel === "request" && response.requestMessage && chatStatus(character.id).blocked) {
+    if (response.channel === "call") {
+      const fresh = loadSms();
+      const live = fresh.threads.find(t => t.id === thread.id);
+      if (!live || !fresh.realNumber.trim()) return;
+      if (response.summary) live.summary = response.summary;
+      fresh.contactAttempts[character.id] = Date.now();
+      saveSms(fresh);
+      window.dispatchEvent(new CustomEvent("phone-request-incoming", { detail: { characterId: character.id, source: "sms" } }));
+      return;
+    }
+    if (response.channel === "request" && response.requestMessage && !thread.blockedByMe && chatStatus(character.id).blocked) {
       const existing = loadFriendRequests().filter(r => r.characterId === character.id && now-Date.parse(r.createdAt)<24*3600_000);
       if (existing.some(r => r.status === "pending") || existing.length >= 3) return;
       addFriendRequest(character.id, response.requestMessage, existing.length + 1);

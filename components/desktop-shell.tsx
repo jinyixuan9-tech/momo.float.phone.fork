@@ -135,7 +135,7 @@ import { WidgetRenderer } from "@/components/widgets/widget-renderer";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
 import { DebugPromptPanel } from "@/components/debug-prompt-panel";
 import { QuickActionFloat } from "@/components/quick-action-float";
-import { CHAT_MESSAGE_PUSHED_EVENT, CHAT_REQUEST_REPLY_EVENT, findChatSessionById, hydrateChatStorage, loadChatSessions, loadChatMessages, pushChatMessage, type ChatMessage, type ChatSession } from "@/lib/chat-storage";
+import { CHAT_MESSAGE_PUSHED_EVENT, CHAT_REQUEST_REPLY_EVENT, createOrGetSession, findChatSessionById, hydrateChatStorage, loadChatSessions, loadChatMessages, pushChatMessage, type ChatMessage, type ChatSession } from "@/lib/chat-storage";
 import { ensureGlobalBindingDefaults, resolveUserIdentity } from "@/lib/settings-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { generateChatCompletion, flattenCompletionResult } from "@/lib/chat-engine";
@@ -1124,7 +1124,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   if (activeApp === "shopping" && !shoppingMounted) setShoppingMounted(true);
   const [widgets, setWidgets] = useState<WidgetInstance[]>([]);
   const [incomingCall, setIncomingCall] = useState<{
-    sessionId: string; type: "voice" | "video"; charName: string; charAvatar: string | null; isGroup?: boolean;
+    sessionId: string; type: "phone" | "voice" | "video"; charName: string; charAvatar: string | null; isGroup?: boolean; source?: "chat" | "sms";
   } | null>(null);
   // 来电优先使用 Phone 设置里的铃声 URL，留空沿用 Chat 的来电音。
   useEffect(() => {
@@ -1143,8 +1143,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         const session = findChatSessionById(incomingCall.sessionId);
         if (session && !session.isGroup) {
           const now = Date.now();
-          appendPhoneCall({ id: phoneId(), characterId: session.contactId, number: getCharacterPhoneNumber(session.contactId), direction: "incoming", status: "missed", startedAt: now - 45000, endedAt: now, durationSec: 0, transcript: [], source: "chat" });
-          window.dispatchEvent(new CustomEvent("phone-missed-notice", { detail: { name: incomingCall.charName, avatar: incomingCall.charAvatar } }));
+          if (incomingCall.type === "phone" || incomingCall.source === "sms") {
+            appendPhoneCall({ id: phoneId(), characterId: session.contactId, number: getCharacterPhoneNumber(session.contactId), direction: "incoming", status: "missed", startedAt: now - 45000, endedAt: now, durationSec: 0, transcript: [], source: incomingCall.source || "chat" });
+            window.dispatchEvent(new CustomEvent("phone-missed-notice", { detail: { name: incomingCall.charName, avatar: incomingCall.charAvatar } }));
+          } else {
+            pushChatMessage({ sessionId: session.id, role: "system", content: `未接听${incomingCall.type === "voice" ? "语音" : "视频"}通话` });
+          }
         }
       }
       setIncomingCall(null);
@@ -1168,6 +1172,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [smsOpenThreadId, setSmsOpenThreadId] = useState<string | null>(null);
   const activeSmsThreadRef = useRef<string | null>(null);
   const [activePhoneCall, setActivePhoneCall] = useState<{ characterId: string; connectedAt: number } | null>(null);
+  const [activeChatCall, setActiveChatCall] = useState<{ sessionId: string; type: "voice" | "video"; phase: "ringing" | "connected" } | null>(null);
   const [islandCallSeconds, setIslandCallSeconds] = useState(0);
   useEffect(() => { if (incomingCall) setIslandExpanded(true); }, [incomingCall]);
   const enqueueIslandNotice = useCallback((notice: {sessionId: string; title: string; body: string; avatar: string | null; isGroup?: boolean}) => {
@@ -1200,6 +1205,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       const detail = (event as CustomEvent<{active: boolean; characterId?: string; connectedAt?: number}>).detail;
       setActivePhoneCall(detail?.active && detail.characterId && detail.connectedAt ? { characterId: detail.characterId, connectedAt: detail.connectedAt } : null);
     };
+    const onChatCall = (event: Event) => {
+      const detail = (event as CustomEvent<{ active: boolean; sessionId?: string; type?: "voice" | "video"; phase?: "ringing" | "connected" }>).detail;
+      setActiveChatCall(detail?.active && detail.sessionId && detail.type ? { sessionId: detail.sessionId, type: detail.type, phase: detail.phase || "connected" } : null);
+    };
     const onSmsIncoming = (event: Event) => {
       const { message, thread } = (event as CustomEvent<{message: SmsMessage; thread: SmsThread}>).detail || {};
       if (!message || !thread || activeSmsThreadRef.current === thread.id) return;
@@ -1215,12 +1224,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     refreshSms(); refreshPhone();
     window.addEventListener(SMS_EVENT, refreshSms); window.addEventListener(PHONE_EVENT, refreshPhone);
     window.addEventListener(SMS_INCOMING_EVENT, onSmsIncoming);
-    window.addEventListener("sms-active-thread", onActiveSms); window.addEventListener("phone-call-state", onPhoneCall);
+    window.addEventListener("sms-active-thread", onActiveSms); window.addEventListener("phone-call-state", onPhoneCall); window.addEventListener("chat-call-state", onChatCall);
     window.addEventListener("phone-missed-notice", onMissed);
     return () => {
       window.removeEventListener(SMS_EVENT, refreshSms); window.removeEventListener(PHONE_EVENT, refreshPhone);
       window.removeEventListener(SMS_INCOMING_EVENT, onSmsIncoming);
-      window.removeEventListener("sms-active-thread", onActiveSms); window.removeEventListener("phone-call-state", onPhoneCall);
+      window.removeEventListener("sms-active-thread", onActiveSms); window.removeEventListener("phone-call-state", onPhoneCall); window.removeEventListener("chat-call-state", onChatCall);
       window.removeEventListener("phone-missed-notice", onMissed);
     };
   }, [enqueueIslandNotice]);
@@ -1235,6 +1244,20 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
+  useEffect(() => {
+    const onPhoneIncoming = (event: Event) => {
+      const characterId = String((event as CustomEvent<{ characterId?: string }>).detail?.characterId || "");
+      const character = loadCharacters().find(item => item.id === characterId);
+      if (!character || !loadSms().realNumber.trim()) return;
+      const session = createOrGetSession(characterId);
+      setIncomingCall(current => current || {
+        sessionId: session.id, type: "voice", charName: session.alias || character.name,
+        charAvatar: character.avatar || null, source: "sms",
+      });
+    };
+    window.addEventListener("phone-request-incoming", onPhoneIncoming);
+    return () => window.removeEventListener("phone-request-incoming", onPhoneIncoming);
+  }, []);
   useEffect(() => {
     const onPhoneRequest = (e: Event) => {
       const characterId = String((e as CustomEvent).detail?.characterId || "");
@@ -1956,6 +1979,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       const sessions = loadChatSessions();
       const session = sessions.find(s => s.id === detail.sessionId);
       if (!session) return;
+      if (detail.type === "phone" && (session.isGroup || !loadSms().realNumber.trim())) {
+        if (!session.isGroup) pushChatMessage({ sessionId: session.id, role: "assistant", content: "我还不知道你的手机号，发我一下好吗？" });
+        return;
+      }
       const chars = loadCharacters();
       const isGroup = !!session.isGroup;
       // Group chat: use characterName from event detail; 1:1: use session.contactId
@@ -1966,15 +1993,17 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         ? (detail.characterName || session.groupName || "群聊")
         : (session.alias || char?.name || "未知");
       // Write call initiation system message
-      const callLabel = detail.type === "voice" ? "语音通话" : "视频通话";
-      if (isGroup) {
+      const callLabel = detail.type === "voice" ? "语音通话" : detail.type === "video" ? "视频通话" : "电话";
+      const alreadyLogged = detail.type !== "phone" && loadChatMessages(detail.sessionId).slice(-2).some(message =>
+        message.role === "system" && message.content === `[我发起了${callLabel}]` && Date.now() - Date.parse(message.createdAt) < 10_000);
+      if (detail.type !== "phone" && !alreadyLogged && isGroup) {
         pushChatMessage({
           sessionId: detail.sessionId,
           role: "assistant",
           content: `[我向群聊发起了${callLabel}]`,
           ...(char ? { senderCharacterId: char.id, senderName: detail.characterName || charName } : {}),
         });
-      } else {
+      } else if (detail.type !== "phone" && !alreadyLogged) {
         const userName = resolveUserIdentity(session.contactId, "chat")?.name || "你";
         pushChatMessage({
           sessionId: detail.sessionId,
@@ -1990,7 +2019,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         isGroup,
       });
       sendBrowserNotification("来电", {
-        body: `${charName} ${isGroup ? "群" : ""}${detail.type === "voice" ? "语音通话" : "视频通话"}`,
+        body: `${charName} ${isGroup ? "群" : ""}${callLabel}`,
         icon: char?.avatar || undefined,
       });
     };
@@ -4200,17 +4229,19 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                 <StatusClock />
                 <button
                   type="button"
-                  className={`status-island${chatMessageNotice || activePhoneCall || incomingCall ? " status-island-active" : ""}`}
-                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : chatMessageNotice ? `新消息：${chatMessageNotice.title}` : activePhoneCall ? "返回通话" : "灵动岛"}
+                  className={`status-island${chatMessageNotice || activePhoneCall || activeChatCall || incomingCall ? " status-island-active" : ""}`}
+                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : activePhoneCall || activeChatCall ? "返回通话" : chatMessageNotice ? `新消息：${chatMessageNotice.title}` : "灵动岛"}
                   onClick={() => {
                     if (incomingCall) { setIslandExpanded(value => !value); return; }
-                    if (chatMessageNotice) { setIslandExpanded(value => !value); return; }
-                    if (activePhoneCall) setActiveApp("phone");
+                    if (activePhoneCall) { setActiveApp("phone"); return; }
+                    if (activeChatCall) { setActiveApp("chat"); setChatInitSessionId(activeChatCall.sessionId); return; }
+                    if (chatMessageNotice) setIslandExpanded(value => !value);
                   }}
                 >
                   {incomingCall ? <span className="status-island-content"><span className="status-island-dot" />{incomingCall.charName}来电</span>
-                    : chatMessageNotice ? <span className="status-island-content"><span className="status-island-dot" />{chatMessageNotice.title}<span className="status-island-end">消息</span></span>
                     : activePhoneCall ? <span className="status-island-content"><span className="status-island-dot" />通话中 <span className="status-island-end">{Math.floor(islandCallSeconds / 60).toString().padStart(2, "0")}:{(islandCallSeconds % 60).toString().padStart(2, "0")}</span></span>
+                    : activeChatCall ? <span className="status-island-content"><span className="status-island-dot" />Chat {activeChatCall.type === "video" ? "视频" : "语音"}{activeChatCall.phase === "ringing" ? "呼叫中" : "通话中"}</span>
+                    : chatMessageNotice ? <span className="status-island-content"><span className="status-island-dot" />{chatMessageNotice.title}<span className="status-island-end">消息</span></span>
                     : null}
                 </button>
                 <div className="status-right" aria-hidden>
@@ -4375,7 +4406,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                     <div className="incoming-call-bar-text">
                       <span className="incoming-call-bar-name">{incomingCall.charName}</span>
                       <span className="incoming-call-bar-type">
-                        {incomingCall.isGroup ? "群" : ""}{incomingCall.type === "voice" ? "语音通话" : "视频通话"}
+                        {incomingCall.isGroup ? "群" : ""}{incomingCall.type === "phone" ? "电话" : incomingCall.type === "voice" ? "语音通话" : "视频通话"}
                       </span>
                     </div>
                   </div>
@@ -4384,8 +4415,17 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                       className="incoming-call-bar-btn incoming-call-bar-decline"
                       onClick={() => {
                         const call = incomingCall;
-                        const callLabel = call.type === "voice" ? "语音通话" : "视频通话";
+                        const callLabel = call.type === "voice" ? "语音通话" : call.type === "video" ? "视频通话" : "电话";
                         playChatSoundOnce("hangup", findChatSessionById(call.sessionId)); // 拒接也是结束通话：播挂断音
+                        if (call.type === "phone" || call.source === "sms") {
+                          const session = findChatSessionById(call.sessionId);
+                          if (session?.contactId) {
+                            const now = Date.now();
+                            appendPhoneCall({ id: phoneId(), characterId: session.contactId, number: getCharacterPhoneNumber(session.contactId), direction: "incoming", status: "declined", startedAt: now, endedAt: now, durationSec: 0, transcript: [], source: call.source || "chat" });
+                          }
+                          setIncomingCall(null);
+                          return;
+                        }
                         pushChatMessage({
                           sessionId: call.sessionId,
                           role: "user",
@@ -4424,14 +4464,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                       onClick={() => {
                         const call = incomingCall;
                         setIncomingCall(null);
-                        if (!call.isGroup && call.type === "voice") {
+                        if (!call.isGroup && (call.type === "phone" || call.source === "sms")) {
                           setActiveApp("phone" as IconId);
-                          setTimeout(() => window.dispatchEvent(new CustomEvent("phone-open-incoming", { detail: { sessionId: call.sessionId } })), 350);
+                          setTimeout(() => window.dispatchEvent(new CustomEvent("phone-open-incoming", { detail: { sessionId: call.sessionId, answered: true } })), 350);
                         } else {
                           setActiveApp("chat" as IconId);
                           setChatInitSessionId(call.sessionId);
                           setTimeout(() => {
-                            window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId: call.sessionId, type: call.type, __fromBar: true } }));
+                            window.dispatchEvent(new CustomEvent("ai-call-trigger", { detail: { sessionId: call.sessionId, type: call.type, characterName: call.charName, __fromBar: true } }));
                           }, 600);
                         }
                       }}

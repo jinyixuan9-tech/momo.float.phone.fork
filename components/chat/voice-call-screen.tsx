@@ -46,6 +46,7 @@ type VoiceCallScreenProps = {
     onEnd: () => void;
     onConnect?: () => void;
     initiator?: "user" | "character";
+    answered?: boolean;
     /** 通话是否处于缩小的悬浮窗状态：暂停麦克风监听/计时/语音播放，仅显示背景+名字 */
     minimized?: boolean;
     /** 点击左上角返回键：请求缩小为悬浮窗（通话逻辑冻结，不挂断） */
@@ -56,7 +57,7 @@ type VoiceCallScreenProps = {
 
 // ── Component ───────────────────────────────────────
 
-export function VoiceCallScreen({ session, character, onEnd, onConnect, initiator = "user", minimized = false, onMinimize, onRestore }: VoiceCallScreenProps) {
+export function VoiceCallScreen({ session, character, onEnd, onConnect, initiator = "user", answered = false, minimized = false, onMinimize, onRestore }: VoiceCallScreenProps) {
     // iOS 保留 Web Speech 免提 + Web Audio 播放（麦克风会话共存的老方案）；
     // 其余设备改「按住说话 + 云端转写」，播放走媒体元素（音量键可控、无静音拨键坑）。
     // 没配 OpenAI 兼容识别时回落旧行为（安卓=文字输入）。
@@ -70,7 +71,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const androidTextInputOnly = androidTextInputOnlyRef.current;
     const playCallAudio = iosDevice ? playAudioBlob : playAudioBlobViaMediaElement;
     const keyboardOffsetStyle = useCallKeyboardOffsetStyle();
-    const [callState, setCallState] = useState<CallState>("CONNECTING");
+    const [callState, setCallState] = useState<CallState>(answered ? "IDLE" : "CONNECTING");
     const hasConnectedRef = useRef(false);
     const [callDuration, setCallDuration] = useState(0);
     const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
@@ -91,7 +92,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const callStartRef = useRef<number>(0);
     const pausedAtRef = useRef<number | null>(null);
     const minimizedRef = useRef(false);
-    const stateRef = useRef<string>("CONNECTING");
+    const stateRef = useRef<string>(answered ? "IDLE" : "CONNECTING");
     const interimTextRef = useRef<string>("");  // ref 版本，闭包安全
     const sttWarningShownRef = useRef(false);
     const subtitleScrollRef = useRef<HTMLDivElement>(null);
@@ -102,6 +103,10 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     // Keep refs in sync
     useEffect(() => { stateRef.current = callState; }, [callState]);
+    useEffect(() => {
+        window.dispatchEvent(new CustomEvent("chat-call-state", { detail: { active: callState !== "ENDED", sessionId: session.id, type: "voice", phase: callState === "CONNECTING" ? "ringing" : "connected" } }));
+        return () => window.dispatchEvent(new CustomEvent("chat-call-state", { detail: { active: false, sessionId: session.id } }));
+    }, [callState, session.id]);
     useEffect(() => { minimizedRef.current = minimized; }, [minimized]);
 
     // 缩小为悬浮窗：冻结通话——停止监听、打断在播放的语音
@@ -244,7 +249,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         // User-initiated: auto-connect after 3s fake dial
         // Character-initiated: wait for user to accept
         let connectTimer: NodeJS.Timeout | undefined;
-        if (initiator !== "character") {
+        if (initiator !== "character" && !answered) {
             connectTimer = setTimeout(() => {
                 setCallState("IDLE");
             }, 3000);

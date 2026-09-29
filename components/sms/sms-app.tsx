@@ -5,6 +5,7 @@ import { ArrowLeft, Ban, Check, ChevronRight, Copy, ImagePlus, MoreHorizontal, P
 import { loadCharacters } from "@/lib/character-storage";
 import { addSmsMessage, createVirtualIdentity, ensureSmsThread, getSmsThreadUnreadCount, markSmsThreadRead, loadSms, saveSms, phoneFromPersona, smsId, SMS_EVENT, SMS_REGIONS, DEFAULT_SMS_EMOJI, type SmsMessage, type SmsState, type SmsThread } from "@/lib/sms-storage";
 import { generateSmsReply } from "@/lib/sms-engine";
+import { chatStatus } from "@/lib/sms-continuity";
 import styles from "./sms-app.module.css";
 
 const isEmoji = (value: string) => /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(value) && Array.from(value).length <= 16;
@@ -108,10 +109,11 @@ export function SmsApp({ onClose, onNotice, initialThreadId }: { onClose: () => 
     try {
       if (thread.blockedByCharacter || thread.blockedByMe) return;
       const reply = await generateSmsReply(thread, next, "summon");
-      if (!reply.messages.length && !reply.block) throw new Error("这次没有生成短信，点重试再召唤");
+      if (!reply.messages.length && !reply.block && reply.channel !== "call") throw new Error("这次没有生成短信，点重试再召唤");
       const fresh = loadSms(); const live = fresh.threads.find(t => t.id === threadId);
       if (!live || live.blockedByMe) return;
       applyReply(fresh, live, reply, smsId()); persist(fresh);
+      if (reply.channel === "call") window.dispatchEvent(new CustomEvent("phone-request-incoming", { detail: { characterId: live.characterId, source: "sms" } }));
     } catch (e) { setError(e instanceof Error ? e.message : "回复生成失败"); } finally { setBusy(false); }
   }
   function send() {
@@ -265,7 +267,15 @@ export function SmsApp({ onClose, onNotice, initialThreadId }: { onClose: () => 
   function toggleBlock() {
     if (!selectedThread) return;
     const next = loadSms(); const thread = next.threads.find(t => t.id === selectedThread.id);
-    if (thread) { thread.blockedByMe = !thread.blockedByMe; persist(next); }
+    if (thread) {
+      thread.blockedByMe = !thread.blockedByMe;
+      if (thread.blockedByMe && thread.identityId === "real" && next.realNumber.trim() && chatStatus(thread.characterId).blocked) {
+        // Let the next background contact opportunity reconsider the Phone channel.
+        next.lastAutoAt[thread.characterId] = 0;
+        next.contactAttempts[thread.characterId] = 0;
+      }
+      persist(next);
+    }
   }
   function deleteThreads() {
     if (!selectedRows.length || !window.confirm(`删除选中的 ${selectedRows.length} 条会话及全部短信？`)) return;

@@ -266,6 +266,11 @@ const RICH_PATTERNS: {
         }),
     },
     {
+        // 独立的小手机 Phone 来电，和 Chat 内语音通话使用不同动作。
+        regex: /\[我向[^\]]+拨打了电话\]/,
+        build: () => ({ content: "", mediaType: "voice_call" as const, mediaData: { label: "native_phone" } }),
+    },
+    {
         regex: /\[我向[^\]]+发起了语音通话\]/,
         build: () => ({ content: "", mediaType: "voice_call" as const }),
     },
