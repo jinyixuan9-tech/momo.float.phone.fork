@@ -3,3 +3,23 @@
 .dialSuggestions{width:min(100%,310px);margin:-12px 0 14px;background:rgba(255,255,255,.94);border-radius:14px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.08)}.dialSuggestions>button{width:100%;border:0;background:transparent;display:flex;align-items:center;gap:10px;padding:9px 12px;text-align:left;border-bottom:1px solid rgba(0,0,0,.06)}.dialSuggestions>button:last-child{border-bottom:0}.dialSuggestions>button:active{background:#ececf0}.dialSuggestions>button>span:last-child{display:flex;flex-direction:column;min-width:0}.dialSuggestions strong{font-size:calc(14px*var(--app-text-scale,1))}.dialSuggestions small{font-size:calc(12px*var(--app-text-scale,1));color:#777;margin-top:2px}.suggestionAvatar{width:30px;height:30px;border-radius:50%;background:#ddd;display:grid;place-items:center;overflow:hidden;flex:none}.suggestionAvatar img{width:100%;height:100%;object-fit:cover}.modalHint{font-size:calc(12px*var(--app-text-scale,1));line-height:1.45;color:#777;margin:10px 2px 0}.phoneMini:disabled{color:#b9b9bf}
 
 .app button,.app input,.app textarea,.app select{font-family:inherit}
+
+.favoriteGroup{margin-bottom:10px;border-radius:18px;background:#fff;overflow:hidden;box-shadow:0 2px 12px rgba(25,28,40,.045)}
+.favoriteGroup .favoriteCard{margin-bottom:0;border-radius:18px;box-shadow:none}
+.replaySheet{margin:0 9px 9px;padding:9px 14px 13px;border:1px solid rgba(255,255,255,.8);border-radius:18px;background:linear-gradient(155deg,rgba(247,247,251,.98),rgba(231,234,243,.9));box-shadow:inset 0 1px rgba(255,255,255,.9),0 8px 24px rgba(39,48,76,.1);animation:replay-appear .25s ease-out both}
+.replayGrip{width:33px;height:4px;margin:0 auto 10px;border-radius:99px;background:#bfc2ce}
+.replayHeading{display:flex;justify-content:space-between;align-items:center;color:#30333e;font-size:calc(14px*var(--app-text-scale,1));padding:0 3px 8px}
+.replayHeading span{font-size:calc(12px*var(--app-text-scale,1));color:#808391;font-variant-numeric:tabular-nums}
+.replayViewport{height:210px;overflow-y:auto;overscroll-behavior:contain;scroll-snap-type:y mandatory;scrollbar-width:none;touch-action:pan-y;mask-image:linear-gradient(to bottom,transparent,#000 9%,#000 91%,transparent)}
+.replayViewport::-webkit-scrollbar{display:none}
+.replaySlide{height:210px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;scroll-snap-align:start;scroll-snap-stop:always;opacity:.34;transform:scale(.96);transition:opacity .3s ease,transform .3s ease;padding:12px 4px}
+.replaySlideActive{opacity:1;transform:scale(1)}
+.replaySpeech{width:100%;max-height:100%;overflow:auto;padding:16px 17px;border:1px solid rgba(255,255,255,.95);border-radius:17px;background:rgba(255,255,255,.68);box-shadow:0 7px 20px rgba(45,54,77,.065)}
+.replaySpeaker{display:block;color:#727c9b;font-size:calc(12px*var(--app-text-scale,1));font-weight:600;margin-bottom:10px}
+.replayOriginal{margin:0;color:#272b39;font-size:calc(17px*var(--app-text-scale,1));line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.replayTranslation{margin:8px 0 0;color:#777b89;font-size:calc(13px*var(--app-text-scale,1));line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.replayAudioButton{margin-top:12px;padding:5px 9px;border:0;border-radius:9px;background:#e6eafa;color:#526892;font-size:calc(12px*var(--app-text-scale,1))}
+.replayHint,.replayEmpty{margin:6px 3px 0;color:#8d909d;text-align:center;font-size:calc(11px*var(--app-text-scale,1))}
+.replayEmpty{padding:24px 0}
+@keyframes replay-appear{from{opacity:0;transform:translateY(-7px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){.replaySheet{animation:none}.replaySlide{transition:none}}

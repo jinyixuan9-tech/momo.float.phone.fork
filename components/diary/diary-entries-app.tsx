@@ -226,7 +226,8 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
 
   const diaryEntryStyle = useMemo(() => ({
     "--diary-entry-font-scale": String(diaryFontScale),
-  } as CSSProperties), [diaryFontScale]);
+    "--diary-entry-font-family": diaryFontDataUrl ? `"${DIARY_USER_FONT_FAMILY}", var(--app-font-family)` : "var(--app-font-family)",
+  } as CSSProperties), [diaryFontScale, diaryFontDataUrl]);
 
   const deleteEntry = useCallback((entry: DiaryEntry) => {
     deleteDiaryEntry(entry.id);
@@ -588,7 +589,7 @@ export function DiaryEntriesApp({ onBack, onNotice }: DiaryEntriesAppProps) {
   const activeBookBusy = Boolean(activeBook && generatingCharacterIds.includes(activeBook.characterId));
 
   return (
-    <section className={`diary-app diary-entry-app ${entryDrag ? "is-entry-dragging" : ""}`} style={diaryEntryStyle}>
+    <section className={`diary-app diary-entry-app ${diaryFontDataUrl ? "has-custom-font" : ""} ${entryDrag ? "is-entry-dragging" : ""}`} style={diaryEntryStyle}>
       {generatingCharacterIds.length > 0 && (
         <div className="diary-generating-toast" role="status">
           <span className="diary-generating-toast-spinner" aria-hidden="true" />
@@ -898,7 +899,7 @@ function DiaryEntryFontPanel({
         <header>
           <div>
             <h2>日记字体</h2>
-            <p>{hasCustomFont ? "已使用自定义字体" : "当前使用默认手写字体"}</p>
+            <p>{hasCustomFont ? "已使用自定义字体" : "当前使用手机默认字体"}</p>
           </div>
           <button type="button" className="diary-icon-btn" onClick={onClose} aria-label="关闭">
             <X size={18} />

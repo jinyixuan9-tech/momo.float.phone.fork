@@ -3904,3 +3904,13 @@
 @keyframes diary-generating-spin {
   to { transform: rotate(360deg); }
 }
+
+/* The diary uses the phone font by default; uploaded fonts only affect the diary paper. */
+.diary-entry-app.has-custom-font .diary-book-label,
+.diary-entry-app.has-custom-font .diary-book-label *,
+.diary-entry-app.has-custom-font .diary-entry-card,
+.diary-entry-app.has-custom-font .diary-entry-card *,
+.diary-entry-app.has-custom-font .diary-entry-detail-paper,
+.diary-entry-app.has-custom-font .diary-entry-detail-paper * {
+  font-family: var(--diary-entry-font-family) !important;
+}
