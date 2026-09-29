@@ -641,7 +641,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
         <button onClick={() => { setDrawerOpen(false); openManagement({ initialTab: "world" }); }}><Sparkles size={22} />世界观</button>
         <button onClick={() => { setDrawerOpen(false); openManagement({ initialTab: "communities" }); }}><MessageCircle size={22} />社群</button>
       </div>
-      <button className={styles.drawerExit} onClick={onClose}>退出推特</button>
+      <button className={styles.drawerExit} onClick={onClose}>退出 X</button>
     </aside></div>}
 
     {followPageOpen && <div className={`${styles.page} ${styles.followPage}`}><div className={styles.pageHeader}><button onClick={() => setFollowPageOpen(false)} aria-label="返回"><ArrowLeft size={23} /></button><b>关注</b></div><div className={styles.followList}>

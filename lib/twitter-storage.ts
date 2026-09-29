@@ -3,7 +3,7 @@ import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 export const TWITTER_STORAGE_KEY = "ai_phone_twitter_v1";
 export const TWITTER_UPDATED_EVENT = "twitter-updated";
 registerKvMigration(TWITTER_STORAGE_KEY);
-export const DEFAULT_TWITTER_WORLD = "现在是2025—2026年。这里是面向世界各地用户的虚构 X／推特式交流平台，人们分享日常、学校生活、游戏、情感、娱乐和自己所在世界的热门话题。角色的公开身份与已设定人设一致；副账号是否公开关联主账号，以各自账号设置为准。路人只知道公开内容，不会自动知道角色与用户的私密关系。热门话题应符合用户写下的世界观，避免假称掌握真实世界的即时新闻、行程或未经设定的重大事件。";
+export const DEFAULT_TWITTER_WORLD = "现在是2025—2026年。这里是面向世界各地用户的虚构 X 交流平台，人们分享日常、学校生活、游戏、情感、娱乐和自己所在世界的热门话题。角色的公开身份与已设定人设一致；副账号是否公开关联主账号，以各自账号设置为准。路人只知道公开内容，不会自动知道角色与用户的私密关系。热门话题应符合用户写下的世界观，避免假称掌握真实世界的即时新闻、行程或未经设定的重大事件。";
 export const TWITTER_LOCALES = ["简中（大陆）", "繁中（港澳台）", "日语（日本）", "韩语（韩国）", "英语国家", "泰语（泰国）"] as const;
 
 export type TwitterProfile = {
@@ -215,7 +215,7 @@ export function twitterClueGuidance(state: TwitterState, accountId: string): str
 export function getTwitterPrivateAccountContext(characterId: string): string {
   const alternate = loadTwitterState().accounts[`${characterId}:alt`];
   if (!alternate) return "";
-  return `你自己在推特的小号是 @${alternate.handle}，对外身份为“${(alternate.identity || alternate.bio || "普通账号").slice(0, 600)}”。这条真实归属是私下信息，路人、评论者和公众默认不知道。用户在一对一聊天问起时，可按你的人设自行决定告诉、卖关子或拒绝；不要在公开发言中无端暴露关联。`;
+  return `你自己在 X 的小号是 @${alternate.handle}，对外身份为“${(alternate.identity || alternate.bio || "普通账号").slice(0, 600)}”。这条真实归属是私下信息，路人、评论者和公众默认不知道。用户在一对一聊天问起时，可按你的人设自行决定告诉、卖关子或拒绝；不要在公开发言中无端暴露关联。`;
 }
 
 export function loadTwitterProjectionEntries(characterId: string, afterTimestamp?: string): Array<{ id: string; timestamp: string; content: string }> {
@@ -226,10 +226,10 @@ export function loadTwitterProjectionEntries(characterId: string, afterTimestamp
   for (const post of visiblePosts) {
     if (!Number.isFinite(post.createdAt)) continue;
     const author = post.authorId.startsWith("user") ? state.accounts[post.authorId]?.name || state.profile.name : post.authorId === characterId ? "角色" : post.authorId === `${characterId}:alt` ? "角色的小号" : "其他人";
-    entries.push({ id: `twitter_${post.id}`, timestamp: new Date(post.createdAt).toISOString(), content: `${author}在推特${post.replyToId ? "评论" : "发帖"}：“${post.original.slice(0, 300)}”` });
+    entries.push({ id: `twitter_${post.id}`, timestamp: new Date(post.createdAt).toISOString(), content: `${author}在 X ${post.replyToId ? "评论" : "发帖"}：“${post.original.slice(0, 300)}”` });
   }
   for (const convo of state.conversations.filter(c => c.characterId === characterId && c.mode === "real" && (!c.userAccountId || c.userAccountId === "user"))) {
-    for (const msg of convo.messages.slice(-30)) if (Number.isFinite(msg.createdAt) && typeof msg.original === "string") entries.push({ id: `twitter_dm_${msg.id}`, timestamp: new Date(msg.createdAt).toISOString(), content: `推特私信：${msg.role === "user" ? state.profile.name : "角色"}说“${msg.original.slice(0, 260)}”` });
+    for (const msg of convo.messages.slice(-30)) if (Number.isFinite(msg.createdAt) && typeof msg.original === "string") entries.push({ id: `twitter_dm_${msg.id}`, timestamp: new Date(msg.createdAt).toISOString(), content: `X 私信：${msg.role === "user" ? state.profile.name : "角色"}说“${msg.original.slice(0, 260)}”` });
   }
   return entries.filter(e => !afterTimestamp || e.timestamp > afterTimestamp).sort((a, b) => a.timestamp.localeCompare(b.timestamp)).slice(-80);
 }

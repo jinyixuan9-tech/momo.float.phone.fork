@@ -766,7 +766,7 @@ export function loadNativeTimeline(
             authorType: "character",
             timestamp: twitterEntry.timestamp,
             content: formatStoredPromptEventContent(twitterEntry.content, {
-                label: "推特", timestamp: twitterEntry.timestamp,
+                label: "X", timestamp: twitterEntry.timestamp,
                 timeAware, timestampOptions,
             }),
         });

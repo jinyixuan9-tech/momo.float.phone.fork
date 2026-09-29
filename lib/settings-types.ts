@@ -296,7 +296,7 @@ export const CONTENT_APP_LABELS: Record<ContentAppId, string> = {
     vn: "漫卷",
     adventure: "冒险",
     weverse: "Weverse",
-    lysn: "LYSN",
+    lysn: "Lysn",
     sms: "短信",
 };
 

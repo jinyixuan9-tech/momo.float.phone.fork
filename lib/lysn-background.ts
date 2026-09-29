@@ -72,8 +72,8 @@ export async function maybeGenerateLysnBackgroundMessage(): Promise<void> {
     if (latest.settings.notificationsEnabled && !latest.rooms[id]?.muted) {
       const character = loadCharacters().find(c => c.id === id);
       const name = latest.rooms[id]?.chatName || latest.profiles[id]?.name || character?.name || "艺人";
-      sendBrowserNotification(`${name} · LYSN`, { body: result[0].original.slice(0, 90), url: `/#lysn=${encodeURIComponent(id)}` });
-      window.dispatchEvent(new CustomEvent("lysn-message-notice", { detail: { characterId: id, title: `${name} · LYSN`, body: result[0].original } }));
+      sendBrowserNotification(`${name} · Lysn`, { body: result[0].original.slice(0, 90), url: `/#lysn=${encodeURIComponent(id)}` });
+      window.dispatchEvent(new CustomEvent("lysn-message-notice", { detail: { characterId: id, title: `${name} · Lysn`, body: result[0].original } }));
     }
   } catch {
     const latest = loadLysn();

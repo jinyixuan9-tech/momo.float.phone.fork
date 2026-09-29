@@ -21,7 +21,7 @@ export type GeneratedLysn = {
 };
 function parseJson(raw: string): Record<string, unknown> {
   const start = raw.indexOf("{"); const end = raw.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error("LYSN 没有返回有效消息，请重试。");
+  if (start < 0 || end < start) throw new Error("Lysn 没有返回有效消息，请重试。");
   return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
 }
 const asText = (value: unknown) => typeof value === "string" ? value.trim() : "";
@@ -32,7 +32,7 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   if (!character) throw new Error("角色已不存在。");
   const slot = resolveBinding(loadBindingConfig(), characterId, "lysn");
   const api = loadApiConfigs().find(x => x.id === slot.apiConfigId) || loadApiConfigs()[0];
-  if (!api) throw new Error("请先为 LYSN 配置可用的文字 API。");
+  if (!api) throw new Error("请先为 Lysn 配置可用的文字 API。");
   const presets = loadPresets();
   const preset = presets.find(x => x.id === slot.presetId) || presets.find(x => x.builtIn) || null;
   const worldBooks = (slot.worldBookIds || []).map(id => loadWorldBooks().find(x => x.id === id)).filter(Boolean) as WorldBookConfig[];
@@ -56,7 +56,7 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   const quotedFan = quoteTest ? [...history].reverse().find(m => m.sender === "fan" && m.kind === "text" && m.original.trim()) : undefined;
   const profilePrompt = mode === "new" || mode === "reply" ? lysnAutonomousProfilePrompt(characterId) : null;
   const instruction: LLMMessage = { role: "system", content: [
-    mode === "birthday" ? "你正在写一张仅当前订阅者能看到的 Bubble 生日卡片；这不是公开频道消息，也不进入聊天记录。按你的本来语言写祝福并附中文译文，不要声称知道订阅者真实身份或私下关系。" : "你正在 LYSN Bubble 面向全部订阅者的艺人频道发消息。回复是匿名粉丝反馈，不是与某个人的私聊。绝不识别发送者真实身份、推断私下关系或泄露秘密。",
+    mode === "birthday" ? "你正在写一张仅当前订阅者能看到的 Bubble 生日卡片；这不是公开频道消息，也不进入聊天记录。按你的本来语言写祝福并附中文译文，不要声称知道订阅者真实身份或私下关系。" : "你正在 Lysn Bubble 面向全部订阅者的艺人频道发消息。回复是匿名粉丝反馈，不是与某个人的私聊。绝不识别发送者真实身份、推断私下关系或泄露秘密。",
     lysnPublicBoundary(characterId),
     mode === "new" || mode === "reply" ? lysnPublicContinuityPrompt(characterId) : "",
     "自然地按人设发短消息，不要总写公告。original 必须使用角色本人最自然的语言（例如人设为韩国人的角色主要用韩语，日本人的角色主要用日语）；translated 是忠实简体中文翻译，原文中文则相同。语音逐字稿也遵守这一要求，不能因为译文是中文就把原文改成中文。",
@@ -81,7 +81,7 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
     configuredOpener ? `用户设定的开场白内容（仅作开场白，不是粉丝来信）：${configuredOpener}` : "",
   ].filter(Boolean).join("\n") };
   const messages: LLMMessage[] = [...prompt, instruction, { role: "user", content: mode === "opening" ? configuredOpener ? "按用户设定内容，生成角色语言原文和简体中文译文的开场白。" : "生成一次性频道开场白。" : mode === "birthday" ? "今天生日，发送一条生日祝福。" : mode === "reply" ? "判断艺人现在是否想公开发消息，如想发请自然回应匿名反馈。" : "判断艺人现在是否想公开发新消息。" }];
-  const requestMeta = { characterName: `LYSN:${character.name}`, userName: "订阅粉丝" };
+  const requestMeta = { characterName: `Lysn:${character.name}`, userName: "订阅粉丝" };
   const requestOptions = { appId: "lysn", appTags: ["lysn", "bubble"], skipOutputRegex: true };
   let raw = await sendLLMRequest(api, preset, messages, regexes, requestMeta, requestOptions);
   let data = parseJson(raw);
@@ -123,7 +123,7 @@ export async function generateLysn(characterId: string, history: LysnMessage[], 
   }
   if (photoRequest && photoChoices.length && rows.some(row => row.kind === "text" && claimsPhotoSent(row.original)) && !rows.some(row => row.kind === "photo")) throw new Error("艺人只描述了照片，没有真正发出图片；这次未发送虚假的照片消息，请重试。");
   if (quoteTest && quotedFan && rows.length && !rows.some(row => row.quote)) rows[0].quote = { original: quotedFan.original, translated: quotedFan.translated || quotedFan.original };
-  if (!rows.length && (data.publish !== false || quoteTest && quotedFan)) throw new Error("LYSN 没有返回有效正文，请重试。");
+  if (!rows.length && (data.publish !== false || quoteTest && quotedFan)) throw new Error("Lysn 没有返回有效正文，请重试。");
   if (rows.length && profilePrompt && data.profileUpdate && typeof data.profileUpdate === "object") {
     const proposed = data.profileUpdate as Record<string, unknown>;
     const name = typeof proposed.name === "string" ? proposed.name.trim().slice(0, 40) : undefined;

@@ -26,8 +26,8 @@ async function ask(instruction: string): Promise<Record<string, unknown>> {
   const configs = loadApiConfigs();
   const selectedId = resolveBinding(loadBindingConfig(), undefined, "twitter").apiConfigId;
   const config = selectedId ? configs.find(row => row.id === selectedId) : configs.find(row => row.apiKey?.trim()) || configs[0];
-  if (!config) throw new Error(selectedId ? "当前绑定的文字 API 已不存在，请检查推特或全局绑定。" : "请先在小手机的全局绑定或推特绑定里设置文字 API，才能刷新内容。");
-  if (!config.apiKey?.trim()) throw new Error(`推特当前使用的文字 API「${config.name || config.provider}」没有填写 Key，请在小手机的全局绑定中选择可用配置。`);
+  if (!config) throw new Error(selectedId ? "当前绑定的文字 API 已不存在，请检查 X或全局绑定。" : "请先在小手机的全局绑定或 X 绑定里设置文字 API，才能刷新内容。");
+  if (!config.apiKey?.trim()) throw new Error(`X 当前使用的文字 API「${config.name || config.provider}」没有填写 Key，请在小手机的全局绑定中选择可用配置。`);
   const presets = loadPresets();
   const preset = presets.find(p => p.builtIn) ?? presets[0] ?? null;
   const raw = await sendLLMRequest(config, preset, [
@@ -45,7 +45,7 @@ export async function generateTwitterWorldBatch(state: TwitterState, hint: strin
   const existing = state.trends.slice(-8).map(t => t.label).join("、");
   const locales = state.audienceLocales?.length ? state.audienceLocales.join("、") : "中文";
   const topicRule = sensitive ? `本批内容采用用户单独开启的话题设定：${state.sensitiveTopics.description.slice(0, 1400)}。这一话题所选世界书：${twitterWorldBookText(state, true, 1900) || "无"}。每条帖子都需提供 imageDescription，作为点开遮罩后的文字图片内容。` : "";
-  const request = `你为一个纯虚构的推特世界生成生活化动态和虚构趋势。只采用以下明确公开的背景：${context || "普通现代城市的虚构日常"}。${topicRule}用户偏好或搜索目标：${hint.slice(0, 450) || "生活、校园、情感、游戏、都市传闻、艺人日常，内容混合"}。账号语言地区从${locales}中尽量均衡选用，如果六个地区全选则均匀分配。现有趋势：${existing || "无"}。趋势名称必须用中文；不要虚构实时现实新闻、外链或联系方式；除用户明确关联的角色外，不写现实艺人的实际行程；不要凭空确立影响世界观的大事件，不要透露私下关系、角色小号身份。输出 2 至 3 个趋势以及恰好 ${desiredPosts} 条不同虚构路人账号的帖子，每条附 5 至 10 条短评论；搜索或指定话题时每条必须相关。original 是作者使用的语言；外语需准确附简体中文译文；#标签始终沿用原文不翻译。如路人想发照片，用 imageDescription 写出照片画面供文字图片卡片显示；不发图则留空，禁止直接请求生图。JSON: {"trends":[{"label":"中文趋势","scope":"world"}],"posts":[{"name":"昵称","handle":"英文账号","original":"帖子","translated":"中文译文","trend":"趋势名称或空字符串","imageDescription":"可留空的图片描述","comments":[{"name":"昵称","handle":"英文账号","original":"评论","translated":"中文译文"}]}]}。`;
+  const request = `你为一个纯虚构的 X 世界生成生活化动态和虚构趋势。只采用以下明确公开的背景：${context || "普通现代城市的虚构日常"}。${topicRule}用户偏好或搜索目标：${hint.slice(0, 450) || "生活、校园、情感、游戏、都市传闻、艺人日常，内容混合"}。账号语言地区从${locales}中尽量均衡选用，如果六个地区全选则均匀分配。现有趋势：${existing || "无"}。趋势名称必须用中文；不要虚构实时现实新闻、外链或联系方式；除用户明确关联的角色外，不写现实艺人的实际行程；不要凭空确立影响世界观的大事件，不要透露私下关系、角色小号身份。输出 2 至 3 个趋势以及恰好 ${desiredPosts} 条不同虚构路人账号的帖子，每条附 5 至 10 条短评论；搜索或指定话题时每条必须相关。original 是作者使用的语言；外语需准确附简体中文译文；#标签始终沿用原文不翻译。如路人想发照片，用 imageDescription 写出照片画面供文字图片卡片显示；不发图则留空，禁止直接请求生图。JSON: {"trends":[{"label":"中文趋势","scope":"world"}],"posts":[{"name":"昵称","handle":"英文账号","original":"帖子","translated":"中文译文","trend":"趋势名称或空字符串","imageDescription":"可留空的图片描述","comments":[{"name":"昵称","handle":"英文账号","original":"评论","translated":"中文译文"}]}]}。`;
   const row = await ask(request);
   const proposedTrends = Array.isArray(row.trends) ? row.trends.slice(0, 4).flatMap(item => {
     const trend = item && typeof item === "object" ? item as Record<string, unknown> : {};
@@ -73,7 +73,7 @@ export async function generateTwitterTrends(state: TwitterState): Promise<string
 export async function generateTwitterStrangerDms(state: TwitterState, userAccountId = "user"): Promise<TwitterStranger[]> {
   const profile = userAccountId === "user" ? state.profile : state.accounts[userAccountId] || state.profile;
   const visible = state.posts.filter(p => p.authorId === userAccountId && profile.visibility !== "protected" && (!p.replyToId || state.posts.some(parent => parent.id === p.replyToId))).slice(-12).map(p => p.original.slice(0, 170)).join("；");
-  const row = await ask(`生成 2 至 4 位互不相同的虚构陌生人在推特上给用户发来的第一条私信。只能根据以下公开信息，不得引用私信、隐私设定、未公开感情关系或大小号归属。公开主页：${profile.name.slice(0, 60)}；${profile.bio.slice(0, 350)}。网友对该账号的称呼：${twitterPublicAddress(state, userAccountId).slice(0, 60)}；不能凭空使用真实姓名。公开动态或互动：${visible.slice(0, 1000) || "暂无"}。世界公开背景：${publicWorld(state, 550)}。内容要各不相同，自然简短，不含真实新闻、外链、联系方式。外语需附准确中文译文，原文中文时译文相同。只输出 JSON：{"messages":[{"name":"虚构昵称","handle":"账号名","original":"原文","translated":"中文译文"}]}。`);
+  const row = await ask(`生成 2 至 4 位互不相同的虚构陌生人在 X 上给用户发来的第一条私信。只能根据以下公开信息，不得引用私信、隐私设定、未公开感情关系或大小号归属。公开主页：${profile.name.slice(0, 60)}；${profile.bio.slice(0, 350)}。网友对该账号的称呼：${twitterPublicAddress(state, userAccountId).slice(0, 60)}；不能凭空使用真实姓名。公开动态或互动：${visible.slice(0, 1000) || "暂无"}。世界公开背景：${publicWorld(state, 550)}。内容要各不相同，自然简短，不含真实新闻、外链、联系方式。外语需附准确中文译文，原文中文时译文相同。只输出 JSON：{"messages":[{"name":"虚构昵称","handle":"账号名","original":"原文","translated":"中文译文"}]}。`);
   const messages = Array.isArray(row.messages) ? row.messages.slice(0, 4).flatMap(item => {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
