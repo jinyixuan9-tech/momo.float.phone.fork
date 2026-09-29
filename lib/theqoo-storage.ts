@@ -1,21 +1,31 @@
 export type TheqooTranslationMode = "original" | "chinese" | "folded" | "repost";
 export type TheqooUiLanguage = "ko" | "zh";
 
+export type TheqooTranslatorConfig = {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+};
+
 export type TheqooComment = {
   id: string;
   original: string;
   translated: string;
   createdAt: number;
   authoredByUser?: boolean;
+  authoredByOP?: boolean;
   pendingRefresh?: boolean;
 };
 
 export type TheqooImage = {
   id: string;
   kind: "text" | "generated";
+  /** 文字图始终保存中文。旧字段名为兼容既有数据继续保留。 */
   originalText?: string;
   translatedText?: string;
   mediaRef?: string;
+  /** 生图描述始终保存中文。 */
   prompt?: string;
 };
 
@@ -38,10 +48,12 @@ export type TheqooPost = {
 
 export type TheqooState = {
   uiLanguage: TheqooUiLanguage;
+  /** false 时论坛内容只生成/显示中文，且不调用翻译 API。 */
+  translationEnabled: boolean;
   translationMode: TheqooTranslationMode;
+  translator: TheqooTranslatorConfig;
   worldBookIds: string[];
   includeCalendar: boolean;
-  includeWeverseSchedule: boolean;
   posts: TheqooPost[];
 };
 
@@ -62,7 +74,7 @@ const demoPosts: TheqooPost[] = [
     comments: [
       { id: "c1", original: "헐 카페에서도 빛이 나나... 진짜 대단하다", translated: "哇 在咖啡店也会发光吗……真的太厉害了", createdAt: now - 1000 * 60 * 17 },
       { id: "c2", original: "실물은 진짜 다르다던데 역시구나 ㅠㅠㅠ", translated: "都说本人和照片真的不一样 果然是这样啊ㅠㅠㅠ", createdAt: now - 1000 * 60 * 16 },
-      { id: "c3", original: "카페 어디야? 나도 가보고 싶다 ㅋㅋㅋㅋ", translated: "是哪个咖啡店啊？我也好想去看看ㅋㅋㅋㅋ", createdAt: now - 1000 * 60 * 15 },
+      { id: "c3", original: "카페 어디야? 나도 가보고 싶다 ㅋㅋㅋㅋ", translated: "是哪个咖啡店啊？我也好想去看看ㅋㅋㅋㅋ", createdAt: now - 1000 * 60 * 15, authoredByOP: true },
     ],
   },
   {
@@ -98,10 +110,16 @@ const demoPosts: TheqooPost[] = [
 
 export const defaultTheqooState = (): TheqooState => ({
   uiLanguage: "ko",
+  translationEnabled: true,
   translationMode: "repost",
+  translator: {
+    enabled: false,
+    baseUrl: "https://api.siliconflow.cn/v1",
+    apiKey: "",
+    model: "deepseek-ai/DeepSeek-V4-Flash",
+  },
   worldBookIds: [],
   includeCalendar: false,
-  includeWeverseSchedule: false,
   posts: demoPosts,
 });
 
@@ -110,13 +128,19 @@ export function loadTheqooState(): TheqooState {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaultTheqooState();
-    const parsed = JSON.parse(raw) as Partial<TheqooState>;
+    const parsed = JSON.parse(raw) as Partial<TheqooState> & { includeWeverseSchedule?: boolean };
+    const defaults = defaultTheqooState();
+    const translator = parsed.translator && typeof parsed.translator === "object"
+      ? { ...defaults.translator, ...parsed.translator }
+      : defaults.translator;
+    const mode = parsed.translationMode === "chinese" ? "repost" : parsed.translationMode;
     return {
-      ...defaultTheqooState(),
-      ...parsed,
+      uiLanguage: parsed.uiLanguage === "zh" ? "zh" : "ko",
+      translationEnabled: parsed.translationEnabled !== false,
+      translationMode: mode || defaults.translationMode,
+      translator,
       worldBookIds: Array.isArray(parsed.worldBookIds) ? parsed.worldBookIds : [],
       includeCalendar: parsed.includeCalendar === true,
-      includeWeverseSchedule: parsed.includeWeverseSchedule === true,
       posts: Array.isArray(parsed.posts) ? parsed.posts : demoPosts,
     };
   } catch {
