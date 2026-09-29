@@ -17,6 +17,12 @@ import {
 import MusicCommentsPage from "./music-comments";
 import MusicArtistPage from "./music-artist";
 import { loadMusicBg, playerBgStyle, MUSIC_BG_EVENT, type MusicBgConfig } from "@/lib/music-bg";
+import MusicShareSheet from "./music-share-sheet";
+import { endListenSession, formatListenDuration, useListenSessions } from "@/lib/together-listening";
+import { loadCharacters } from "@/lib/character-storage";
+import { resolveChatCharacterAvatar, resolveChatCharacterDisplayName } from "@/lib/chat-profile-storage";
+import { loadChatSessions, resolveChatUserAvatar } from "@/lib/chat-storage";
+import { resolveUserIdentity } from "@/lib/settings-storage";
 
 const PLAY_MODE_ICONS: Record<PlayMode, { svg: string; label: string }> = {
     sequence: {
@@ -71,6 +77,19 @@ export default function MusicPlayer() {
     const [palette, setPalette] = useState<CoverPalette>(DEFAULT_COVER_PALETTE);
     const [bgCfg, setBgCfg] = useState<MusicBgConfig>(() => loadMusicBg());
     const [commentTotal, setCommentTotal] = useState(0);
+    const [showShareSheet, setShowShareSheet] = useState(false);
+    const listening = useListenSessions().find(s => !s.endedAt) || null;
+    const [listeningNow, setListeningNow] = useState(Date.now());
+    useEffect(() => {
+        if (!listening) return;
+        setListeningNow(Date.now());
+        const timer = window.setInterval(() => setListeningNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [listening?.id]);
+    const listeningChar = listening ? loadCharacters().find(c => c.id === listening.characterId) : null;
+    const listeningName = listeningChar ? resolveChatCharacterDisplayName(listeningChar) : "对方";
+    const listeningAvatar = resolveChatCharacterAvatar(listeningChar);
+    const userAvatar = listening ? resolveChatUserAvatar(loadChatSessions().find(s => s.contactId === listening.characterId), resolveUserIdentity()?.avatarUrl) : "";
 
     useEffect(() => {
         const handleBgChange = () => setBgCfg(loadMusicBg());
@@ -263,10 +282,10 @@ export default function MusicPlayer() {
 
     // Auto-scroll lyrics
     useEffect(() => {
-        if (view !== "lyrics" || activeLyricIdx < 0 || !lyricsContainerRef.current) return;
+        if ((view !== "lyrics" && !listening) || activeLyricIdx < 0 || !lyricsContainerRef.current) return;
         const el = lyricsContainerRef.current.children[activeLyricIdx] as HTMLElement;
         if (el) scrollElementWithinContainer(lyricsContainerRef.current, el, { behavior: "smooth", block: "center" });
-    }, [activeLyricIdx, view]);
+    }, [activeLyricIdx, view, listening?.id]);
 
     const handleLyricClick = useCallback((idx: number, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -333,16 +352,7 @@ export default function MusicPlayer() {
         setShowPlaylistPicker(false);
     }, [neteaseId]);
 
-    const openShareViaChat = useCallback(() => {
-        if (!player.currentTrack) return;
-        window.dispatchEvent(new CustomEvent("open-mini-chat", {
-            detail: { share: { type: "music", title: player.currentTrack.title, artist: player.currentTrack.artist } },
-        }));
-    }, [player.currentTrack]);
-
-    const openMiniChat = useCallback(() => {
-        window.dispatchEvent(new CustomEvent("open-mini-chat"));
-    }, []);
+    const openShare = useCallback(() => setShowShareSheet(true), []);
 
     const openArtistPage = useCallback(async () => {
         if (!player.currentTrack) return;
@@ -425,7 +435,7 @@ export default function MusicPlayer() {
     } as React.CSSProperties;
 
     return (
-        <div className="music-player mp-lumen" style={ambientVars}>
+        <div className={`music-player mp-lumen${listening ? " mp-is-together" : ""}`} style={ambientVars}>
             {musicToast && (
                 <div className="music-toast-overlay">
                     <div className="music-toast-chip">
@@ -472,12 +482,7 @@ export default function MusicPlayer() {
                             <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
                         </svg>
                     </button>
-                    <button className="music-player-ctrl-btn mp-top-btn" onClick={openMiniChat} title="聊天小窗">
-                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                        </svg>
-                    </button>
-                    <button className="music-player-ctrl-btn mp-top-btn" onClick={openShareViaChat} title="分享到聊天">
+                    <button className="music-player-ctrl-btn mp-top-btn" onClick={openShare} title="分享音乐或一起听">
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
                             <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
@@ -488,7 +493,25 @@ export default function MusicPlayer() {
 
             {/* Body — cover / vinyl / glow lyrics */}
             <div className="mp-body">
-                {view === "lyrics" ? (
+                {listening ? (
+                    <div className="mp-together-page">
+                        <div className="mp-together-heading">
+                            <div className="mp-together-people">
+                                <div className="mp-together-avatar">{userAvatar ? <img src={userAvatar} alt="我" /> : "我"}</div>
+                                <span className="mp-together-link">♫</span>
+                                <div className="mp-together-avatar">{listeningAvatar ? <img src={listeningAvatar} alt={listeningName} /> : listeningName.slice(0, 1)}</div>
+                            </div>
+                            <strong>与 {listeningName} 一起听</strong>
+                            <span>已一起听 {formatListenDuration(listeningNow - listening.startedAt)}</span>
+                        </div>
+                        <div className="mp-together-lyrics">
+                            {hasLyrics ? <div className="mp-lyrics" ref={lyricsContainerRef}>
+                                {parsedLyrics.current.map((line, i) => <div key={i} className="mp-lyric-line" {...(i === activeLyricIdx ? { "data-active": "" } : Math.abs(i - activeLyricIdx) === 1 ? { "data-near": "" } : {})} onClick={e => handleLyricClick(i, e)}>{line.text || " "}</div>)}
+                            </div> : <div className="mp-lyrics mp-lyrics-empty"><div className="mp-lyric-line" data-active="">一起听，让音乐替我们说话</div></div>}
+                        </div>
+                        <button className="mp-together-end" onClick={() => endListenSession("user")}>结束一起听</button>
+                    </div>
+                ) : view === "lyrics" ? (
                     <div className="mp-lyrics-wrap" onClick={() => setView("cover")}>
                         {hasLyrics ? (
                             <div className="mp-lyrics" ref={lyricsContainerRef}>
@@ -649,7 +672,7 @@ export default function MusicPlayer() {
                     </svg>
                     <span>{commentTotal > 0 ? formatCount(commentTotal) : "评论"}</span>
                 </button>
-                <button className="mp-social-btn" onClick={openShareViaChat}>
+                <button className="mp-social-btn" onClick={openShare}>
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
                         <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
@@ -657,6 +680,8 @@ export default function MusicPlayer() {
                     <span>分享</span>
                 </button>
             </div>
+
+            {showShareSheet && <MusicShareSheet track={track} onClose={() => setShowShareSheet(false)} onShared={name => showMusicToast(`已分享给 ${name}`)} />}
 
             {/* Queue drawer */}
             {showQueue && (

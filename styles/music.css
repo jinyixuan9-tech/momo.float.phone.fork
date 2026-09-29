@@ -3394,6 +3394,43 @@
     border-color: rgba(255, 84, 104, 0.4);
 }
 
+/* Together listening lives in the same player, with the same waveform and controls. */
+.mp-together-page { height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 22px 4px; }
+.mp-together-heading { display: flex; align-items: center; flex-direction: column; gap: 7px; flex: none; text-align: center; color: var(--c-music-text); }
+.mp-together-heading strong { font-size: calc(15px*var(--app-text-scale,1)); letter-spacing: .03em; }
+.mp-together-heading > span { font-size: calc(11px*var(--app-text-scale,1)); color: var(--c-music-accent); font-variant-numeric: tabular-nums; }
+.mp-together-people { display: flex; align-items: center; gap: 16px; margin-bottom: 2px; }
+.mp-together-avatar { width: 54px; height: 54px; overflow: hidden; border-radius: 50%; display: grid; place-items: center; background: var(--c-music-surface); border: 2px solid rgba(255,255,255,.48); box-shadow: 0 8px 26px rgba(0,0,0,.28); font-weight: 700; }
+.mp-together-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.mp-together-link { color: var(--c-music-accent); font-size: 23px; text-shadow: 0 0 16px currentColor; }
+.mp-together-lyrics { flex: 1; min-height: 0; width: 100%; margin-top: 10px; }
+.mp-together-lyrics .mp-lyrics { text-align: center; padding: 30px 12px; }
+.mp-together-lyrics .mp-lyric-line { text-align: center; }
+.mp-together-end { flex: none; margin: 2px 0 8px; padding: 7px 16px; border: 1px solid var(--c-music-surface-solid); border-radius: 20px; background: var(--c-music-surface); color: var(--c-music-text); font: inherit; font-size: calc(11px*var(--app-text-scale,1)); }
+
+/* Share drawer follows the album colors and the player's glass surfaces. */
+.mp-share-overlay { position: absolute; inset: 0; z-index: 85; display: flex; align-items: flex-end; background: rgba(3,8,15,.48); backdrop-filter: blur(7px); animation: music-player-in .2s ease; }
+.mp-share-sheet { width: 100%; max-height: 75%; display: flex; flex-direction: column; padding: 9px 20px max(20px, env(safe-area-inset-bottom)); border-radius: 28px 28px 0 0; background: color-mix(in srgb, var(--c-music-bg) 86%, var(--mp-c1) 14%); color: var(--c-music-text); box-shadow: 0 -20px 70px rgba(0,0,0,.38); border-top: 1px solid rgba(255,255,255,.2); }
+.mp-share-grip { width: 36px; height: 4px; border-radius: 8px; background: var(--c-music-accent); opacity: .42; margin: 1px auto 17px; }
+.mp-share-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 17px; }
+.mp-share-heading span { font-size: 11px; color: var(--c-music-accent); }
+.mp-share-heading h2 { font-size: 21px; margin: 2px 0 0; letter-spacing: .03em; }
+.mp-share-heading button { border: 0; background: var(--c-music-surface); color: var(--c-music-text); border-radius: 50%; width: 29px; height: 29px; font-size: 21px; line-height: 1; }
+.mp-share-track { display: flex; align-items: center; gap: 12px; min-height: 68px; padding: 9px; background: var(--c-music-surface); border: 1px solid var(--c-music-surface-solid); border-radius: 17px; margin-bottom: 16px; }
+.mp-share-track img, .mp-share-cover-empty { width: 50px; height: 50px; border-radius: 10px; object-fit: cover; flex: none; background: var(--c-music-bg); display: grid; place-items: center; }
+.mp-share-track div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.mp-share-track strong, .mp-share-track small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-share-track strong { font-size: 14px; }.mp-share-track small { font-size: 11px; color: var(--c-music-accent); }
+.mp-share-track-icon { color: var(--c-music-accent); font-size: 20px; padding-right: 5px; }
+.mp-share-search { width: 100%; flex: none; border: 1px solid var(--c-music-surface-solid); border-radius: 14px; background: var(--c-music-surface); padding: 10px 13px; margin-bottom: 10px; color: var(--c-music-text); font: inherit; }
+.mp-share-list { min-height: 0; overflow-y: auto; scrollbar-width: none; }.mp-share-list::-webkit-scrollbar { display: none; }
+.mp-share-person { display: flex; align-items: center; gap: 9px; padding: 10px 1px; border-bottom: 1px solid var(--c-music-surface-solid); }
+.mp-share-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--c-music-surface); display: grid; place-items: center; flex: none; overflow: hidden; font-weight: 600; }
+.mp-share-avatar img { width: 100%; height: 100%; object-fit: cover; }.mp-share-person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.mp-share-action { flex: none; border-radius: 18px; padding: 7px 10px; border: 1px solid var(--c-music-surface-solid); background: var(--c-music-surface); color: var(--c-music-text); font: inherit; font-size: 11px; cursor: pointer; }
+.mp-share-together { background: var(--c-music-accent); color: var(--c-music-bg); border-color: transparent; font-weight: 700; }.mp-share-action:active { transform: scale(.95); }
+.mp-share-empty { text-align: center; padding: 22px; color: var(--c-music-accent); }.mp-share-hint { margin: 12px 0 0; text-align: center; color: var(--c-music-accent); opacity: .75; font-size: 10px; }
+
 /* ══════════════════════════════════════════
    Comments Page
    ══════════════════════════════════════════ */

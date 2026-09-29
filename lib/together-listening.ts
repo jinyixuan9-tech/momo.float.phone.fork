@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from "react";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import type { MusicTrack } from "./music-storage";
+import { createOrGetSession, pushChatMessage } from "./chat-storage";
+import { loadCharacters } from "./character-storage";
+import { resolveChatCharacterDisplayName } from "./chat-profile-storage";
 
 export type ListenEntry = { at: number; by: "user" | "character"; text: string; trackId?: string };
 export type ListenSession = {
@@ -46,6 +49,22 @@ function write(sessions: ListenSession[]) {
     window.dispatchEvent(new Event(TOGETHER_LISTENING_EVENT));
 }
 
+function characterName(characterId: string): string {
+    return resolveChatCharacterDisplayName(loadCharacters().find(c => c.id === characterId)) || "对方";
+}
+
+function chatNotice(characterId: string, content: string) {
+    const session = createOrGetSession(characterId);
+    pushChatMessage({ sessionId: session.id, role: "system", content });
+    window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+}
+
+export function formatListenDuration(milliseconds: number): string {
+    const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const minutes = Math.floor(seconds / 60);
+    return minutes ? `${minutes}分${String(seconds % 60).padStart(2, "0")}秒` : `${seconds}秒`;
+}
+
 export function activeListenSession(): ListenSession | null {
     return loadListenSessions().find(s => !s.endedAt) || null;
 }
@@ -53,16 +72,20 @@ export function activeListenSession(): ListenSession | null {
 export function startListenSession(characterId: string): ListenSession {
     const active = activeListenSession();
     if (active?.characterId === characterId) return active;
+    if (active) endListenSession();
     const now = Date.now();
-    const old = loadListenSessions().map(s => s.endedAt ? s : { ...s, endedAt: now });
     const next: ListenSession = { id: `listen_${now}`, characterId, startedAt: now, entries: [] };
-    write([next, ...old]);
+    write([next, ...loadListenSessions()]);
+    chatNotice(characterId, "正在一起听");
     return next;
 }
 
-export function endListenSession(): void {
-    if (!activeListenSession()) return;
-    write(loadListenSessions().map(s => s.endedAt ? s : { ...s, endedAt: Date.now() }));
+export function endListenSession(by: ListenEntry["by"] = "user"): void {
+    const active = activeListenSession();
+    if (!active) return;
+    const now = Date.now();
+    write(loadListenSessions().map(s => s.id === active.id ? { ...s, endedAt: now } : s));
+    chatNotice(active.characterId, `${by === "user" ? "我" : characterName(active.characterId)}结束了一起听，一起听时长${formatListenDuration(now - active.startedAt)}`);
 }
 
 export function recordListenEntry(by: ListenEntry["by"], text: string, trackId?: string) {
@@ -75,7 +98,9 @@ export function recordListenEntry(by: ListenEntry["by"], text: string, trackId?:
 export function recordListenTrack(track: MusicTrack, by: ListenEntry["by"]) {
     const active = activeListenSession();
     if (!active || active.entries.some((entry, index) => index === active.entries.length - 1 && entry.trackId === track.id)) return;
-    recordListenEntry(by, `播放了「${track.title}」 · ${track.artist}`, track.id);
+    const notice = `${by === "user" ? "我" : characterName(active.characterId)}将歌曲切换到《${track.title}》`;
+    recordListenEntry(by, notice, track.id);
+    chatNotice(active.characterId, notice);
 }
 
 export function creditCharacterListenTrack(track: MusicTrack) {
@@ -84,7 +109,7 @@ export function creditCharacterListenTrack(track: MusicTrack) {
     const entries = [...active.entries];
     const last = entries[entries.length - 1];
     if (last?.trackId === track.id && Date.now() - last.at < 10_000) {
-        entries[entries.length - 1] = { ...last, by: "character", text: `播放了「${track.title}」 · ${track.artist}` };
+        entries[entries.length - 1] = { ...last, by: "character", text: `${characterName(active.characterId)}将歌曲切换到《${track.title}》` };
         write(loadListenSessions().map(s => s.id === active.id ? { ...s, entries } : s));
     } else recordListenTrack(track, "character");
 }

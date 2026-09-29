@@ -24,8 +24,7 @@ import { PhoneChatApp } from "@/components/chat/phone-chat-app";
 import { PhonePlaceholderApp } from "@/components/phone-placeholder-app";
 import MusicApp from "@/components/music/music-app";
 import MusicPlayer from "@/components/music/music-player";
-import { useListenSessions } from "@/lib/together-listening";
-import MusicFloat from "@/components/music/music-float";
+import MusicIsland from "@/components/music/music-island";
 import MiniAppWindow from "@/components/music/mini-app-window";
 import { PhoneCalendarApp } from "@/components/calendar-app";
 import { PhoneQaApp } from "@/components/phone-qa-app";
@@ -1029,6 +1028,7 @@ function useAndroidCaretKeyboardLift() {
 
 type MusicOverlayController = {
   closeFullPlayer: () => void;
+  openFullPlayer: () => void;
 };
 
 const MusicShellOverlays = memo(function MusicShellOverlays({
@@ -1041,31 +1041,21 @@ const MusicShellOverlays = memo(function MusicShellOverlays({
   const musicPlayer = useMusicControlsOptional();
 
   useEffect(() => {
-    onControllerChange(musicPlayer ? { closeFullPlayer: musicPlayer.closeFullPlayer } : null);
-  }, [musicPlayer?.closeFullPlayer, onControllerChange]);
+    onControllerChange(musicPlayer ? { closeFullPlayer: musicPlayer.closeFullPlayer, openFullPlayer: musicPlayer.openFullPlayer } : null);
+  }, [musicPlayer?.closeFullPlayer, musicPlayer?.openFullPlayer, onControllerChange]);
 
   return (
     <>
       {musicPlayer?.showFullPlayer && musicPlayer.currentTrack && <MusicPlayer />}
-      <MusicFloat hidden={activeApp === "music" || musicPlayer?.showFullPlayer} />
     </>
   );
 });
 
 export function DesktopShell({ initialThemeProfile, initialThemeAssets }: DesktopShellProps) {
-  const listeningSessions = useListenSessions();
-  const listeningSession = listeningSessions.find(s => !s.endedAt) || null;
-  const [listeningNow, setListeningNow] = useState(Date.now());
-  useEffect(() => {
-    if (!listeningSession) return;
-    setListeningNow(Date.now());
-    const timer = window.setInterval(() => setListeningNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, [listeningSession?.id]);
   useEffect(() => {
     const openTogether = () => {
       setActiveApp("music");
-      window.setTimeout(() => window.dispatchEvent(new Event("together-listening-open")), 80);
+      musicOverlayControllerRef.current?.openFullPlayer();
     };
     window.addEventListener("together-listening-navigate", openTogether);
     return () => window.removeEventListener("together-listening-navigate", openTogether);
@@ -4245,25 +4235,23 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
               <header className="phone-status-bar">
                 <StatusClock />
-                <button
+                {incomingCall || activePhoneCall || activeChatCall || chatMessageNotice ? <button
                   type="button"
-                  className={`status-island${chatMessageNotice || activePhoneCall || activeChatCall || incomingCall || listeningSession ? " status-island-active" : ""}`}
-                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : activePhoneCall || activeChatCall ? "返回通话" : chatMessageNotice ? `新消息：${chatMessageNotice.title}` : listeningSession ? "返回一起听" : "灵动岛"}
+                  className="status-island status-island-active"
+                  aria-label={incomingCall ? `来电：${incomingCall.charName}` : activePhoneCall || activeChatCall ? "返回通话" : `新消息：${chatMessageNotice?.title}`}
                   onClick={() => {
                     if (incomingCall) { setIslandExpanded(value => !value); return; }
                     if (activePhoneCall) { setActiveApp("phone"); return; }
                     if (activeChatCall) { setActiveApp("chat"); setChatInitSessionId(activeChatCall.sessionId); return; }
                     if (chatMessageNotice) setIslandExpanded(value => !value);
-                    else if (listeningSession) window.dispatchEvent(new Event("together-listening-navigate"));
                   }}
                 >
                   {incomingCall ? <span className="status-island-content"><span className="status-island-dot" />{incomingCall.charName}来电</span>
                     : activePhoneCall ? <span className="status-island-content"><span className="status-island-dot" />通话中 <span className="status-island-end">{Math.floor(islandCallSeconds / 60).toString().padStart(2, "0")}:{(islandCallSeconds % 60).toString().padStart(2, "0")}</span></span>
                     : activeChatCall ? <span className="status-island-content"><span className="status-island-dot" />Chat {activeChatCall.type === "video" ? "视频" : "语音"}{activeChatCall.phase === "ringing" ? "呼叫中" : "通话中"}</span>
                     : chatMessageNotice ? <span className="status-island-content"><span className="status-island-dot" />{chatMessageNotice.title}<span className="status-island-end">消息</span></span>
-                    : listeningSession ? <span className="status-island-content"><span className="status-island-dot" />♫ 一起听<span className="status-island-end">{Math.floor((listeningNow - listeningSession.startedAt) / 60000)}分</span></span>
                     : null}
-                </button>
+                </button> : <MusicIsland onOpen={() => { setActiveApp("music"); musicOverlayControllerRef.current?.openFullPlayer(); }} />}
                 <div className="status-right" aria-hidden>
                   <svg viewBox="0 0 72 51" className="status-signal" fill="currentColor">
                     <path d="M11.6,41.9c0,1.4,0,2.8,0,4.3c0,2.3-1.4,3.7-3.6,3.8c-1.5,0.1-3,0.1-4.4,0c-1.9-0.1-3.2-1.2-3.4-3c-0.3-3.4-0.2-6.8,0-10.1c0.1-1.8,1.5-3,3.3-3.1c1.5-0.1,3-0.1,4.4,0c2.2,0.1,3.6,1.5,3.7,3.8C11.6,39,11.6,40.5,11.6,41.9z" />

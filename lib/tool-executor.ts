@@ -1868,7 +1868,7 @@ async function executeMusicControlTool(call: ToolCall, context?: ToolExecutionCo
             }
             case "结束一起听": {
                 if (!context?.characterId || activeListenSession()?.characterId !== context.characterId) return { name: call.name, success: false, error: "当前没有与你的一起听会话" };
-                endListenSession();
+                endListenSession("character");
                 return musicToolSuccess(call.name, "一起听已结束", { continueConversation: false, persistToHistory: false, userNotice: "一起听已结束" });
             }
             case "查看音乐状态":
@@ -2463,6 +2463,7 @@ async function executeMusicPlayTool(args: Record<string, unknown>, context?: Too
     if (songId !== undefined && songId !== null && String(songId).trim()) {
         const track = await resolveMusicTrackById(source, songId);
         if (!track) return { name: "播放音乐", success: false, error: "没有找到指定歌曲" };
+        if (fromParticipant) markNextListenTrackAsCharacter();
         const played = await bridge.playTrack(track);
         if (played.ok && played.track && fromParticipant) creditCharacterListenTrack(played.track);
         return musicToolSuccess("播放音乐", played, {
@@ -2473,6 +2474,7 @@ async function executeMusicPlayTool(args: Record<string, unknown>, context?: Too
     }
 
     if (!query) return { name: "播放音乐", success: false, error: "缺少 query 或 songId" };
+    if (fromParticipant) markNextListenTrackAsCharacter();
     const played = await bridge.playByQuery(query);
     if (played.ok && played.track && fromParticipant) creditCharacterListenTrack(played.track);
     return musicToolSuccess("播放音乐", played, {
@@ -2510,6 +2512,7 @@ async function executeMusicQueueTool(args: Record<string, unknown>, context?: To
     }
 
     if (tracks.length === 0) return { name: "加入播放列表", success: false, error: "没有找到可加入播放列表的歌曲" };
+    if (playFirst && listen?.characterId === context?.characterId) markNextListenTrackAsCharacter();
     const queued = await bridge.addToQueue(tracks, { replace, playFirst });
     if (queued.ok && playFirst && listen?.characterId === context?.characterId) creditCharacterListenTrack(tracks[0]);
     return musicToolSuccess("加入播放列表", {
