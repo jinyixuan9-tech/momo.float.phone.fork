@@ -5,3 +5,5 @@
 .opBadge{display:inline-block;margin-left:6px;padding:1px 5px;border:1px solid #7892a9;border-radius:5px;color:#315777;font-size:calc(10px * var(--app-text-scale,1));font-weight:850;vertical-align:1px}.sectionTitle{padding:18px 18px 8px;color:#315777;font-weight:800}.apiFields{display:grid;gap:11px;padding:12px 18px;border-bottom:1px solid #edf0f3}.apiFields label{display:grid;gap:6px;color:#50606c;font-weight:700}.apiFields input{width:100%;border:1px solid #d7e0e8;border-radius:8px;padding:10px;color:#17202a;background:#fff;outline-color:#315777}.icon:disabled{opacity:.5;cursor:default}
 .refreshSpin{animation:theqooRefreshSpin .9s linear infinite}
 @keyframes theqooRefreshSpin{to{transform:rotate(360deg)}}
+.loadMoreComments{display:block;width:calc(100% - 34px);margin:16px 17px 22px;padding:11px 12px;border:1px solid #d9e4ec;border-radius:10px;background:#f5f8fa;color:#315777;text-align:center;font-weight:750}
+.loadMoreComments:disabled{opacity:.62;cursor:default}

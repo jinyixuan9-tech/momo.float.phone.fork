@@ -8,7 +8,7 @@ import { createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
 import { generateImageFromConfiguredApi } from "@/lib/image-generation-service";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
-import { generateTheqooCommentFollowups, generateTheqooPosts } from "@/lib/theqoo-engine";
+import { dedupeTheqooPosts, generateTheqooCommentFollowups, generateTheqooMoreComments, generateTheqooPosts } from "@/lib/theqoo-engine";
 import { translateTheqooTexts } from "@/lib/theqoo-translation";
 import { loadTheqooState, saveTheqooState, type TheqooImage, type TheqooPost, type TheqooState, type TheqooTranslationMode } from "@/lib/theqoo-storage";
 import styles from "./theqoo-app.module.css";
@@ -57,6 +57,8 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
   const [previousPage, setPreviousPage] = useState<Page>("home");
   const [keyword, setKeyword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [moreCommentsPostId, setMoreCommentsPostId] = useState<string | null>(null);
+  const moreBusyRef = useRef(false);
   const [generationKind, setGenerationKind] = useState<"refresh" | "search" | null>(null);
   const busyRef = useRef(false);
   const [publishing, setPublishing] = useState(false);
@@ -91,14 +93,15 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
   const t = (ko: string, cn: string) => zh ? cn : ko;
   useEffect(() => saveTheqooState(state), [state]);
   useEffect(() => {
-    onBusyChange?.(busy);
-    if (!visible && !busy) onIdle?.();
-  }, [busy, visible, onBusyChange, onIdle]);
+    const generating = busy || moreCommentsPostId !== null;
+    onBusyChange?.(generating);
+    if (!visible && !generating) onIdle?.();
+  }, [busy, moreCommentsPostId, visible, onBusyChange, onIdle]);
 
-  const visiblePosts = state.posts.filter(p => {
+  const visiblePosts = dedupeTheqooPosts(state.posts).filter(p => {
     if (page === "favorites" && !p.favorite) return false;
     if (page === "published" && !p.authoredByUser) return false;
-    if (page === "home" && category !== "전체" && (category === "HOT" ? p.views < 10000 : (LEGACY_CAT[p.category] || p.category) !== category)) return false;
+    if (page === "home" && category !== "전체" && (LEGACY_CAT[p.category] || p.category) !== category) return false;
     return true;
   });
 
@@ -113,7 +116,7 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
     }
     if (page === "my") { setPage("settings"); return; }
     if (page === "settings") { setPage("home"); return; }
-    onClose(busyRef.current);
+    onClose(busyRef.current || moreBusyRef.current);
   };
 
   const openPost = (p: TheqooPost) => {
@@ -125,7 +128,7 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
   const replaceImages = (post: TheqooPost, images: TheqooImage[]) => updatePost(post.id, { images, imageRef: undefined, imagePrompt: undefined });
 
   const generateBatch = async (searchKeyword: string, processPending: boolean) => {
-    if (busyRef.current) return;
+    if (busyRef.current || moreBusyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setGenerationKind(processPending ? "refresh" : "search");
@@ -135,6 +138,7 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
         searchKeyword,
         { includeCalendar: state.includeCalendar, includeWeverseSchedule: state.includeWeverseSchedule },
         state.translationEnabled,
+        state.posts,
       );
       if (!rows.length) throw new Error("这次没有生成帖子，请重试。");
 
@@ -182,6 +186,23 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
     await generateBatch(query, false);
   };
   const refreshPosts = async () => generateBatch("", true);
+
+  const loadMoreComments = async () => {
+    const post = selected;
+    if (!post || !post.comments.length || busyRef.current || moreBusyRef.current || post.comments.some(c => c.authoredByUser && c.pendingRefresh)) return;
+    moreBusyRef.current = true;
+    setMoreCommentsPostId(post.id);
+    try {
+      const extra = await generateTheqooMoreComments(post, state.worldBookIds, state.translationEnabled);
+      setState(s => ({ ...s, posts: s.posts.map(item => item.id === post.id
+        ? { ...item, comments: [...item.comments, ...extra] } : item) }));
+    } catch (error) {
+      onNotice?.(error instanceof Error ? error.message : "评论加载失败，请重试。");
+    } finally {
+      moreBusyRef.current = false;
+      setMoreCommentsPostId(null);
+    }
+  };
 
   const openEditor = (p?: TheqooPost) => {
     setPostId(p?.id || null);
@@ -256,7 +277,7 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
     event.preventDefault();
     const post = selected;
     const input = commentText.trim();
-    if (!post || !input || commentBusy) return;
+    if (!post || !input || commentBusy || moreBusyRef.current) return;
     setCommentBusy(true);
     try {
       let original = input;
@@ -480,10 +501,20 @@ export function TheqooApp({ onClose, onNotice, visible = true, onBusyChange, onI
             {translation(`comment_${c.id}`, c.original, c.translated)}
           </article>;
         })}
+        {selected.comments.length > 0 && <button
+          type="button"
+          className={styles.loadMoreComments}
+          disabled={busy || moreCommentsPostId !== null || selected.comments.some(c => c.authoredByUser && c.pendingRefresh)}
+          onClick={() => void loadMoreComments()}
+        >{moreCommentsPostId === selected.id
+          ? t("댓글 불러오는 중…", "正在加载评论…")
+          : selected.comments.some(c => c.authoredByUser && c.pendingRefresh)
+            ? t("다음 새로고침 후 더 보기", "下次刷新后可查看更多")
+            : t("댓글 더 보기", "查看更多评论")}</button>}
       </main>
       <form className={styles.commentComposer} onSubmit={sendComment}>
         <input value={commentText} onChange={e => setCommentText(e.target.value)} placeholder={state.translationEnabled ? t("댓글을 입력하세요…", "写下评论…中文或韩文都可以") : t("중국어로 댓글을 입력하세요…", "写下评论…关闭翻译时请直接输入中文")} />
-        <button type="submit" disabled={commentBusy || !commentText.trim()} aria-label="发送评论"><Send size={19} /></button>
+        <button type="submit" disabled={commentBusy || moreCommentsPostId !== null || !commentText.trim()} aria-label="发送评论"><Send size={19} /></button>
       </form>
     </>}
 

@@ -32,6 +32,8 @@ export type TheqooImage = {
 export type TheqooPost = {
   id: string;
   category: string;
+  /** 同一事件的稳定主题标识，用于避免重复生成。旧帖可缺省。 */
+  topicKey?: string;
   titleOriginal: string;
   titleTranslated: string;
   bodyOriginal: string;
