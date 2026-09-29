@@ -80,6 +80,7 @@ import { loadAllTracks } from "./music-storage";
 import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
 import { activeListenSession } from "./together-listening";
+import { buildListeningLyricContext } from "./music-lyric-context";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { buildCharacterTimeContext } from "./character-time";
@@ -1993,7 +1994,9 @@ export async function buildChatPromptMessages(
             content: [
                 `你正在与用户一起听歌，已开始 ${Math.floor((Date.now() - listening.startedAt) / 60000)} 分钟。音乐播放以小手机现有 Music 播放器为准。`,
                 `最近一起听记录：${listening.entries.slice(-12).map(entry => `${entry.by === "user" ? "用户" : "你"}：${entry.text}`).join("；") || "暂无"}。`,
+                buildListeningLyricContext(),
                 "你和用户都可以点歌、换歌。自然地回应当前聊天；主动换歌至少间隔 3 分钟，用户明确要求则不受此限制。不要声称与现实中的另一台设备同步播放。",
+                "歌词只是当前对话的实时背景。用户聊到正在唱的句子时可以接住；是否主动聊歌词按人设和语境决定，不必每轮引用，也不要编造片段之外的歌词。",
             ].join("\n"),
         });
     }

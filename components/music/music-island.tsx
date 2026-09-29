@@ -3,35 +3,13 @@
 import { useEffect, useState } from "react";
 import { useMusicPlayerOptional } from "@/lib/music-context";
 import { useListenSessions } from "@/lib/together-listening";
-import { addTracksToPlaylist, getTrackPlaylistId, getUserPlaylists, isNeteaseConfigured, recordTrackPlaylist, removeTrackPlaylistRecord, removeTracksFromPlaylist, type NeteasePlaylist } from "@/lib/music-service";
 
 export default function MusicIsland({ onOpen }: { onOpen: () => void }) {
     const player = useMusicPlayerOptional();
     const together = useListenSessions().some(s => !s.endedAt);
     const [expanded, setExpanded] = useState(false);
-    const [playlists, setPlaylists] = useState<NeteasePlaylist[] | null>(null);
-    const [feedback, setFeedback] = useState("");
     const track = player?.currentTrack;
-    const neteaseId = track?.id.startsWith("netease_") ? Number(track.id.slice(8)) : 0;
-    const liked = neteaseId ? Boolean(getTrackPlaylistId(neteaseId)) : Boolean(track?.liked);
-    useEffect(() => { if (!track) { setExpanded(false); setPlaylists(null); } }, [track?.id]);
-
-    const favorite = async () => {
-        if (!player || !track) return;
-        if (neteaseId && isNeteaseConfigured()) {
-            if (liked) {
-                const pid = getTrackPlaylistId(neteaseId);
-                if (!pid) return;
-                const result = await removeTracksFromPlaylist(pid, [neteaseId]);
-                if (result.ok) { removeTrackPlaylistRecord(neteaseId); player.setTrackLiked(track.id, false); }
-                else setFeedback(result.message);
-            } else {
-                const list = await getUserPlaylists();
-                if (list.length) setPlaylists(list);
-                else setFeedback("还没有可用歌单");
-            }
-        } else player.setTrackLiked(track.id, !liked);
-    };
+    useEffect(() => { if (!track) setExpanded(false); }, [track?.id]);
 
     if (!player || !track) return <span className="status-island" aria-label="灵动岛" />;
     return <div className={`status-island music-island${expanded ? " music-island-expanded" : ""}`}>
@@ -47,17 +25,13 @@ export default function MusicIsland({ onOpen }: { onOpen: () => void }) {
             </div>
             <div className="music-island-progress"><span style={{ width: `${Math.min(100, player.duration ? player.currentTime / player.duration * 100 : 0)}%` }} /></div>
             <div className="music-island-actions">
-                <button onClick={() => player.prev()} aria-label="上一首">|◀</button>
-                <button onClick={() => player.togglePlay()} aria-label={player.isPlaying ? "暂停" : "播放"}>{player.isPlaying ? "Ⅱ" : "▶"}</button>
-                <button onClick={() => player.next()} aria-label="下一首">▶|</button>
-                <button onClick={() => { void favorite(); }} aria-label={liked ? "取消收藏" : "收藏"} className={liked ? "liked" : ""}>{liked ? "♥" : "♡"}</button>
+                <button onClick={() => player.prev()} aria-label="上一首"><svg viewBox="0 0 36 36" fill="currentColor" aria-hidden="true"><path d="M18 5 3 18l15 13V5Zm15 0L18 18l15 13V5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg></button>
+                <button onClick={() => player.togglePlay()} aria-label={player.isPlaying ? "暂停" : "播放"}>
+                    {player.isPlaying ? <svg viewBox="0 0 36 36" fill="currentColor" aria-hidden="true"><rect x="7" y="4" width="8" height="28" rx="2"/><rect x="21" y="4" width="8" height="28" rx="2"/></svg>
+                        : <svg viewBox="0 0 36 36" fill="currentColor" aria-hidden="true"><path d="M9 4v28l23-14L9 4Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5"/></svg>}
+                </button>
+                <button onClick={() => player.next()} aria-label="下一首"><svg viewBox="0 0 36 36" fill="currentColor" aria-hidden="true"><path d="M18 5 3 18l15 13V5Zm15 0L18 18l15 13V5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg></button>
             </div>
-            {playlists && <div className="music-island-playlists"><span>收藏到歌单</span>{playlists.map(list => <button key={list.id} onClick={async () => {
-                const result = await addTracksToPlaylist(list.id, [neteaseId]);
-                if (result.ok) { recordTrackPlaylist(neteaseId, list.id); player.setTrackLiked(track.id, true); setPlaylists(null); }
-                else setFeedback(result.message);
-            }}>{list.name}</button>)}<button onClick={() => setPlaylists(null)}>取消</button></div>}
-            {feedback && <span className="music-island-feedback" onClick={() => setFeedback("")}>{feedback}</span>}
         </div>}
     </div>;
 }

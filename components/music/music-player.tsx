@@ -498,7 +498,6 @@ export default function MusicPlayer() {
                         <div className="mp-together-heading">
                             <div className="mp-together-people">
                                 <div className="mp-together-avatar">{userAvatar ? <img src={userAvatar} alt="我" /> : "我"}</div>
-                                <span className="mp-together-link">♫</span>
                                 <div className="mp-together-avatar">{listeningAvatar ? <img src={listeningAvatar} alt={listeningName} /> : listeningName.slice(0, 1)}</div>
                             </div>
                             <strong>与 {listeningName} 一起听</strong>

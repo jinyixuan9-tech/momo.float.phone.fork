@@ -243,9 +243,11 @@
 .music-island-art { flex: none; width: 39px; height: 39px; padding: 0; border-radius: 8px; overflow: hidden; background: #292f3c !important; }.music-island-art img { width: 100%; height: 100%; object-fit: cover; }
 .music-island-title { min-width: 0; flex: 1; display: flex; flex-direction: column; text-align: left; gap: 3px; }.music-island-title strong, .music-island-title small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 100%; }.music-island-title strong { font-size: 12px; }.music-island-title small { font-size: 10px; color: #9aabc0; }.music-island-collapse { font-size: 18px; opacity: .7; }
 .music-island-progress { height: 3px; border-radius: 3px; background: #4a5361; margin: 13px 1px 8px; overflow: hidden; }.music-island-progress span { display: block; height: 100%; background: #b9efcf; border-radius: inherit; }
-.music-island-actions { display: flex; align-items: center; justify-content: space-around; }.music-island-actions button { border: 0; background: none; color: white; padding: 3px 8px; font-size: 15px; cursor: pointer; }.music-island-actions .liked { color: #ff718d; }
-.music-island-playlists { display: flex; flex-direction: column; gap: 3px; max-height: 160px; overflow: auto; margin-top: 8px; padding-top: 8px; border-top: 1px solid #38404b; font-size: 10px; }.music-island-playlists button { border: 0; background: #222a36; color: white; padding: 7px; border-radius: 6px; text-align: left; }
-.music-island-feedback { display: block; color: #ffb6b6; font-size: 10px; margin: 5px 0; }
+.music-island-actions { display: flex; align-items: center; justify-content: center; gap: 17px; }
+.music-island-actions button { display: grid; place-items: center; width: 52px; height: 40px; border: 0; background: none; color: white; padding: 4px; cursor: pointer; }
+.music-island-actions svg { display: block; width: 30px; height: 30px; filter: drop-shadow(0 1px 2px rgba(255,255,255,.14)); }
+.music-island-actions button:nth-child(2) svg { width: 33px; height: 33px; }
+.music-island-actions button:nth-child(3) svg { transform: rotate(180deg); }
 .phone-shell:has(.music-player) > .phone-status-bar { z-index: 90; }
 
 .phone-shell-wrap[data-hide-top-bar="1"] .phone-status-bar>* {

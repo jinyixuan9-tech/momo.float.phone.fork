@@ -3399,10 +3399,10 @@
 .mp-together-heading { display: flex; align-items: center; flex-direction: column; gap: 7px; flex: none; text-align: center; color: var(--c-music-text); }
 .mp-together-heading strong { font-size: calc(15px*var(--app-text-scale,1)); letter-spacing: .03em; }
 .mp-together-heading > span { font-size: calc(11px*var(--app-text-scale,1)); color: var(--c-music-accent); font-variant-numeric: tabular-nums; }
-.mp-together-people { display: flex; align-items: center; gap: 16px; margin-bottom: 2px; }
-.mp-together-avatar { width: 54px; height: 54px; overflow: hidden; border-radius: 50%; display: grid; place-items: center; background: var(--c-music-surface); border: 2px solid rgba(255,255,255,.48); box-shadow: 0 8px 26px rgba(0,0,0,.28); font-weight: 700; }
+.mp-together-people { display: flex; align-items: center; justify-content: center; gap: 0; padding: 5px 10px; margin-bottom: 2px; isolation: isolate; }
+.mp-together-avatar { width: 58px; height: 58px; overflow: hidden; border-radius: 50%; display: grid; place-items: center; background: var(--c-music-surface); border: 2px solid rgba(255,255,255,.96); box-shadow: 0 0 12px rgba(255,255,255,.42), 0 0 24px rgba(205,230,255,.22), 0 8px 26px rgba(0,0,0,.28); font-weight: 700; position: relative; }
+.mp-together-avatar + .mp-together-avatar { margin-left: -14px; z-index: 1; }
 .mp-together-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.mp-together-link { color: var(--c-music-accent); font-size: 23px; text-shadow: 0 0 16px currentColor; }
 .mp-together-lyrics { flex: 1; min-height: 0; width: 100%; margin-top: 10px; }
 .mp-together-lyrics .mp-lyrics { text-align: center; padding: 30px 12px; }
 .mp-together-lyrics .mp-lyric-line { text-align: center; }

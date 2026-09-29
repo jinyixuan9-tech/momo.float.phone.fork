@@ -62,7 +62,6 @@ import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
 import { getMusicControlBridge } from "@/lib/music-control-bridge";
-import { startListenSession } from "@/lib/together-listening";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
 import { approveMemoryWriteRequest } from "@/lib/tool-executor";
 import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
@@ -5671,10 +5670,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         )}
                     </span>
                     <span className="page-header-right">
-                        {!session.isGroup && !offlineMode && <button className="page-back-btn" type="button" title="一起听" aria-label="一起听" onClick={() => {
-                            startListenSession(session.contactId);
-                            window.dispatchEvent(new Event("together-listening-navigate"));
-                        }}>♫</button>}
                         <button className="page-back-btn" type="button" onClick={() => setShowSettings(true)} aria-label="更多">
                             <MoreHorizontal size={22} strokeWidth={1.5} />
                         </button>
