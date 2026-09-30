@@ -7612,3 +7612,6 @@
 .moments-gallery-upload{position:relative;display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;background:var(--c-input);color:var(--c-text-title);cursor:pointer;overflow:hidden}
 .moments-gallery-upload input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:0}
 .moments-gallery-upload:has(input:disabled){opacity:.5;pointer-events:none}
+
+/* Music sits directly on the cover; two fine rules define its bounds. */
+.moments-music-strip{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;border-top:1px solid rgba(255,255,255,.42);border-bottom:1px solid rgba(255,255,255,.42);box-shadow:none}
