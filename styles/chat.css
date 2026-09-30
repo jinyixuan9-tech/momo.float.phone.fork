@@ -7563,3 +7563,37 @@
 .chat-app .moments-feed-page > .page-body{display:block;overflow-y:auto;overscroll-behavior-y:contain}
 .moments-profile-hero,.moments-featured-section{flex:none;flex-shrink:0}
 .moments-featured-remove{display:none}
+
+/* Small translucent music control, using the cropped reference icons. */
+.moments-music-strip{width:min(100%,330px);height:44px;gap:7px;padding:3px 6px;border:0;border-radius:3px;background:rgba(191,205,218,.22);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.moments-music-cover{display:grid;place-items:center;width:38px;height:38px;flex:none;overflow:hidden;background:rgba(255,255,255,.17);color:#fff}
+.moments-music-cover img{width:100%;height:100%;object-fit:cover}
+.moments-music-select{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0;line-height:1.2}
+.moments-music-select strong{font-size:12px;font-weight:500}
+.moments-music-select small{font-size:10px}
+.moments-music-icon-button{display:grid;place-items:center;width:27px;height:34px;flex:none;padding:2px;border:0;background:transparent;color:#fff}
+.moments-music-icon-button img{width:23px;height:23px;object-fit:contain}
+.moments-music-icon-button.is-liked img{filter:drop-shadow(0 0 3px #fff)}
+.moments-music-icon-button:disabled{opacity:.5}
+
+/* Dialogs and photo previews stay inside the phone-sized Moments shell. */
+.moments-feed-page{overflow:hidden;isolation:isolate}
+.moments-feed-page>.moments-dialog-backdrop,
+.moments-feed-page>.moments-gallery,
+.moments-feed-page>.moments-lightbox{position:absolute;inset:0}
+.moments-feed-page>.moments-dialog-backdrop{z-index:1100}
+.moments-feed-page>.moments-gallery{z-index:1200}
+.moments-feed-page>.moments-lightbox{z-index:1300}
+.moments-feed-page .moments-dialog{max-height:70%;box-sizing:border-box}
+.moments-music-actions{justify-content:center}
+.moments-dialog-actions.moments-music-actions button{min-width:104px;text-align:center;background:var(--c-input);color:var(--c-text-title)}
+.moments-feed-page>.moments-lightbox img{max-width:100%;max-height:calc(100% - 115px)}
+.moments-feed-page>.moments-lightbox .moments-lightbox-bottom{bottom:18px;flex-wrap:wrap;gap:8px;padding:0 12px;box-sizing:border-box}
+.moments-feed-page>.moments-gallery .moments-gallery-grid{width:100%}
+
+/* KKT rounded square avatars throughout the Moments posts and comments. */
+.moments-feed-page .feed-post-author-avatar{border-radius:13px;overflow:hidden}
+.moments-feed-page .feed-comment-avatar-root{border-radius:10px;overflow:hidden}
+.moments-feed-page .feed-comment-avatar-child{border-radius:7px;overflow:hidden}
+.moments-feed-page .feed-post-author-avatar img,
+.moments-feed-page .feed-comment-avatar img{border-radius:inherit}

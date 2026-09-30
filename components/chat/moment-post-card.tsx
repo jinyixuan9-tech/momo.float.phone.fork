@@ -321,7 +321,6 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
             <div className="feed-post-header flex items-center gap-3 mb-3">
                 <div
                     className="feed-post-author-avatar w-[40px] h-[40px] shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center"
-                    style={{ borderRadius: 13 }}
                 >
                     {authorAvatar ? (
                         <img src={authorAvatar} alt="" className="feed-post-author-avatar-image w-full h-full object-cover" />
@@ -431,10 +430,10 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                 )}
             </div>
             )}
-            {previewSrc && <div className="moments-lightbox" role="dialog" aria-modal="true" onClick={() => setPreviewPhoto(null)}>
+            {previewSrc && typeof document !== "undefined" && document.querySelector(".moments-feed-page") && createPortal(<div className="moments-lightbox" role="dialog" aria-modal="true" onClick={() => setPreviewPhoto(null)}>
                 <button type="button" className="moments-lightbox-close" onClick={() => setPreviewPhoto(null)}>关闭</button>
                 <img src={previewSrc} alt="照片原图" onClick={e => e.stopPropagation()} />
-            </div>}
+            </div>, document.querySelector(".moments-feed-page")!)}
             {showFallbackPreview && fallbackPhotoDescription && (
                 <MediaPreviewOverlay
                     description={fallbackPhotoDescription}
@@ -655,7 +654,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                                             onClick={(event) => handleCommentPress(root, event)}
                                         >
                                             <div
-                                                className="feed-comment-avatar feed-comment-avatar-root w-[32px] h-[32px] rounded-full shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center"
+                                                className="feed-comment-avatar feed-comment-avatar-root w-[32px] h-[32px] shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center"
                                             >
                                                 {rootAvatar ? (
                                                     <img src={rootAvatar} alt="" className="feed-comment-avatar-image w-full h-full object-cover" />
@@ -740,7 +739,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                                                             onClick={(event) => handleCommentPress(reply, event)}
                                                         >
                                                             <div
-                                                                className="feed-comment-avatar feed-comment-avatar-child w-[22px] h-[22px] rounded-full shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center mt-[2px]"
+                                                                className="feed-comment-avatar feed-comment-avatar-child w-[22px] h-[22px] shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center mt-[2px]"
                                                             >
                                                                 {replyAvatar ? (
                                                                     <img src={replyAvatar} alt="" className="feed-comment-avatar-image w-full h-full object-cover" />
