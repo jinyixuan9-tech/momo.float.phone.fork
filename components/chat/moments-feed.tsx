@@ -10,7 +10,7 @@ import { MomentPostCard } from "./moment-post-card";
 import { MomentsCompose } from "./moments-compose";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { PageShell } from "@/components/ui/page-shell";
-import { AlertCircle, Camera, Music2, Pencil, Play, Pause, ChevronRight } from "lucide-react";
+import { AlertCircle, Camera, Music2, Play, Pause, ChevronRight, SquarePen, Images } from "lucide-react";
 import { getMomentsScreenName, getMomentsSignature, saveMomentsProfile, getFeaturedPhotos, getMyMomentsPhotos, addFeaturedPhoto, removeFeaturedPhoto, addManualPhoto, getMomentsMusicId, setMomentsMusicId, type MomentsPhoto } from "@/lib/moments-profile";
 import { saveMomentsImage } from "@/lib/moments-image-upload";
 import { MomentsPhotoImage, useMomentsPhotoUrl } from "./moments-photo";
@@ -49,6 +49,7 @@ type MomentsFeedProps = {
 export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
     const [posts, setPosts] = useState<MomentPost[]>([]);
     const [showCompose, setShowCompose] = useState(false);
+    const openMyLife = () => setShowCompose(true);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     // 后台生图失败：弹一次弹窗提示，关掉即消失（同时多条失败只提示第一条）
     const [photoFailureNotice, setPhotoFailureNotice] = useState<string | null>(null);
@@ -91,7 +92,7 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
         event.target.value = "";
         if (!file) return;
         setUploadingPhoto(true);
-        try { const url = await saveMomentsImage(file); addManualPhoto(url); addFeaturedPhoto({ url, addedAt: new Date().toISOString() }); }
+        try { const url = await saveMomentsImage(file); addManualPhoto(url); if (getFeaturedPhotos().length < 3) addFeaturedPhoto({ url, addedAt: new Date().toISOString() }); }
         catch (error) { console.error("[Moments] photo upload failed", error); }
         finally { setUploadingPhoto(false); }
     };
@@ -421,21 +422,10 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
         <PageShell
             title="动态"
             onBack={onCloseApp}
-            rightAction={
-                <button
-                    onClick={() => setShowCompose(true)}
-                    className="page-back-btn"
-                    title="发布朋友圈"
-                    type="button"
-                    aria-label="发布朋友圈"
-                >
-                    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" stroke="currentColor">
-                        <rect x="2" y="6" width="20" height="14" rx="2" />
-                        <circle cx="12" cy="13" r="4" />
-                        <path d="M8 6l1-3h6l1 3" />
-                    </svg>
-                </button>
-            }
+            rightAction={<div className="moments-header-actions">
+                <button type="button" className="moments-header-edit" onClick={() => { setDraftName(screenName); setDraftSignature(signature); setEditProfile(true); }} aria-label="编辑朋友圈资料">编辑</button>
+                <button type="button" className="moments-header-compose" onClick={openMyLife} aria-label="My Life，发朋友圈" title="My Life，发朋友圈"><Camera size={18} strokeWidth={1.8}/></button>
+            </div>}
             className={`moments-feed-page ${headerScrolled ? "is-scrolled" : ""} ${activeComposer ? "has-comment-modal" : ""}`}
             bodyRef={scrollRef}
             footer={showCompose ? (
@@ -508,7 +498,6 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                                 {userIdentity?.avatarUrl ? <img src={userIdentity.avatarUrl} alt="我的头像" /> : <span>{(screenName || "我")[0]}</span>}
                             </div>
                             <div className="moments-profile-identity"><strong>{screenName}</strong><span>{signature}</span></div>
-                            <button type="button" className="moments-profile-edit" onClick={() => { setDraftName(screenName); setDraftSignature(signature); setEditProfile(true); }} aria-label="编辑网名和签名"><Pencil size={17}/></button>
                         </div>
                         <div className="moments-music-strip">
                             <button type="button" className="moments-music-play" disabled={!selectedTrack || !music} onClick={() => { if (!selectedTrack || !music) return; music.currentTrack?.id === selectedTrack.id ? music.togglePlay() : music.playTrack(selectedTrack); }} aria-label="播放或暂停主页音乐">
@@ -517,10 +506,13 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                             </button>
                             <button type="button" className="moments-music-select" onClick={() => { loadAllTracks().then(setMusicTracks); setMusicPicker(true); }}><strong>{selectedTrack?.title || "选择一首主页音乐"}</strong><small>{selectedTrack?.artist || "从音乐收藏或播放列表选歌"}</small><ChevronRight size={16}/></button>
                         </div>
+                        <div className="moments-profile-actions">
+                            <button type="button" onClick={openMyLife} aria-label="My Life，发朋友圈"><SquarePen size={17} strokeWidth={1.8}/><span>My Life</span></button>
+                            <button type="button" onClick={() => setShowGallery(true)} aria-label="Photo Album，查看相册"><Images size={17} strokeWidth={1.8}/><span>Photo Album</span></button>
+                        </div>
                     </div>
                 </section>
-                <section className="moments-featured-section">
-                    <div className="moments-section-title"><strong>我的照片</strong><button type="button" onClick={() => setShowGallery(true)}>看我的照片 <ChevronRight size={15}/></button></div>
+                <section className="moments-featured-section" aria-label="主页照片">
                     <div className="moments-featured-scroll">
                         {featured.map(photo => <div className="moments-featured-tile" key={photo.url}>
                             <button type="button" className="moments-featured-image" onClick={() => { setShowGallery(true); const index = galleryPhotos.findIndex(p => p.url === photo.url); if (index >= 0) setLightboxIndex(index); }}><MomentsPhotoImage url={photo.url} /></button>
@@ -575,9 +567,9 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                 )}
 
 
-            {editProfile && <div className="moments-dialog-backdrop" role="presentation" onClick={() => setEditProfile(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="编辑朋友圈资料" onClick={e => e.stopPropagation()}><h3>编辑朋友圈资料</h3><label>网名<input maxLength={24} value={draftName} onChange={e => setDraftName(e.target.value)} /></label><label>签名<input maxLength={80} value={draftSignature} onChange={e => setDraftSignature(e.target.value)} /></label><div className="moments-dialog-actions"><button onClick={() => setEditProfile(false)}>取消</button><button onClick={() => { saveMomentsProfile(draftName, draftSignature); setEditProfile(false); }}>保存</button></div></div></div>}
+            {editProfile && <div className="moments-dialog-backdrop" role="presentation" onClick={() => setEditProfile(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="编辑朋友圈资料" onClick={e => e.stopPropagation()}><h3>编辑朋友圈资料</h3><label>网名<input maxLength={24} value={draftName} onChange={e => setDraftName(e.target.value)} /></label><label>签名<input maxLength={80} value={draftSignature} onChange={e => setDraftSignature(e.target.value)} /></label><div className="moments-dialog-actions"><button type="button" onClick={() => setEditProfile(false)}>取消</button><button type="button" className="moments-save-btn" onClick={() => { saveMomentsProfile(draftName, draftSignature); setEditProfile(false); }}>保存</button></div></div></div>}
             {musicPicker && <div className="moments-dialog-backdrop" role="presentation" onClick={() => setMusicPicker(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="选择主页音乐" onClick={e => e.stopPropagation()}><h3>主页音乐</h3><div className="moments-song-list">{Array.from(new Map<string, MusicTrack>([...musicTracks, ...(music?.queue || []), ...(music?.currentTrack ? [music.currentTrack] : [])].map(t => [t.id, t] as const)).values()).map(track => <button type="button" key={track.id} onClick={() => { setMomentsMusicId(track.id); setMusicPicker(false); }}><Music2 size={18}/><span>{track.title}<small>{track.artist}</small></span>{track.id === musicId ? "✓" : ""}</button>)}{musicTracks.length === 0 && !music?.queue.length && !music?.currentTrack && <p>先到音乐 App 添加歌曲，再回来选。</p>}</div><div className="moments-dialog-actions"><button onClick={() => { setMomentsMusicId(""); setMusicPicker(false); }}>移除音乐</button><button onClick={() => setMusicPicker(false)}>完成</button></div></div></div>}
-            {showGallery && <div className="moments-gallery" role="dialog" aria-modal="true" aria-label="我的照片"><div className="moments-gallery-header"><button type="button" onClick={() => { setShowGallery(false); setLightboxIndex(null); }}>‹ 返回</button><strong>我的照片</strong><span>{galleryPhotos.length} 张</span></div><div className="moments-gallery-grid">{galleryPhotos.map((photo, index) => <button type="button" key={photo.url} onClick={() => setLightboxIndex(index)}><MomentsPhotoImage url={photo.url} alt={`照片 ${index + 1}`}/></button>)}</div>{galleryPhotos.length === 0 && <p className="moments-gallery-empty">发动态或上传照片后，会出现在这里。</p>}</div>}
+            {showGallery && <div className="moments-gallery" role="dialog" aria-modal="true" aria-label="我的照片"><div className="moments-gallery-header"><button type="button" onClick={() => { setShowGallery(false); setLightboxIndex(null); }}>‹ 返回</button><strong>我的照片</strong><div className="moments-gallery-header-actions"><span>{galleryPhotos.length} 张</span><button type="button" disabled={uploadingPhoto} onClick={() => manualInputRef.current?.click()} aria-label="上传照片到相册"><Camera size={18}/></button></div></div><div className="moments-gallery-grid">{galleryPhotos.map((photo, index) => <button type="button" key={photo.url} onClick={() => setLightboxIndex(index)}><MomentsPhotoImage url={photo.url} alt={`照片 ${index + 1}`}/></button>)}</div>{galleryPhotos.length === 0 && <p className="moments-gallery-empty">发动态或上传照片后，会出现在这里。</p>}</div>}
             {showGallery && lightboxIndex !== null && lightboxPhoto && <div className="moments-lightbox" role="dialog" aria-modal="true" onTouchStart={e => { touchX.current = e.touches[0].clientX; }} onTouchEnd={e => { if (touchX.current === null) return; const diff = e.changedTouches[0].clientX - touchX.current; if (Math.abs(diff) > 40) setLightboxIndex(i => i === null ? null : Math.max(0, Math.min(galleryPhotos.length - 1, i + (diff < 0 ? 1 : -1)))); touchX.current = null; }}><button type="button" className="moments-lightbox-close" onClick={() => setLightboxIndex(null)}>关闭</button><button type="button" className="moments-lightbox-prev" disabled={lightboxIndex === 0} onClick={() => setLightboxIndex(lightboxIndex - 1)}>‹</button>{lightboxSrc && <img src={lightboxSrc} alt="照片原图"/>}<button type="button" className="moments-lightbox-next" disabled={lightboxIndex === galleryPhotos.length - 1} onClick={() => setLightboxIndex(lightboxIndex + 1)}>›</button><div className="moments-lightbox-bottom"><span>{lightboxIndex + 1} / {galleryPhotos.length}</span><button type="button" onClick={() => addFeaturedPhoto({ ...lightboxPhoto, addedAt: new Date().toISOString() })}>展示到主页</button>{lightboxPhoto.postId && posts.some(p => p.id === lightboxPhoto.postId) && <button type="button" onClick={() => jumpToPost(lightboxPhoto.postId!)}>查看原动态与评论</button>}</div></div>}
 
             {/* Delete confirm dialog */}
