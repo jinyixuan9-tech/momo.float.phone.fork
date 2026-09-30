@@ -13,6 +13,7 @@ import { ContactCardGenerateFlow } from "@/components/chat/contact-card-generate
 import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import { findStickerByName } from "@/lib/sticker-data";
 import { splitBilingualText } from "@/lib/bilingual-text";
+import { loadAllTracks } from "@/lib/music-storage";
 import { isInvisibleOrWhitespaceOnly } from "@/lib/rich-message-parser";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -40,6 +41,8 @@ interface MessageBubbleProps {
     onUpdate?: (updated: ChatMessage) => void;
     charName?: string;
     userName?: string;
+    quoteCharacterName?: string;
+    quoteUserName?: string;
     onSystemMessage?: (text: string) => void;
     groupSize?: number;
     onShowDetail?: (msg: ChatMessage) => void;
@@ -92,7 +95,7 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, onMeetingInviteAction, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUpdate, charName, userName, quoteCharacterName, quoteUserName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, onMeetingInviteAction, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
     if (photoGroup && photoGroup.length > 1) return <ChatPhotoDeck messages={photoGroup} onUpdate={onUpdate} characterId={characterId} />;
     switch (msg.mediaType) {
         case "red_packet":
@@ -118,7 +121,11 @@ export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUp
         case "dice":
             return <DiceBubble msg={msg} />;
         case "quote":
-            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            return <QuoteBubble msg={msg} quotedSenderName={
+                msg.mediaData?.quoteRole === "user" || (!msg.mediaData?.quoteRole && msg.role === "assistant")
+                    ? (quoteUserName || userName)
+                    : (quoteCharacterName || charName)
+            } displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
         case "music_share":
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
         case "media_file":
@@ -1764,13 +1771,17 @@ function StickerBubble({ msg, characterId }: { msg: ChatMessage; characterId?: s
 
 // ── Quote ─────────────────────────────
 
-function QuoteBubble({ msg, displayContent, defaultTranslationExpanded = false }: { msg: ChatMessage; displayContent?: string; defaultTranslationExpanded?: boolean }) {
+function QuoteBubble({ msg, quotedSenderName, displayContent, defaultTranslationExpanded = false }: { msg: ChatMessage; quotedSenderName?: string; displayContent?: string; defaultTranslationExpanded?: boolean }) {
     const d = msg.mediaData;
+    // Old saved quotes may still include "original | translation".
+    const originalPreview = d?.quotePreview
+        ? (splitBilingualText(d.quotePreview)?.original || d.quotePreview.split(/\s+\|\s+/)[0])
+        : "";
     return (
         <div className="chat-quote-message max-w-full">
-            {d?.quotePreview && (
+            {originalPreview && (
                 <div className="chat-quote-preview bg-black/[0.06] border-l-[3px] border-l-black/15 px-2.5 py-1.5 ts-12 text-[var(--c-icon)] mb-1.5 rounded-r-[6px] truncate max-w-full">
-                    {d.quotePreview}
+                    {quotedSenderName && <><strong>{quotedSenderName}:</strong>{" "}</>}{originalPreview}
                 </div>
             )}
             {msg.content && <TextBubble content={displayContent ?? msg.content} defaultTranslationExpanded={defaultTranslationExpanded} />}
@@ -2350,6 +2361,19 @@ function MediaFileBubble({
 function MusicShareBubble({ msg, onPlay }: { msg: ChatMessage; onPlay?: (title: string, artist?: string) => void }) {
     const title = msg.mediaData?.musicTitle || "未知歌曲";
     const artist = msg.mediaData?.musicArtist || "";
+    const [coverUrl, setCoverUrl] = useState(msg.mediaData?.musicCoverUrl || "");
+    useEffect(() => {
+        let mounted = true;
+        setCoverUrl(msg.mediaData?.musicCoverUrl || "");
+        if (!msg.mediaData?.musicCoverUrl) {
+            void loadAllTracks().then(tracks => {
+                const match = tracks.find(track => track.title.trim().toLowerCase() === title.trim().toLowerCase()
+                    && (!artist || track.artist.trim().toLowerCase() === artist.trim().toLowerCase()));
+                if (mounted && match?.coverUrl) setCoverUrl(match.coverUrl);
+            });
+        }
+        return () => { mounted = false; };
+    }, [msg.mediaData?.musicCoverUrl, title, artist]);
     return (
         <div
             className="chat-music-share-card"
@@ -2358,9 +2382,11 @@ function MusicShareBubble({ msg, onPlay }: { msg: ChatMessage; onPlay?: (title: 
         >
             <div className="chat-music-share-body">
                 <div className="chat-music-share-cover">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-music-accent, #7c9a92)" strokeWidth="1.2">
-                        <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                    </svg>
+                    {coverUrl
+                        ? <img src={coverUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                        : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-music-accent, #7c9a92)" strokeWidth="1.2">
+                            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>}
                 </div>
                 <div className="chat-music-share-info">
                     <div className="chat-music-share-title">{title}</div>

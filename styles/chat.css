@@ -4,7 +4,6 @@
 
 .chat-app {
   background: transparent;
-  --kkt-avatar-radius: 45%;
   --ctx-menu-bg: #2c2c2c;
   --page-header-content-height: 54px;
   --chat-tabbar-content-height: 68px;
@@ -3175,6 +3174,29 @@
   border: none;
   box-shadow: none;
   padding: 0;
+}
+.chat-kkt-batch-meta {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  gap: 1px;
+  /* The message wrapper already has a 16px flex gap. */
+  margin-top: -13px;
+  color: #686868;
+  font-size: calc(10px * var(--app-text-scale, 1));
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chat-kkt-batch-meta[data-role="assistant"] { margin-left: 88px; align-items: flex-start; }
+.chat-kkt-batch-meta[data-role="user"] { margin-left: auto; margin-right: 4px; align-items: flex-end; }
+.chat-kkt-batch-unread { color: #c5a500; font-size: 11px; font-weight: 700; }
+.chat-kkt-sender-name {
+  align-self: flex-start;
+  margin: 0 0 2px 2px;
+  color: #383838;
+  font-size: calc(11px * var(--app-text-scale, 1));
+  line-height: 1.2;
 }
 .chat-markdown p,
 .chat-markdown-paragraph {
@@ -7491,7 +7513,7 @@
 .moments-hero-cover:after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,rgba(0,0,0,.25));pointer-events:none}
 .moments-profile-info{position:relative;padding:0 18px;margin-top:-32px}
 .moments-profile-heading{display:flex;align-items:end;gap:12px;min-height:84px}
-.moments-squircle-avatar{width:78px;height:78px;flex:none;border:4px solid var(--c-page-body-bg);border-radius:var(--kkt-avatar-radius, 45%);overflow:hidden;background:var(--c-input);display:grid;place-items:center;font-size:27px;font-weight:700;color:var(--c-text-title)}
+.moments-squircle-avatar{width:78px;height:78px;flex:none;border:4px solid var(--c-page-body-bg);border-radius:27px;overflow:hidden;background:var(--c-input);display:grid;place-items:center;font-size:27px;font-weight:700;color:var(--c-text-title)}
 .moments-squircle-avatar img{width:100%;height:100%;object-fit:cover}
 .moments-profile-identity{display:flex;flex-direction:column;min-width:0;flex:1;gap:5px;padding-bottom:5px;color:var(--c-text-title)}
 .moments-profile-identity strong{font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -7524,7 +7546,7 @@
 .moments-music-play{background:rgba(255,255,255,.17);color:white;border-radius:4px}
 .moments-music-select{color:white}.moments-music-select small{color:rgba(255,255,255,.75)}
 .moments-profile-heading{order:2;display:block;min-height:0;margin-top:auto;color:white}
-.moments-squircle-avatar{width:73px;height:73px;border:0;border-radius:var(--kkt-avatar-radius, 45%);background:rgba(255,255,255,.2);color:white}
+.moments-squircle-avatar{width:73px;height:73px;border:0;border-radius:24px;background:rgba(255,255,255,.2);color:white}
 .moments-profile-identity{margin-top:11px;padding:0;gap:5px;color:white}.moments-profile-identity strong{font-size:19px}.moments-profile-identity span{font-size:13px;color:rgba(255,255,255,.83)}
 .moments-profile-actions{order:3;display:flex;align-items:center;flex:none;margin-top:20px;height:47px;overflow:hidden;border:1px solid rgba(255,255,255,.54);border-radius:8px;background:rgba(255,255,255,.12);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .moments-profile-actions button{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;height:100%;padding:0 8px;border:0;background:transparent;color:#fff;font-size:13px;font-weight:650;letter-spacing:.01em;white-space:nowrap}
@@ -7572,10 +7594,10 @@
 .moments-feed-page>.moments-lightbox .moments-lightbox-bottom{bottom:18px;flex-wrap:wrap;gap:8px;padding:0 12px;box-sizing:border-box}
 .moments-feed-page>.moments-gallery .moments-gallery-grid{width:100%}
 
-/* One KKT silhouette for the profile, post author, and comment avatars. */
-.moments-feed-page .feed-post-author-avatar{border-radius:var(--kkt-avatar-radius, 45%);overflow:hidden}
-.moments-feed-page .feed-comment-avatar-root{border-radius:var(--kkt-avatar-radius, 45%);overflow:hidden}
-.moments-feed-page .feed-comment-avatar-child{border-radius:var(--kkt-avatar-radius, 45%);overflow:hidden}
+/* KKT rounded square avatars throughout the Moments posts and comments. */
+.moments-feed-page .feed-post-author-avatar{border-radius:13px;overflow:hidden}
+.moments-feed-page .feed-comment-avatar-root{border-radius:10px;overflow:hidden}
+.moments-feed-page .feed-comment-avatar-child{border-radius:7px;overflow:hidden}
 .moments-feed-page .feed-post-author-avatar img,
 .moments-feed-page .feed-comment-avatar img{border-radius:inherit}
 
@@ -7710,9 +7732,9 @@
   background: #e5e5e5;
   color: #343b43;
 }
-.chat-app .kkt-own-avatar { width: 56px; height: 56px; border-radius: var(--kkt-avatar-radius); }
+.chat-app .kkt-own-avatar { width: 56px; height: 56px; border-radius: 20px; }
 .chat-app .kkt-own-avatar img,
-.chat-app .kkt-update-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.chat-app .kkt-update-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .chat-app .kkt-own-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .chat-app .kkt-own-text strong { font-size: calc(15px * var(--app-text-scale, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app .kkt-own-text span { font-size: calc(12px * var(--app-text-scale, 1)); color: #777; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -7768,7 +7790,7 @@
 .chat-app .kkt-updates-list { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; }
 .chat-app .kkt-updates-list::-webkit-scrollbar { display: none; }
 .chat-app .kkt-update-preview { min-width: 48px; max-width: 58px; flex: none; }
-.chat-app .kkt-update-avatar { width: 40px; height: 40px; border-radius: var(--kkt-avatar-radius); }
+.chat-app .kkt-update-avatar { width: 40px; height: 40px; border-radius: 15px; }
 .chat-app .kkt-update-preview > span:last-child { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app .kkt-recommend-row {
   width: 100%;
@@ -7792,7 +7814,7 @@
 .chat-app .kkt-list-page .minimal-avatar-wrapper,
 .chat-app .kkt-list-page .minimal-avatar-wrapper > img,
 .chat-app .kkt-list-page .minimal-avatar-wrapper .rounded-full {
-  border-radius: var(--kkt-avatar-radius) !important;
+  border-radius: 16px !important;
 }
 .chat-app .kkt-list-page .minimal-avatar-wrapper { overflow: hidden; }
 .chat-app .kkt-list-page .minimal-list-item { gap: 11px; padding: 10px 14px; margin: 0 -14px; }

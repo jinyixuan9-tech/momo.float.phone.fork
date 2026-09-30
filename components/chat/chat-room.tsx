@@ -66,6 +66,8 @@ import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib
 import { approveMemoryWriteRequest } from "@/lib/tool-executor";
 import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
+import { splitBilingualText } from "@/lib/bilingual-text";
+import { getSavedMomentsScreenName } from "@/lib/moments-profile";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { creditWalletBalance, payWithWalletBalance, loadWalletState, recordWalletPayment, recordWalletCredit, formatCurrencyAmount, walletCurrency } from "@/lib/wallet-storage";
@@ -456,11 +458,44 @@ function cancelOfflineGenerationRun(sessionId: string): boolean {
 
 // ── Rich media reprocessing on mount ──────────────────────────
 
-const TIME_GAP = 1 * 60 * 1000;
+const TIME_GAP = 10 * 60 * 1000;
 
 function shouldShowTimestamp(currentMsg: string, prevMsg: string | null): boolean {
     if (!prevMsg) return true; // First message always shows time
-    return new Date(currentMsg).getTime() - new Date(prevMsg).getTime() > TIME_GAP;
+    const current = new Date(currentMsg);
+    const previous = new Date(prevMsg);
+    return current.toDateString() !== previous.toDateString()
+        || current.getTime() - previous.getTime() >= TIME_GAP;
+}
+
+function formatKktChatDate(dateStr: string): string {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    if (day.getTime() === today.getTime()) return "Today";
+    if (day.getTime() === yesterday.getTime()) return "Yesterday";
+    return new Intl.DateTimeFormat("en-US", {
+        weekday: "long", month: "short", day: "numeric", year: "numeric",
+    }).format(date);
+}
+
+function formatKktChatClock(dateStr: string): string {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
+    const hour = date.getHours();
+    return `${hour % 12 || 12}:${String(date.getMinutes()).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+function chatKktBatchKey(message: ChatMessage): string {
+    const speaker = message.role === "assistant" ? message.senderCharacterId || "assistant" : message.role;
+    const batch = message.role === "assistant"
+        ? message.responseBatchId || message.responseRoundId || message.id
+        : message.mediaData?.photoBatchId || message.id;
+    return `${speaker}:${batch}`;
 }
 
 type ChatRoomProps = {
@@ -1089,6 +1124,11 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
 export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [liveCSS, setLiveCSS] = useState(session.customCSS || "");
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [unreadKktBatches, setUnreadKktBatches] = useState<Set<string>>(() => new Set());
+    const seenKktMessageIdsRef = useRef<Set<string> | null>(null);
+    const unreadKktTimersRef = useRef<Map<string, number>>(new Map());
+    const userKktReadTimerRef = useRef<number | null>(null);
+    const wasKktGeneratingRef = useRef(false);
     const [transientMessages, setTransientMessages] = useState<ChatMessage[]>([]);
     const [stickerReady, setStickerReady] = useState(false);
     const [character, setCharacter] = useState<Character | null>(() => {
@@ -1144,6 +1184,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [enterToSendEnabled, setEnterToSendEnabled] = useState(() => loadChatAppSettings().enterToSendEnabled === true);
     const [chatAppSettingsRevision, setChatAppSettingsRevision] = useState(0);
     const chatDisplayName = character ? resolveChatCharacterDisplayName(character) : `User_${session.contactId.slice(-4)}`;
+    const quoteCharacterName = session.alias?.trim()
+        || loadChatContacts().find(contact => contact.characterId === session.contactId)?.nickname?.trim()
+        || chatDisplayName;
+    const quoteUserName = getSavedMomentsScreenName() || userIdentity?.name || "你";
     const chatAvatar = character ? resolveChatCharacterAvatar(character) : null;
     void chatProfileRevision;
 
@@ -1767,10 +1811,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         window.addEventListener(CHARACTERS_UPDATED_EVENT, refreshAvatars);
         window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, refreshAvatars);
         window.addEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, refreshChatProfile);
+        window.addEventListener("moments-profile-updated", refreshChatProfile);
         return () => {
             window.removeEventListener(CHARACTERS_UPDATED_EVENT, refreshAvatars);
             window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, refreshAvatars);
             window.removeEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, refreshChatProfile);
+            window.removeEventListener("moments-profile-updated", refreshChatProfile);
         };
     }, [session.contactId]);
 
@@ -1780,6 +1826,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     );
 
     useEffect(() => {
+        setUnreadKktBatches(new Set());
         setUserIdentity(resolveUserIdentity(session.contactId, "chat"));
         setTransientMessages([]);
         setOfflineMode(kvGet(CHAT_OFFLINE_MODE_PREFIX + session.id) === "1");
@@ -1810,6 +1857,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             needsInitialScrollRef.current = true;
             prevMsgCountRef.current = 0;
             visibleMessagesRef.current = msgs;
+            seenKktMessageIdsRef.current = new Set(msgs.map(message => message.id));
             setMessages(msgs);
         });
 
@@ -1858,6 +1906,65 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             kvRemove(pendingKey);
             void runManagedGeneration({ history: msgs, onDecline: triggerReply });
         }
+    }, [session.id]);
+
+    // The small “1” is transient display state, never saved into chat history.
+    // Each assistant response batch shares one key; a user send uses its own id.
+    useEffect(() => {
+        if (session.isGroup) return;
+        const seen = seenKktMessageIdsRef.current;
+        if (!seen) {
+            seenKktMessageIdsRef.current = new Set(messages.map(message => message.id));
+            return;
+        }
+        const lastKnownIndex = messages.reduce((index, message, current) => seen.has(message.id) ? current : index, -1);
+        const fresh = messages.filter((message, index) => index > lastKnownIndex && !seen.has(message.id));
+        messages.forEach(message => seen.add(message.id));
+        const keys = fresh.filter(message => message.role === "user" || message.role === "assistant")
+            .map(chatKktBatchKey);
+        if (!keys.length) return;
+        setUnreadKktBatches(previous => new Set([...previous, ...keys]));
+        for (const message of fresh) {
+            if (message.role !== "assistant") continue;
+            const key = chatKktBatchKey(message);
+            const previousTimer = unreadKktTimersRef.current.get(key);
+            if (previousTimer) window.clearTimeout(previousTimer);
+            unreadKktTimersRef.current.set(key, window.setTimeout(() => {
+                setUnreadKktBatches(previous => {
+                    const next = new Set(previous);
+                    next.delete(key);
+                    return next;
+                });
+                unreadKktTimersRef.current.delete(key);
+            }, 2500));
+        }
+    }, [messages, session.isGroup]);
+
+    useEffect(() => {
+        if (session.isGroup) return;
+        if (isGenerating && !wasKktGeneratingRef.current) {
+            if (userKktReadTimerRef.current) window.clearTimeout(userKktReadTimerRef.current);
+            userKktReadTimerRef.current = window.setTimeout(() => {
+                setUnreadKktBatches(previous => {
+                    const next = new Set(previous);
+                    for (const message of messages) {
+                        if (message.role === "user") next.delete(chatKktBatchKey(message));
+                    }
+                    return next;
+                });
+                userKktReadTimerRef.current = null;
+            }, 2500);
+        }
+        wasKktGeneratingRef.current = isGenerating;
+    }, [isGenerating, messages, session.isGroup]);
+
+    useEffect(() => () => {
+        for (const timer of unreadKktTimersRef.current.values()) window.clearTimeout(timer);
+        unreadKktTimersRef.current.clear();
+        if (userKktReadTimerRef.current) window.clearTimeout(userKktReadTimerRef.current);
+        userKktReadTimerRef.current = null;
+        seenKktMessageIdsRef.current = null;
+        wasKktGeneratingRef.current = false;
     }, [session.id]);
 
     const needsInitialScrollRef = useRef(true);
@@ -4108,7 +4215,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const isQuoting = !!quotingMessage;
         const quoteData = quotingMessage ? {
             quoteMessageId: quotingMessage.id,
-            quotePreview: quotingMessage.content.slice(0, 50),
+            quotePreview: splitBilingualText(quotingMessage.content)?.original || quotingMessage.content,
             quoteRole: quotingMessage.role,
         } : undefined;
         setQuotingMessage(null);
@@ -5720,7 +5827,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                             const offlineDisplay = offlineDisplayByTurnId.get(turn.id) ?? getOfflineDisplayText(turn);
                             const assistantHasHtmlPreview = hasOfflineHtmlPreview(offlineDisplay.assistantContent);
                             const prevTime = turnIdx > 0 ? visibleOfflineTurns[turnIdx - 1].createdAt : null;
-                            const showTime = !prevTime || shouldShowTimestamp(turn.createdAt, prevTime);
+                            const showTime = !prevTime
+                                || new Date(turn.createdAt).getTime() - new Date(prevTime).getTime() > 60_000;
                             return (
                             <Fragment key={turn.id}>
                             {showTime && <div className="chat-offline-time">{formatChatUiTime(turn.createdAt)}</div>}
@@ -6041,8 +6149,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         prevVisibleMsg = candidate;
                         break;
                     }
-                    const showTime = shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null);
-                    const isConsecutive = prevVisibleMsg && !showTime && uiRole(prevVisibleMsg) === uiRole(msg) && uiRole(msg) !== "system"
+                    let nextVisibleMsg: RenderChatMessage | null = null;
+                    for (let nextIdx = idx + 1; nextIdx < projectedMessages.length; nextIdx += 1) {
+                        if (voiceCallGroups.memberSet.has(nextIdx)) continue;
+                        const candidate = projectedMessages[nextIdx];
+                        if (samePhotoBatch(candidate)) continue;
+                        if (isHiddenChatFlowMessage(candidate, getMessageDisplayContent(candidate))) continue;
+                        nextVisibleMsg = candidate;
+                        break;
+                    }
+                    const showTime = session.isGroup
+                        ? (!prevVisibleMsg || new Date(msg.createdAt).getTime() - new Date(prevVisibleMsg.createdAt).getTime() > 60_000)
+                        : shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null);
+                    const isConsecutive = prevVisibleMsg && !showTime
+                        && (session.isGroup ? uiRole(prevVisibleMsg) === uiRole(msg) : chatKktBatchKey(prevVisibleMsg) === chatKktBatchKey(msg))
+                        && uiRole(msg) !== "system"
                         && (!session.isGroup || prevVisibleMsg.senderCharacterId === msg.senderCharacterId);
                     // Hide bubbles with no visible content (empty text, stripped music tags, etc.)
                     const visibleContent = getChatFlowVisibleContent(renderMsg, bubbleDisplayContent);
@@ -6056,6 +6177,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     const isMediaBubble = (renderMsg.mediaType && CHAT_MEDIA_BUBBLE_TYPES.has(renderMsg.mediaType)) || isStandaloneHtmlPreview;
                     // Empty bubble: no visible content AND no visual media AND no folded panel.
                     const isEmptyBubble = !isVisualMedia && !visibleContent && uiRole(msg) !== "system" && !hasFoldedPanel;
+                    const isBatchEnd = !session.isGroup && (msg.role === "user" || msg.role === "assistant")
+                        && !hiddenEmpty && !isEmptyBubble && !isSilentThought
+                        && (!nextVisibleMsg || chatKktBatchKey(nextVisibleMsg) !== chatKktBatchKey(msg));
                     const selectableStoredId = getSelectableStoredMessageId(msg);
                     const isMultiSelectable = isMultiSelectMode && !!selectableStoredId && !hiddenEmpty;
                     const isMultiSelected = !!selectableStoredId && selectedMessageIds.has(selectableStoredId);
@@ -6076,7 +6200,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                             {showTime && (
                                 <div className="flex justify-center w-full">
                                     <span className="chat-sys-msg py-[2px] px-2 rounded select-none">
-                                        {formatChatUiTime(msg.createdAt)}
+                                        {session.isGroup ? formatChatUiTime(msg.createdAt) : formatKktChatDate(msg.createdAt)}
                                     </span>
                                 </div>
                             )}
@@ -6272,6 +6396,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             {session.isGroup && msg.role !== "user" && (
                                                 <span className="chat-group-sender-name">{msg.senderName || ""}{renderGroupRoleBadge(msg.senderCharacterId)}</span>
                                             )}
+                                            {!session.isGroup && msg.role === "assistant" && !isConsecutive && (
+                                                <span className="chat-kkt-sender-name">{quoteCharacterName}</span>
+                                            )}
                                             <div
                                             {...(editingMessageId !== msg.id ? {
                                                 onPointerDown: (e: React.PointerEvent) => { e.stopPropagation(); handleMessagePointerDown(e, msg.id); },
@@ -6302,6 +6429,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 displayContent={msg.displayProjected ? undefined : bubbleDisplayContent}
                                                 charName={character?.name}
                                                 userName={userIdentity?.name || "你"}
+                                                quoteCharacterName={quoteCharacterName}
+                                                quoteUserName={quoteUserName}
                                                 groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
                                                 onShowDetail={setMediaDetailMsg}
                                                 characterId={msg.senderCharacterId || session.contactId}
@@ -6377,6 +6506,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         />
                                     </div>
                                     {msg.role === "user" && <div className="w-[40px] shrink-0" />}
+                                </div>
+                            )}
+                            {isBatchEnd && (
+                                <div className="chat-kkt-batch-meta" data-role={msg.role}>
+                                    {unreadKktBatches.has(chatKktBatchKey(msg)) && <span className="chat-kkt-batch-unread">1</span>}
+                                    <time dateTime={msg.createdAt}>{formatKktChatClock(msg.createdAt)}</time>
                                 </div>
                             )}
                             {/* 状态栏：一律裸渲染，不套便利贴外框（自定义模式下交给用户的渲染代码，

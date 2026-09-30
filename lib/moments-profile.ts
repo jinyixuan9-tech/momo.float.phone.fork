@@ -18,6 +18,12 @@ const readPhotos = (key: string): MomentsPhoto[] => {
     } catch { return []; }
 };
 export const getMomentsScreenName = () => typeof window === "undefined" ? "我的朋友圈" : kvGet(NAME_KEY)?.trim() || "我的朋友圈";
+/** 只返回用户明确填写的网名，供引用消息回退到用户本名。 */
+export const getSavedMomentsScreenName = () => {
+    if (typeof window === "undefined") return "";
+    const value = kvGet(NAME_KEY)?.trim() || "";
+    return value === "我的朋友圈" ? "" : value;
+};
 export const getMomentsSignature = () => typeof window === "undefined" ? "写下你的签名" : kvGet(SIGNATURE_KEY) || "写下你的签名";
 export const saveMomentsProfile = (name: string, signature: string) => {
     kvSet(NAME_KEY, name.trim() || "我的朋友圈");

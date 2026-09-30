@@ -37,7 +37,7 @@ export default function MusicShareSheet({ track, onClose, onShared }: {
                         <button className="mp-share-action mp-share-send" onClick={() => {
                             const session = createOrGetSession(char.id);
                             pushChatMessage({ sessionId: session.id, role: "user", content: "", mediaType: "music_share", mediaData: {
-                                musicTitle: track.title, musicArtist: track.artist, label: `${track.title} - ${track.artist}`,
+                                musicTitle: track.title, musicArtist: track.artist, musicCoverUrl: track.coverUrl, label: `${track.title} - ${track.artist}`,
                             } });
                             window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
                             onClose();
