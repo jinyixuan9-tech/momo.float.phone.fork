@@ -7657,7 +7657,7 @@
 }
 .chat-app .kkt-nav-contacts { --kkt-icon: url('/images/chat-kkt/contacts.png'); width: 27px; height: 30px; }
 .chat-app .kkt-nav-messages { --kkt-icon: url('/images/chat-kkt/messages.png'); width: 30px; height: 30px; }
-.chat-app .kkt-nav-feeds { --kkt-icon: url('/images/chat-kkt/heart.svg'); width: 30px; height: 30px; }
+.chat-app .kkt-nav-feeds { --kkt-icon: url('/images/chat-kkt/heart.svg'); width: 37px; height: 37px; }
 .chat-app .kkt-nav-more { --kkt-icon: url('/images/chat-kkt/more.png'); width: 31px; height: 11px; }
 
 .chat-app .kkt-list-page,
@@ -7766,8 +7766,10 @@
   background: transparent;
   color: #555;
   font-size: calc(10px * var(--app-text-scale, 1));
-  cursor: pointer;
 }
+.chat-app .kkt-updates-list { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+.chat-app .kkt-updates-list::-webkit-scrollbar { display: none; }
+.chat-app .kkt-update-preview { min-width: 48px; max-width: 58px; flex: none; }
 .chat-app .kkt-update-avatar { width: 40px; height: 40px; border-radius: 15px; }
 .chat-app .kkt-update-preview > span:last-child { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-app .kkt-recommend-row {
@@ -7785,9 +7787,8 @@
   cursor: pointer;
 }
 .chat-app .kkt-ch-icon { width: 42px; height: 42px; flex: none; }
-.chat-app .kkt-ch-icon svg { width: 100%; height: 100%; }
+.chat-app .kkt-ch-icon img { width: 100%; height: 100%; display: block; }
 .chat-app .kkt-request-count { margin-left: auto; font-size: 11px; color: #888; }
-.chat-app .kkt-chevron { color: #aaa; font-size: 23px; line-height: 1; }
 .chat-app .kkt-friends-section .contact-letter-header,
 .chat-app .kkt-contacts-page .contact-alpha-index { display: none; }
 .chat-app .kkt-list-page .minimal-avatar-wrapper,
@@ -7807,5 +7808,6 @@
 .chat-app .kkt-group-decor { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1px solid #e3e3e3; border-radius: 50%; color: #343b43; pointer-events: none; }
 .chat-app .kkt-title-wrap { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .chat-app .kkt-header-exit { display: grid; place-items: center; width: 18px; height: 34px; margin-left: -7px; padding: 0; border: 0; background: transparent; color: #92979b; cursor: pointer; }
+.chat-app .kkt-title-exit { border: 0; background: transparent; padding: 5px 8px 5px 0; cursor: pointer; text-align: left; }
 .chat-app .kkt-list-page .chat-list-tabs::before,
 .chat-app .kkt-list-page .chat-list-tabs::after { display: none !important; content: none !important; }

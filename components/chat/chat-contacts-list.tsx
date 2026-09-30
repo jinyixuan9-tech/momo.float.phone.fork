@@ -5,7 +5,7 @@ import { loadChatContacts, ChatContact, createOrGetSession, ChatSession, addChat
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
 import { getMomentsScreenName, getMomentsSignature } from "@/lib/moments-profile";
-import { ChevronLeft, Search, UserRoundPlus, Settings } from "lucide-react";
+import { Search, UserRoundPlus, Settings } from "lucide-react";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
@@ -24,6 +24,7 @@ import { kvSet } from "@/lib/kv-db";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
     CHAT_CHARACTER_PROFILES_UPDATED_EVENT,
+    loadChatCharacterProfiles,
     resolveChatCharacterAvatar,
     resolveChatCharacterDisplayName,
 } from "@/lib/chat-profile-storage";
@@ -55,7 +56,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
     const [momentsName, setMomentsName] = useState(() => getMomentsScreenName());
     const [momentsSignature, setMomentsSignature] = useState(() => getMomentsSignature());
     const [profileAvatar, setProfileAvatar] = useState(() => resolveUserIdentity()?.avatarUrl || "");
-    const [previewIndex, setPreviewIndex] = useState(0);
+    const [profileUpdates, setProfileUpdates] = useState<(ChatContact & { char?: Character })[]>([]);
     const [latestPost, setLatestPost] = useState<Record<string, string>>({});
     const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
     const [showRequestList, setShowRequestList] = useState(false);
@@ -143,6 +144,14 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
             return aName.localeCompare(bName);
         });
         setContacts(enriched);
+        const changedProfiles = loadChatCharacterProfiles();
+        setProfileUpdates(enriched.filter(c => {
+            const profile = changedProfiles[c.characterId];
+            return !!profile && (
+                (!!profile.avatarUrl && profile.avatarUrl !== c.char?.avatar) ||
+                (!!profile.displayName && profile.displayName !== c.char?.name)
+            );
+        }).sort((a, b) => changedProfiles[b.characterId].updatedAt - changedProfiles[a.characterId].updatedAt));
 
         const posts = loadMomentPosts();
         const map: Record<string, string> = {};
@@ -224,7 +233,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
         <div className="relative flex-1 h-full">
             <PageShell
                 className="kkt-list-page kkt-contacts-page"
-                leftAction={<span className="kkt-title-wrap"><button type="button" className="kkt-header-exit" onClick={onCloseApp} aria-label="退出 Chat"><ChevronLeft size={17} strokeWidth={1.8}/></button><strong className="kkt-list-title">Friends</strong></span>}
+                leftAction={<button type="button" className="kkt-list-title kkt-title-exit" onClick={onCloseApp} aria-label="退出 Chat">Friends</button>}
                 bodyRef={bodyRef}
                 rightAction={
                     <div className="kkt-header-actions">
@@ -259,26 +268,23 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                     <button type="button" className="kkt-profile-link" onClick={onOpenMoments}>Profile＋</button>
                 </div>
 
-                <section className="kkt-list-section kkt-updates-section">
+                {profileUpdates.length > 0 && <section className="kkt-list-section kkt-updates-section">
                     <div className="kkt-section-heading"><span>更新的个人资料</span><span aria-hidden="true">⌃</span></div>
-                    {contacts.length > 0 && (() => {
-                        const preview = contacts[previewIndex % contacts.length];
-                        const char = preview.char!;
-                        const avatar = resolveChatCharacterAvatar(char);
-                        return <button type="button" className="kkt-update-preview" onClick={() => setPreviewIndex(i => i + 1)} aria-label="换一个展示头像">
+                    <div className="kkt-updates-list">{profileUpdates.map(c => {
+                        const avatar = resolveChatCharacterAvatar(c.char);
+                        return <div key={c.characterId} className="kkt-update-preview">
                             <span className="kkt-update-avatar">{avatar ? <img src={avatar} alt="" /> : <ChatFallbackAvatar />}</span>
-                            <span>{resolveChatCharacterDisplayName(char)}</span>
-                        </button>;
-                    })()}
-                </section>
+                            <span>{resolveChatCharacterDisplayName(c.char)}</span>
+                        </div>;
+                    })}</div>
+                </section>}
 
                 <section className="kkt-list-section kkt-recommend-section">
                     <div className="kkt-section-heading"><span>推荐</span><span aria-hidden="true">⌃</span></div>
                     <button type="button" className="kkt-recommend-row" onClick={() => setShowRequestList(true)}>
-                        <span className="kkt-ch-icon" aria-hidden="true"><svg viewBox="0 0 48 48" width="48" height="48"><rect width="48" height="48" rx="13" fill="#ffe500"/><path d="M24 8c-9.4 0-17 6.9-17 15.4 0 5.1 2.8 9.6 7.2 12.4L12.8 42l7.1-4.1c1.3.3 2.7.4 4.1.4 9.4 0 17-6.9 17-15.4S33.4 8 24 8Z" fill="#222"/><text x="24" y="28" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="14" fontWeight="bold" fill="#ffe500">Ch</text></svg></span>
+                        <span className="kkt-ch-icon" aria-hidden="true"><img src="/images/chat-kkt/recommend.svg" alt="" /></span>
                         <span>发现更多人</span>
                         {pendingRequests.length > 0 && <span className="kkt-request-count">{pendingRequests.length}</span>}
-                        <span className="kkt-chevron" aria-hidden="true">›</span>
                     </button>
                 </section>
 

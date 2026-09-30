@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useSyncExternalStore } from "react";
-import { ChevronLeft, Search, MessageCirclePlus, UsersRound, Settings, ListPlus } from "lucide-react";
+import { Search, MessageCirclePlus, UsersRound, Settings, ListPlus } from "lucide-react";
 import { CHAT_MESSAGE_PUSHED_EVENT, loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, getLastVisibleSessionMessage, getChatMessagePreview } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
@@ -167,7 +167,7 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
         <div className="relative flex-1 h-full">
             <PageShell
                 className="kkt-list-page kkt-chats-page"
-                leftAction={<span className="kkt-title-wrap"><button type="button" className="kkt-header-exit" onClick={onCloseApp} aria-label="退出 Chat"><ChevronLeft size={17} strokeWidth={1.8}/></button><strong className="kkt-list-title">Chats</strong></span>}
+                leftAction={<button type="button" className="kkt-list-title kkt-title-exit" onClick={onCloseApp} aria-label="退出 Chat">Chats</button>}
                 rightAction={
                     <div className="kkt-header-actions">
                         <button type="button" onClick={() => { if (showChatSearch) setListFilter(""); setShowChatSearch(open => !open); }} aria-label="搜索聊天"><Search size={22} strokeWidth={1.9}/></button>
