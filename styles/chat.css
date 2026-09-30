@@ -7558,3 +7558,8 @@
 .moments-feed-page{position:relative}
 .moments-feed-page>.page-header{position:absolute;top:0;left:0;right:0;z-index:20}
 .moments-gallery-header-actions{display:flex;align-items:center;gap:12px}.moments-gallery-header-actions button{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--c-input)}
+
+/* A single scrolling Moments page: posts extend the page instead of shrinking the cover. */
+.chat-app .moments-feed-page > .page-body{display:block;overflow-y:auto;overscroll-behavior-y:contain}
+.moments-profile-hero,.moments-featured-section{flex:none;flex-shrink:0}
+.moments-featured-remove{display:none}
