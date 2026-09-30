@@ -6577,14 +6577,7 @@
   font-weight: 700;
 }
 
-/* Moments header stays clear at every scroll position. */
-.moments-feed-page .page-header {
-  background: transparent !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border-bottom-color: transparent !important;
-  box-shadow: none !important;
-}
+/* Moments header stays clear at every scroll position; final scoped rule is below. */
 .moments-feed-page .page-title {
   opacity: 0;
 }
@@ -7815,3 +7808,30 @@
 .chat-app .kkt-title-exit { border: 0; background: transparent; padding: 5px 8px 5px 0; cursor: pointer; text-align: left; }
 .chat-app .kkt-list-page .chat-list-tabs::before,
 .chat-app .kkt-list-page .chat-list-tabs::after { display: none !important; content: none !important; }
+
+/* The cover must remain sharp all the way behind the fixed Moments controls. */
+.chat-app .moments-feed-page > header.page-header[data-ui="header"],
+.chat-app .moments-feed-page > header.page-header[data-ui="header"] .page-header-safe-area,
+.chat-app .moments-feed-page > header.page-header[data-ui="header"] .page-header-content {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.chat-app .moments-feed-page > header.page-header[data-ui="header"]::before,
+.chat-app .moments-feed-page > header.page-header[data-ui="header"]::after,
+.chat-app .moments-feed-page > header.page-header[data-ui="header"] .page-header-safe-area::before,
+.chat-app .moments-feed-page > header.page-header[data-ui="header"] .page-header-safe-area::after,
+.chat-app .moments-feed-page > header.page-header[data-ui="header"] .page-header-content::before,
+.chat-app .moments-feed-page > header.page-header[data-ui="header"] .page-header-content::after {
+  content: none !important;
+}
+.chat-app .moments-feed-page .moments-header-actions button,
+.chat-app .moments-feed-page .page-back-btn,
+.chat-app .moments-feed-page .moments-profile-actions {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
