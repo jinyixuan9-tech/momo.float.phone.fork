@@ -12,7 +12,7 @@ import { MomentsCompose } from "./moments-compose";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { PageShell } from "@/components/ui/page-shell";
 import { AlertCircle, Camera, Music2, Pause, ChevronRight, SquarePen, Images } from "lucide-react";
-import { getMomentsScreenName, getMomentsSignature, saveMomentsProfile, getFeaturedPhotos, getMyMomentsPhotos, addFeaturedPhoto, removeFeaturedPhoto, addManualPhoto, getMomentsMusicId, setMomentsMusicId, type MomentsPhoto } from "@/lib/moments-profile";
+import { getMomentsScreenName, getMomentsSignature, saveMomentsProfile, getFeaturedPhotos, getMyMomentsPhotos, addFeaturedPhoto, removeFeaturedPhoto, addManualPhoto, removeAlbumPhoto, getMomentsMusicId, setMomentsMusicId, type MomentsPhoto } from "@/lib/moments-profile";
 import { saveMomentsImage } from "@/lib/moments-image-upload";
 import { MomentsPhotoImage, useMomentsPhotoUrl } from "./moments-photo";
 import { loadAllTracks, type MusicTrack } from "@/lib/music-storage";
@@ -66,6 +66,7 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
     const [featured, setFeatured] = useState<MomentsPhoto[]>([]);
     const [showGallery, setShowGallery] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+    const [photoToRemove, setPhotoToRemove] = useState<MomentsPhoto | null>(null);
     const [musicPicker, setMusicPicker] = useState(false);
     const [musicTracks, setMusicTracks] = useState<MusicTrack[]>([]);
     const [musicId, setMusicId] = useState("");
@@ -357,13 +358,13 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
         };
     }, [refreshPosts]);
 
-    // Hide tab bar only when the full compose page is open.
+    // Full-screen composer and album controls need the space behind the tab bar.
     useEffect(() => {
-        window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: showCompose }));
+        window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: showCompose || showGallery }));
         return () => {
             window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false }));
         };
-    }, [showCompose]);
+    }, [showCompose, showGallery]);
 
 
     const handleDeleteConfirm = () => {
@@ -576,7 +577,37 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
             {editProfile && overlayHost && createPortal(<div className="moments-dialog-backdrop" role="presentation" onClick={() => setEditProfile(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="编辑朋友圈资料" onClick={e => e.stopPropagation()}><h3>编辑朋友圈资料</h3><label>网名<input maxLength={24} value={draftName} onChange={e => setDraftName(e.target.value)} /></label><label>签名<input maxLength={80} value={draftSignature} onChange={e => setDraftSignature(e.target.value)} /></label><div className="moments-dialog-actions"><button type="button" onClick={() => setEditProfile(false)}>取消</button><button type="button" className="moments-save-btn" onClick={() => { saveMomentsProfile(draftName, draftSignature); setEditProfile(false); }}>保存</button></div></div></div>, overlayHost)}
             {musicPicker && overlayHost && createPortal(<div className="moments-dialog-backdrop" role="presentation" onClick={() => setMusicPicker(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="选择主页音乐" onClick={e => e.stopPropagation()}><h3>主页音乐</h3><div className="moments-song-list">{Array.from(new Map<string, MusicTrack>([...musicTracks, ...(music?.queue || []), ...(music?.currentTrack ? [music.currentTrack] : [])].map(t => [t.id, t] as const)).values()).map(track => <button type="button" key={track.id} onClick={() => { setMomentsMusicId(track.id); setMusicPicker(false); }}><Music2 size={18}/><span>{track.title}<small>{track.artist}</small></span>{track.id === musicId ? "✓" : ""}</button>)}{musicTracks.length === 0 && !music?.queue.length && !music?.currentTrack && <p>先到音乐 App 添加歌曲，再回来选。</p>}</div><div className="moments-dialog-actions moments-music-actions"><button type="button" onClick={() => { setMomentsMusicId(""); setMusicPicker(false); }}>移除音乐</button></div></div></div>, overlayHost)}
             {showGallery && overlayHost && createPortal(<div className="moments-gallery" role="dialog" aria-modal="true" aria-label="我的照片"><div className="moments-gallery-header"><button type="button" onClick={() => { setShowGallery(false); setLightboxIndex(null); }}>‹ 返回</button><strong>我的照片</strong><div className="moments-gallery-header-actions"><span>{galleryPhotos.length} 张</span><label className="moments-gallery-upload" aria-label="上传照片到相册"><Camera size={18}/><input type="file" accept="image/*" disabled={uploadingPhoto} onChange={uploadStandalonePhoto} aria-label="上传照片到相册" /></label></div></div><div className="moments-gallery-grid">{galleryPhotos.map((photo, index) => <button type="button" key={photo.url} onClick={() => setLightboxIndex(index)}><MomentsPhotoImage url={photo.url} alt={`照片 ${index + 1}`}/></button>)}</div>{galleryPhotos.length === 0 && <p className="moments-gallery-empty">发动态或上传照片后，会出现在这里。</p>}</div>, overlayHost)}
-            {showGallery && lightboxIndex !== null && lightboxPhoto && overlayHost && createPortal(<div className="moments-lightbox" role="dialog" aria-modal="true" onTouchStart={e => { touchX.current = e.touches[0].clientX; }} onTouchEnd={e => { if (touchX.current === null) return; const diff = e.changedTouches[0].clientX - touchX.current; if (Math.abs(diff) > 40) setLightboxIndex(i => i === null ? null : Math.max(0, Math.min(galleryPhotos.length - 1, i + (diff < 0 ? 1 : -1)))); touchX.current = null; }}><button type="button" className="moments-lightbox-close" onClick={() => setLightboxIndex(null)}>关闭</button><button type="button" className="moments-lightbox-prev" disabled={lightboxIndex === 0} onClick={() => setLightboxIndex(lightboxIndex - 1)}>‹</button>{lightboxSrc && <img src={lightboxSrc} alt="照片原图"/>}<button type="button" className="moments-lightbox-next" disabled={lightboxIndex === galleryPhotos.length - 1} onClick={() => setLightboxIndex(lightboxIndex + 1)}>›</button><div className="moments-lightbox-bottom"><span>{lightboxIndex + 1} / {galleryPhotos.length}</span><button type="button" onClick={() => featured.some(p => p.url === lightboxPhoto.url) ? removeFeaturedPhoto(lightboxPhoto.url) : addFeaturedPhoto({ ...lightboxPhoto, addedAt: new Date().toISOString() })}>{featured.some(p => p.url === lightboxPhoto.url) ? "从主页移除" : "展示到主页"}</button>{lightboxPhoto.postId && posts.some(p => p.id === lightboxPhoto.postId) && <button type="button" onClick={() => jumpToPost(lightboxPhoto.postId!)}>查看原动态与评论</button>}</div></div>, overlayHost)}
+            {showGallery && lightboxIndex !== null && lightboxPhoto && overlayHost && createPortal(
+                <div className="moments-lightbox" role="dialog" aria-modal="true"
+                    onTouchStart={e => { touchX.current = e.touches[0].clientX; }}
+                    onTouchEnd={e => {
+                        if (touchX.current === null) return;
+                        const diff = e.changedTouches[0].clientX - touchX.current;
+                        if (Math.abs(diff) > 40) setLightboxIndex(i => i === null ? null : Math.max(0, Math.min(galleryPhotos.length - 1, i + (diff < 0 ? 1 : -1))));
+                        touchX.current = null;
+                    }}>
+                    <button type="button" className="moments-lightbox-close" onClick={() => { setPhotoToRemove(null); setLightboxIndex(null); }}>关闭</button>
+                    <button type="button" className="moments-lightbox-prev" disabled={lightboxIndex === 0} onClick={() => setLightboxIndex(lightboxIndex - 1)}>‹</button>
+                    {lightboxSrc && <img src={lightboxSrc} alt="照片原图" />}
+                    <button type="button" className="moments-lightbox-next" disabled={lightboxIndex === galleryPhotos.length - 1} onClick={() => setLightboxIndex(lightboxIndex + 1)}>›</button>
+                    <div className="moments-lightbox-bottom">
+                        <span>{lightboxIndex + 1} / {galleryPhotos.length}</span>
+                        <button type="button" onClick={() => featured.some(p => p.url === lightboxPhoto.url) ? removeFeaturedPhoto(lightboxPhoto.url) : addFeaturedPhoto({ ...lightboxPhoto, addedAt: new Date().toISOString() })}>{featured.some(p => p.url === lightboxPhoto.url) ? "从主页移除" : "展示到主页"}</button>
+                        {lightboxPhoto.postId && posts.some(p => p.id === lightboxPhoto.postId) && <button type="button" onClick={() => jumpToPost(lightboxPhoto.postId!)}>查看原动态与评论</button>}
+                        <button type="button" className="moments-photo-remove-button" onClick={() => setPhotoToRemove(lightboxPhoto)}>{lightboxPhoto.postId ? "从相册移除" : "删除照片"}</button>
+                    </div>
+                    {photoToRemove && <div className="moments-photo-delete-layer" role="presentation" onClick={() => setPhotoToRemove(null)}>
+                        <div className="moments-photo-delete-dialog" role="alertdialog" aria-modal="true" aria-label="移除相册照片" onClick={e => e.stopPropagation()}>
+                            <strong>{photoToRemove.postId ? "从相册移除这张照片？" : "删除这张照片？"}</strong>
+                            <p>{photoToRemove.postId ? "原动态和动态中的照片会保留。" : "这张单独上传的照片将从相册和主页移除。"}</p>
+                            <div className="moments-photo-delete-actions">
+                                <button type="button" onClick={() => setPhotoToRemove(null)}>取消</button>
+                                <button type="button" onClick={() => { removeAlbumPhoto(photoToRemove); setPhotoToRemove(null); setLightboxIndex(null); }}>确认移除</button>
+                            </div>
+                        </div>
+                    </div>}
+                </div>, overlayHost
+            )}
 
             {/* Delete confirm dialog */}
             {confirmDeleteId && (

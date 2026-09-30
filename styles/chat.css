@@ -7615,3 +7615,15 @@
 
 /* Music sits directly on the cover; two fine rules define its bounds. */
 .moments-music-strip{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;border-top:1px solid rgba(255,255,255,.42);border-bottom:1px solid rgba(255,255,255,.42);box-shadow:none}
+
+/* Keep album photo controls clear of the status area and bottom tab layer. */
+.moments-feed-page>.moments-lightbox .moments-lightbox-close{top:calc(var(--page-header-safe-top,48px) + 8px);right:16px;z-index:2;min-height:40px;padding:8px 12px}
+.moments-feed-page>.moments-lightbox .moments-lightbox-bottom{bottom:calc(var(--chat-tabbar-height,68px) + 12px);z-index:2;gap:8px}
+.moments-lightbox-bottom .moments-photo-remove-button{color:#ffd3d3;background:rgba(196,53,53,.30)}
+.moments-photo-delete-layer{position:absolute;inset:0;z-index:5;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.62)}
+.moments-photo-delete-dialog{width:min(100%,320px);box-sizing:border-box;padding:22px;border-radius:16px;background:var(--c-panel);color:var(--c-text-title)}
+.moments-photo-delete-dialog strong{display:block;font-size:16px}
+.moments-photo-delete-dialog p{margin:10px 0 20px;color:var(--c-icon);font-size:13px;line-height:1.5}
+.moments-photo-delete-actions{display:flex;justify-content:flex-end;gap:10px}
+.moments-photo-delete-actions button{position:static;border:0;border-radius:8px;padding:9px 13px;background:var(--c-input);color:var(--c-text-title)}
+.moments-photo-delete-actions button:last-child{background:#b84545;color:#fff}
