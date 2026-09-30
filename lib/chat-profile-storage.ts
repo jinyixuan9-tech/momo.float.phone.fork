@@ -19,6 +19,8 @@ export type ChatCharacterProfile = {
   /** 仅记录角色“自主”修改，用于低频冷却；用户手动编辑/推荐头像不会占用这个冷却。 */
   lastAutonomousNameAt?: number;
   lastAutonomousAvatarAt?: number;
+  /** 最近一次头像或昵称实际变化的时间；不受冷却时间等元数据更新影响。 */
+  visualUpdatedAt?: number;
   updatedAt: number;
 };
 
@@ -120,6 +122,7 @@ function normalizeProfile(raw: unknown): ChatCharacterProfile | null {
     avatarUrl: cleanAvatar(source.avatarUrl),
     lastAutonomousNameAt: typeof source.lastAutonomousNameAt === "number" && Number.isFinite(source.lastAutonomousNameAt) ? source.lastAutonomousNameAt : undefined,
     lastAutonomousAvatarAt: typeof source.lastAutonomousAvatarAt === "number" && Number.isFinite(source.lastAutonomousAvatarAt) ? source.lastAutonomousAvatarAt : undefined,
+    visualUpdatedAt: typeof source.visualUpdatedAt === "number" && Number.isFinite(source.visualUpdatedAt) ? source.visualUpdatedAt : undefined,
     updatedAt: typeof source.updatedAt === "number" && Number.isFinite(source.updatedAt) ? source.updatedAt : Date.now(),
   };
 }
@@ -152,13 +155,18 @@ export function updateChatCharacterProfile(
 ): ChatCharacterProfile {
   const profiles = loadChatCharacterProfiles();
   const previous = profiles[characterId];
+  const displayName = patch.displayName !== undefined ? cleanText(patch.displayName) : previous?.displayName;
+  const avatarUrl = patch.avatarUrl !== undefined ? cleanAvatar(patch.avatarUrl) : previous?.avatarUrl;
+  const now = Date.now();
+  const visualChanged = displayName !== previous?.displayName || avatarUrl !== previous?.avatarUrl;
   const next: ChatCharacterProfile = {
     characterId,
-    displayName: patch.displayName !== undefined ? cleanText(patch.displayName) : previous?.displayName,
-    avatarUrl: patch.avatarUrl !== undefined ? cleanAvatar(patch.avatarUrl) : previous?.avatarUrl,
+    displayName,
+    avatarUrl,
     lastAutonomousNameAt: patch.lastAutonomousNameAt !== undefined ? patch.lastAutonomousNameAt : previous?.lastAutonomousNameAt,
     lastAutonomousAvatarAt: patch.lastAutonomousAvatarAt !== undefined ? patch.lastAutonomousAvatarAt : previous?.lastAutonomousAvatarAt,
-    updatedAt: Date.now(),
+    visualUpdatedAt: visualChanged ? now : (previous?.visualUpdatedAt ?? previous?.updatedAt),
+    updatedAt: now,
   };
 
   if (!next.displayName && !next.avatarUrl) delete profiles[characterId];

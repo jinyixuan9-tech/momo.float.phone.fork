@@ -5,7 +5,7 @@ import { loadChatContacts, ChatContact, createOrGetSession, ChatSession, addChat
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
 import { getMomentsScreenName, getMomentsSignature } from "@/lib/moments-profile";
-import { Search, UserRoundPlus, Settings } from "lucide-react";
+import { Search, UserRoundPlus, Settings, ChevronUp } from "lucide-react";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
@@ -48,6 +48,8 @@ type ChatContactsListProps = {
     onPendingAddContactBack?: () => void;
 };
 
+const PROFILE_UPDATE_DISPLAY_MS = 2 * 60 * 60 * 1000;
+
 export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, onOpenMoments, pendingAddContactId, onPendingAddContactConsumed, onPendingAddContactBack }: ChatContactsListProps) {
     const [contacts, setContacts] = useState<(ChatContact & { char?: Character })[]>([]);
     const [contactFilter, setContactFilter] = useState("");
@@ -56,7 +58,10 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
     const [momentsName, setMomentsName] = useState(() => getMomentsScreenName());
     const [momentsSignature, setMomentsSignature] = useState(() => getMomentsSignature());
     const [profileAvatar, setProfileAvatar] = useState(() => resolveUserIdentity()?.avatarUrl || "");
-    const [profileUpdates, setProfileUpdates] = useState<(ChatContact & { char?: Character })[]>([]);
+    const [profileUpdates, setProfileUpdates] = useState<(ChatContact & { char?: Character; visualUpdatedAt: number })[]>([]);
+    const [collapsedSections, setCollapsedSections] = useState({ updates: false, recommend: false, friends: false });
+    const toggleSection = (section: keyof typeof collapsedSections) =>
+        setCollapsedSections(previous => ({ ...previous, [section]: !previous[section] }));
     const [latestPost, setLatestPost] = useState<Record<string, string>>({});
     const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
     const [showRequestList, setShowRequestList] = useState(false);
@@ -145,13 +150,18 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
         });
         setContacts(enriched);
         const changedProfiles = loadChatCharacterProfiles();
-        setProfileUpdates(enriched.filter(c => {
+        const now = Date.now();
+        setProfileUpdates(enriched.flatMap(c => {
             const profile = changedProfiles[c.characterId];
-            return !!profile && (
+            const visualUpdatedAt = profile?.visualUpdatedAt ?? profile?.updatedAt ?? 0;
+            const changed = !!profile && (
                 (!!profile.avatarUrl && profile.avatarUrl !== c.char?.avatar) ||
                 (!!profile.displayName && profile.displayName !== c.char?.name)
             );
-        }).sort((a, b) => changedProfiles[b.characterId].updatedAt - changedProfiles[a.characterId].updatedAt));
+            return changed && visualUpdatedAt <= now && now < visualUpdatedAt + PROFILE_UPDATE_DISPLAY_MS
+                ? [{ ...c, visualUpdatedAt }]
+                : [];
+        }).sort((a, b) => b.visualUpdatedAt - a.visualUpdatedAt));
 
         const posts = loadMomentPosts();
         const map: Record<string, string> = {};
@@ -167,13 +177,23 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
     useEffect(() => {
         refresh();
         const handler = () => refresh();
+        const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
         window.addEventListener("friend-requests-updated", handler);
         window.addEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, handler);
+        document.addEventListener("visibilitychange", onVisible);
         return () => {
             window.removeEventListener("friend-requests-updated", handler);
             window.removeEventListener(CHAT_CHARACTER_PROFILES_UPDATED_EVENT, handler);
+            document.removeEventListener("visibilitychange", onVisible);
         };
     }, [refresh]);
+
+    useEffect(() => {
+        if (profileUpdates.length === 0) return;
+        const nextExpiry = Math.min(...profileUpdates.map(c => c.visualUpdatedAt + PROFILE_UPDATE_DISPLAY_MS));
+        const timer = window.setTimeout(refresh, Math.max(1, nextExpiry - Date.now() + 1));
+        return () => window.clearTimeout(timer);
+    }, [profileUpdates, refresh]);
 
     /** Group contacts by pinyin initial */
     const { grouped, indexLetters } = useMemo(() => {
@@ -269,8 +289,8 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                 </div>
 
                 {profileUpdates.length > 0 && <section className="kkt-list-section kkt-updates-section">
-                    <div className="kkt-section-heading"><span>更新的个人资料</span><span aria-hidden="true">⌃</span></div>
-                    <div className="kkt-updates-list">{profileUpdates.map(c => {
+                    <div className="kkt-section-heading"><span>更新的个人资料</span><button type="button" className="kkt-section-toggle" onClick={() => toggleSection("updates")} aria-label={collapsedSections.updates ? "展开更新的个人资料" : "收起更新的个人资料"} aria-expanded={!collapsedSections.updates} aria-controls="kkt-profile-updates"><ChevronUp size={16} strokeWidth={1.8}/></button></div>
+                    <div id="kkt-profile-updates" className="kkt-updates-list" hidden={collapsedSections.updates}>{profileUpdates.map(c => {
                         const avatar = resolveChatCharacterAvatar(c.char);
                         return <div key={c.characterId} className="kkt-update-preview">
                             <span className="kkt-update-avatar">{avatar ? <img src={avatar} alt="" /> : <ChatFallbackAvatar />}</span>
@@ -280,8 +300,8 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                 </section>}
 
                 <section className="kkt-list-section kkt-recommend-section">
-                    <div className="kkt-section-heading"><span>推荐</span><span aria-hidden="true">⌃</span></div>
-                    <button type="button" className="kkt-recommend-row" onClick={() => setShowRequestList(true)}>
+                    <div className="kkt-section-heading"><span>推荐</span><button type="button" className="kkt-section-toggle" onClick={() => toggleSection("recommend")} aria-label={collapsedSections.recommend ? "展开推荐" : "收起推荐"} aria-expanded={!collapsedSections.recommend} aria-controls="kkt-recommend-contents"><ChevronUp size={16} strokeWidth={1.8}/></button></div>
+                    <button type="button" id="kkt-recommend-contents" className="kkt-recommend-row" hidden={collapsedSections.recommend} onClick={() => setShowRequestList(true)}>
                         <span className="kkt-ch-icon" aria-hidden="true"><img src="/images/chat-kkt/recommend.svg" alt="" /></span>
                         <span>发现更多人</span>
                         {pendingRequests.length > 0 && <span className="kkt-request-count">{pendingRequests.length}</span>}
@@ -289,14 +309,14 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                 </section>
 
                 <section className="kkt-list-section kkt-friends-section">
-                    <div className="kkt-section-heading"><span>好友 {contacts.length}</span><span aria-hidden="true">⌃</span></div>
+                    <div className="kkt-section-heading"><span>好友 {contacts.length}</span><button type="button" className="kkt-section-toggle" onClick={() => toggleSection("friends")} aria-label={collapsedSections.friends ? "展开好友" : "收起好友"} aria-expanded={!collapsedSections.friends} aria-controls="kkt-friends-contents"><ChevronUp size={16} strokeWidth={1.8}/></button></div>
+                <div id="kkt-friends-contents" hidden={collapsedSections.friends}>
 
                 {mascotSettings.chatEnabled && (
                     <div className="kkt-mascot-row">
                         <div className="minimal-list-item" onClick={onSelectMascot}>
                             <div className="minimal-avatar-wrapper bg-white">
                                 <img src={mascotAvatarUrl} className="w-full h-full object-contain rounded-full p-[2px]" alt="" />
-                                <span className="minimal-online-dot" />
                             </div>
                             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
                                 <div className="ts-16 font-medium text-[var(--c-text-title)] truncate">{mascotSettings.nickname || "AI助手"}</div>
@@ -351,6 +371,8 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                         ))}
                     </div>
                 )}
+
+                </div>
 
                 </section>
             </div>

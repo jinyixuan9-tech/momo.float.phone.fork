@@ -368,7 +368,6 @@ function MascotSessionItem({
         <div className="minimal-list-item" onClick={onSelect}>
             <div className="minimal-avatar-wrapper bg-white">
                 <img src={avatarUrl} className="w-full h-full object-contain pointer-events-none rounded-full p-[2px]" alt="" />
-                <span className="minimal-online-dot" />
             </div>
             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
                 <div className="flex justify-between items-center">
@@ -478,7 +477,6 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
                     ) : (
                         <ChatFallbackAvatar className="pointer-events-none rounded-full" />
                     )}
-                    <span className="minimal-online-dot" />
                 </div>
             )}
             <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center gap-1">
