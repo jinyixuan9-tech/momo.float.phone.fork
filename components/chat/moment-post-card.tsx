@@ -23,6 +23,8 @@ import { hasCharacterReferenceImage } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { Trash2, MoreHorizontal, MapPin, Heart, MessageCircle, Pencil } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui";
+import { getMomentsScreenName, getPostPhotos } from "@/lib/moments-profile";
+import { MomentsPhotoImage, useMomentsPhotoUrl } from "./moments-photo";
 
 type Props = {
     post: MomentPost;
@@ -30,6 +32,7 @@ type Props = {
     onRequestDelete?: (postId: string) => void;
     onOpenCommentComposer?: (post: MomentPost) => void;
     onOpenReplyComposer?: (post: MomentPost, comment: MomentComment, replyName: string) => void;
+    onFeaturePhoto?: (postId: string, url: string) => void;
 };
 
 const DEFAULT_MOMENT_AVATAR_SRC = "/images/default-moment-avatar.png";
@@ -38,7 +41,7 @@ function MomentDefaultAvatar({ alt = "" }: { alt?: string }) {
     return <img src={DEFAULT_MOMENT_AVATAR_SRC} alt={alt} className="feed-default-avatar w-full h-full object-cover" />;
 }
 
-export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentComposer, onOpenReplyComposer }: Props) {
+export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentComposer, onOpenReplyComposer, onFeaturePhoto }: Props) {
     const [comments, setComments] = useState<MomentComment[]>(() => loadMomentComments(post.id));
     const [showPhotoPromptEditor, setShowPhotoPromptEditor] = useState(false);
     const [photoPromptDraft, setPhotoPromptDraft] = useState("");
@@ -61,6 +64,9 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
     const [editingComment, setEditingComment] = useState<MomentComment | null>(null);
     const [commentDraft, setCommentDraft] = useState("");
     const [deleteCommentTarget, setDeleteCommentTarget] = useState<MomentComment | null>(null);
+    const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+    const previewSrc = useMomentsPhotoUrl(previewPhoto || undefined);
+    const userPhotos = post.authorType === "user" ? getPostPhotos(post) : [];
 
     // Resolve asset:// photo URLs from IndexedDB
     const [resolvedPhotoUrl, setResolvedPhotoUrl] = useState<string | null>(null);
@@ -109,7 +115,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
 
     const getAuthorName = (authorType: "user" | "character" | "npc", authorId: string, authorName?: string): string => {
         if (authorType === "npc") return authorName!;
-        return authorType === "user" ? (userIdentity?.name ?? "我") : getCharName(authorId);
+        return authorType === "user" ? getMomentsScreenName() : getCharName(authorId);
     };
 
     const getAuthorAvatar = (authorType: "user" | "character" | "npc", authorId: string): string | null => {
@@ -314,7 +320,8 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
             {/* Header row: avatar + name */}
             <div className="feed-post-header flex items-center gap-3 mb-3">
                 <div
-                    className="feed-post-author-avatar w-[40px] h-[40px] rounded-full shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center"
+                    className="feed-post-author-avatar w-[40px] h-[40px] shrink-0 bg-[var(--c-input)] overflow-hidden flex items-center justify-center"
+                    style={{ borderRadius: 13 }}
                 >
                     {authorAvatar ? (
                         <img src={authorAvatar} alt="" className="feed-post-author-avatar-image w-full h-full object-cover" />
@@ -383,7 +390,14 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                 间距用 mb-3 与卡片其余部分（头像行/正文/位置）对齐，media 原本的 mb-5 是全卡唯一的孤例。 */}
             {(resolvedPhotoUrl || fallbackPhotoDescription) && (
             <div className="feed-post-media mb-3 w-full flex flex-col gap-2">
-                {resolvedPhotoUrl && (
+                {userPhotos.length > 0 ? (
+                    <div className="moments-post-photo-row">
+                        {userPhotos.map((url, index) => <div className="moments-post-photo-tile" key={`${url}-${index}`}>
+                            <button type="button" onClick={() => setPreviewPhoto(url)} aria-label={`查看第 ${index + 1} 张照片`}><MomentsPhotoImage url={url} /></button>
+                            {onFeaturePhoto && <button type="button" className="moments-feature-button" onClick={() => onFeaturePhoto(post.id, url)}>展示到主页</button>}
+                        </div>)}
+                    </div>
+                ) : resolvedPhotoUrl && (
                     <MediaImageWithPreview
                         url={resolvedPhotoUrl}
                         title=""
@@ -417,6 +431,10 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                 )}
             </div>
             )}
+            {previewSrc && <div className="moments-lightbox" role="dialog" aria-modal="true" onClick={() => setPreviewPhoto(null)}>
+                <button type="button" className="moments-lightbox-close" onClick={() => setPreviewPhoto(null)}>关闭</button>
+                <img src={previewSrc} alt="照片原图" onClick={e => e.stopPropagation()} />
+            </div>}
             {showFallbackPreview && fallbackPhotoDescription && (
                 <MediaPreviewOverlay
                     description={fallbackPhotoDescription}

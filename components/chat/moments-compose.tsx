@@ -6,7 +6,7 @@ import { loadChatContacts } from "@/lib/chat-storage";
 import { addMomentPost } from "@/lib/moments-storage";
 import { onUserPost } from "@/lib/moments-engine";
 import { resolveUserIdentity } from "@/lib/settings-storage";
-import { saveChatImageToIndexedDB, getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
+import { saveMomentsImage } from "@/lib/moments-image-upload";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 
 type Props = {
@@ -16,8 +16,8 @@ type Props = {
 
 export function MomentsCompose({ onClose, onPublished }: Props) {
     const [text, setText] = useState("");
-    const [photoAssetId, setPhotoAssetId] = useState<string | null>(null);
-    const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+    const [photos, setPhotos] = useState<{ url: string; preview: string }[]>([]);
+    const [uploading, setUploading] = useState(false);
     const [photoDesc, setPhotoDesc] = useState("");
     const [location, setLocation] = useState("");
     const [locationDraft, setLocationDraft] = useState("");
@@ -41,6 +41,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
 
     const fileRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const previewsRef = useRef<string[]>([]);
 
     const contacts = loadChatContacts();
     const chars = loadCharacters();
@@ -87,46 +88,30 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
 
     const handleImageSelect = () => fileRef.current?.click();
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const img = new Image();
-        const objectUrl = URL.createObjectURL(file);
-        img.onload = () => {
-            const canvas = document.createElement("canvas");
-            const maxSize = 800;
-            let w = img.width, h = img.height;
-            if (w > maxSize || h > maxSize) {
-                if (w > h) { h = Math.round((h / w) * maxSize); w = maxSize; }
-                else { w = Math.round((w / h) * maxSize); h = maxSize; }
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
-            ctx.drawImage(img, 0, 0, w, h);
-            canvas.toBlob(blob => {
-                URL.revokeObjectURL(objectUrl);
-                if (!blob) return;
-                // Preview from blob URL (no localStorage cost)
-                setPhotoPreview(URL.createObjectURL(blob));
-                // Persist to IndexedDB
-                saveChatImageToIndexedDB(blob).then(assetId => {
-                    setPhotoAssetId(assetId);
-                });
-            }, "image/jpeg", 0.8);
-        };
-        img.src = objectUrl;
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []).slice(0, 3 - photos.length);
         e.target.value = "";
+        if (!files.length) return;
+        setUploading(true);
+        try {
+            for (const file of files) {
+                const url = await saveMomentsImage(file);
+                const preview = URL.createObjectURL(file);
+                previewsRef.current.push(preview);
+                setPhotos(prev => prev.length < 3 ? [...prev, { url, preview }] : prev);
+            }
+        } catch (error) { console.error("[Moments] photo upload failed", error); }
+        finally { setUploading(false); }
     };
 
-    const handleRemovePhoto = () => {
-        if (photoPreview) URL.revokeObjectURL(photoPreview);
-        setPhotoAssetId(null);
-        setPhotoPreview(null);
-        setPhotoDesc("");
-        if (fileRef.current) fileRef.current.value = "";
+    const handleRemovePhoto = (index: number) => {
+        setPhotos(prev => {
+            URL.revokeObjectURL(prev[index].preview);
+            return prev.filter((_, i) => i !== index);
+        });
     };
+
+    useEffect(() => () => { previewsRef.current.forEach(url => URL.revokeObjectURL(url)); }, []);
 
     const handleConfirmLocation = () => {
         if (locationDraft.trim()) {
@@ -149,7 +134,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
     };
 
     const handlePublish = () => {
-        if (!text.trim()) return;
+        if ((!text.trim() && !photos.length) || uploading) return;
 
         // Build content with @mentions appended
         let content = text.trim();
@@ -170,7 +155,8 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
             authorType: "user",
             authorId: "user",
             content,
-            photoUrl: photoAssetId ? `asset://${photoAssetId}` : undefined,
+            photoUrl: photos[0]?.url,
+            photoUrls: photos.map(p => p.url),
             photoDescription: photoDesc.trim() || undefined,
             visibility: visibleCharIds,
             location: location || undefined,
@@ -182,7 +168,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
         onPublished();
     };
 
-    const canPublish = text.trim().length > 0;
+    const canPublish = !uploading && (text.trim().length > 0 || photos.length > 0);
 
     // Get char name/avatar helpers
     const getCharName = (charId: string) => chars.find(c => c.id === charId)?.name ?? "未知";
@@ -223,30 +209,17 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
 
                     {/* Photo block */}
                     <div className="compose-media-grid">
-                        {photoPreview ? (
-                            <div className="compose-photo-block-preview">
-                                <img src={photoPreview} alt="" />
-                                <button onClick={handleRemovePhoto} className="ui-close-sm compose-photo-remove">×</button>
+                        {photos.map((photo, index) => (
+                            <div className="compose-photo-block-preview" key={photo.url}>
+                                <img src={photo.preview} alt={`照片 ${index + 1}`} />
+                                <button type="button" onClick={() => handleRemovePhoto(index)} className="ui-close-sm compose-photo-remove" aria-label="移除照片">×</button>
                             </div>
-                        ) : (
-                            <button onClick={handleImageSelect} className="compose-photo-block">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <line x1="12" y1="5" x2="12" y2="19" />
-                                    <line x1="5" y1="12" x2="19" y2="12" />
-                                </svg>
-                            </button>
-                        )}
+                        ))}
+                        {photos.length < 3 && <button type="button" onClick={handleImageSelect} disabled={uploading} className="compose-photo-block" aria-label="添加照片">
+                            {uploading ? "上传中…" : <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>}
+                        </button>}
                     </div>
-                    {!photoPreview && (
-                        <input
-                            value={photoDesc || ""}
-                            onChange={e => setPhotoDesc(e.target.value)}
-                            placeholder="纯文字朋友圈不需要图片时"
-                            className="ui-input w-full mt-2"
-                            style={{ display: 'none' }} // Assuming mostly image flows for real, hidden to keep UI clean unless needed
-                        />
-                    )}
-                    <input ref={fileRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                    <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
                 </div>
 
                 {/* ── Action Rows (Location, Mention, Visibility) ── */}

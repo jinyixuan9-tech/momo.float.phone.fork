@@ -10,14 +10,19 @@ import { MomentPostCard } from "./moment-post-card";
 import { MomentsCompose } from "./moments-compose";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { PageShell } from "@/components/ui/page-shell";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Camera, Music2, Pencil, Play, Pause, ChevronRight } from "lucide-react";
+import { getMomentsScreenName, getMomentsSignature, saveMomentsProfile, getFeaturedPhotos, getMyMomentsPhotos, addFeaturedPhoto, removeFeaturedPhoto, addManualPhoto, getMomentsMusicId, setMomentsMusicId, type MomentsPhoto } from "@/lib/moments-profile";
+import { saveMomentsImage } from "@/lib/moments-image-upload";
+import { MomentsPhotoImage, useMomentsPhotoUrl } from "./moments-photo";
+import { loadAllTracks, type MusicTrack } from "@/lib/music-storage";
+import { useMusicControlsOptional } from "@/lib/music-context";
 import { kvGet, kvSet, registerKvMigration } from "@/lib/kv-db";
 import { onUserComment, MOMENT_PHOTO_GENERATION_FAILED_EVENT } from "@/lib/moments-engine";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 
 const COVER_ASSET_KEY = "moments_cover_asset_id";
 registerKvMigration(COVER_ASSET_KEY);
-registerKvMigration("moments_signature");
+
 
 const MOMENTS_INITIAL_POST_COUNT = 10;
 const MOMENTS_LOAD_MORE_COUNT = 10;
@@ -51,25 +56,53 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
     const coverInputRef = useRef<HTMLInputElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const [userIdentity, setUserIdentity] = useState(() => resolveUserIdentity());
-    const [signature, setSignature] = useState(() => {
-        if (typeof window !== "undefined") {
-            return kvGet("moments_signature") || "make every day count (●ˇ∀ˇ●)";
-        }
-        return "make every day count (●ˇ∀ˇ●)";
-    });
+    const [screenName, setScreenName] = useState("我的朋友圈");
+    const [signature, setSignature] = useState("写下你的签名");
+    const [editProfile, setEditProfile] = useState(false);
+    const [draftName, setDraftName] = useState(screenName);
+    const [draftSignature, setDraftSignature] = useState(signature);
+    const [featured, setFeatured] = useState<MomentsPhoto[]>([]);
+    const [showGallery, setShowGallery] = useState(false);
+    const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+    const [musicPicker, setMusicPicker] = useState(false);
+    const [musicTracks, setMusicTracks] = useState<MusicTrack[]>([]);
+    const [musicId, setMusicId] = useState("");
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
+    const manualInputRef = useRef<HTMLInputElement>(null);
+    const touchX = useRef<number | null>(null);
+    const music = useMusicControlsOptional();
+    const selectedTrack = [...musicTracks, ...(music?.queue || []), ...(music?.currentTrack ? [music.currentTrack] : [])].find(t => t.id === musicId);
+    const galleryPhotos = getMyMomentsPhotos(posts);
+    const lightboxPhoto = lightboxIndex === null ? null : galleryPhotos[lightboxIndex];
+    const lightboxSrc = useMomentsPhotoUrl(lightboxPhoto?.url);
 
     useEffect(() => {
         const syncIdentity = () => setUserIdentity(resolveUserIdentity());
+        const syncProfile = () => { setScreenName(getMomentsScreenName()); setSignature(getMomentsSignature()); setFeatured(getFeaturedPhotos()); setMusicId(getMomentsMusicId()); };
         window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, syncIdentity);
-        return () => window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, syncIdentity);
+        window.addEventListener("moments-profile-updated", syncProfile);
+        syncProfile();
+        loadAllTracks().then(setMusicTracks).catch(console.error);
+        return () => { window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, syncIdentity); window.removeEventListener("moments-profile-updated", syncProfile); };
     }, []);
-    const [editingSignature, setEditingSignature] = useState(false);
-    const sigInputRef = useRef<HTMLInputElement>(null);
-    const handleSignatureSubmit = (val: string) => {
-        const trimmed = val.trim() || "make every day count (●ˇ∀ˇ●)";
-        setSignature(trimmed);
-        kvSet("moments_signature", trimmed);
-        setEditingSignature(false);
+
+    const uploadStandalonePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        setUploadingPhoto(true);
+        try { const url = await saveMomentsImage(file); addManualPhoto(url); addFeaturedPhoto({ url, addedAt: new Date().toISOString() }); }
+        catch (error) { console.error("[Moments] photo upload failed", error); }
+        finally { setUploadingPhoto(false); }
+    };
+    const jumpToPost = (postId: string) => {
+        setLightboxIndex(null);
+        setShowGallery(false);
+        setVisiblePostCount(posts.length);
+        window.setTimeout(() => {
+            const el = Array.from(document.querySelectorAll<HTMLElement>("[data-moment-post-id]")).find(node => node.dataset.momentPostId === postId);
+            el?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
     };
 
     const [unreadNotifs, setUnreadNotifs] = useState<ReturnType<typeof getUnreadMomentsNotifications>>([]);
@@ -464,77 +497,39 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                 </div>
             ) : undefined}
         >
-                {/* Cover card + avatar wrapper */}
-                <div className="feed-cover-shell w-full relative mb-4">
-                    
-                    {/* Background Absolute Cover */}
-                    <div
-                        onClick={() => coverInputRef.current?.click()}
-                        className="feed-cover-bg absolute inset-0 w-full h-full bg-[var(--c-input)] cursor-pointer z-0"
-                        style={{ 
-                            maskImage: "linear-gradient(to bottom, black 40%, transparent 100%)",
-                            WebkitMaskImage: "linear-gradient(to bottom, black 40%, transparent 100%)"
-                        }}
-                    >
-                        {coverUrl && (
-                            <img
-                                src={coverUrl}
-                                alt=""
-                                className="feed-cover-image w-full h-full object-cover"
-                            />
-                        )}
-                    </div>
-                    <input
-                        ref={coverInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCoverUpload}
-                        className="hidden"
-                    />
-
-                    {/* Content Container (Layered above absolute bg) */}
-                    <div
-                        className="feed-profile relative w-full px-5 pb-5 pointer-events-none"
-                        style={{ paddingTop: "calc(var(--page-header-safe-top, 48px) + var(--page-header-content-height, 54px) + 160px)" }}
-                    >
-                        {/* Avatar */}
-                        <div className="feed-profile-avatar w-[72px] h-[72px] rounded-full border-[3px] border-[var(--c-page-body-bg)] bg-[var(--c-input)] overflow-hidden flex items-center justify-center translate-x-[2px] pointer-events-auto">
-                            {userIdentity?.avatarUrl ? (
-                                <img src={userIdentity.avatarUrl} alt="" className="feed-profile-avatar-image w-full h-full object-cover" />
-                            ) : (
-                                <span className="feed-profile-avatar-fallback ts-24 text-[var(--c-icon)] font-bold">{(userIdentity?.name ?? "我")[0]}</span>
-                            )}
+                <section className="moments-profile-hero">
+                    <button type="button" className="moments-hero-cover" onClick={() => coverInputRef.current?.click()} aria-label="更换朋友圈背景">
+                        {coverUrl ? <img src={coverUrl} alt="朋友圈背景" /> : <span>点击设置背景</span>}
+                    </button>
+                    <input ref={coverInputRef} type="file" accept="image/*" onChange={handleCoverUpload} className="hidden" />
+                    <div className="moments-profile-info">
+                        <div className="moments-profile-heading">
+                            <div className="moments-squircle-avatar">
+                                {userIdentity?.avatarUrl ? <img src={userIdentity.avatarUrl} alt="我的头像" /> : <span>{(screenName || "我")[0]}</span>}
+                            </div>
+                            <div className="moments-profile-identity"><strong>{screenName}</strong><span>{signature}</span></div>
+                            <button type="button" className="moments-profile-edit" onClick={() => { setDraftName(screenName); setDraftSignature(signature); setEditProfile(true); }} aria-label="编辑网名和签名"><Pencil size={17}/></button>
                         </div>
-                        
-                        {/* Name and Flex Data */}
-                        <div className="feed-profile-info flex flex-col gap-1 mt-3 ml-[6px] pointer-events-auto">
-                            <span className="feed-profile-name ts-20 font-bold text-[var(--c-text-title)]">{userIdentity?.name ?? "我"}</span>
-                            <div className="feed-profile-stats flex gap-4 ts-13 text-[var(--c-icon)] font-medium mt-[2px]">
-                                <span className="feed-profile-stat"><strong className="feed-profile-stat-value text-[var(--c-text-title)]">128</strong> 关注</span>
-                                <span className="feed-profile-stat"><strong className="feed-profile-stat-value text-[var(--c-text-title)]">12.4K</strong> 粉丝</span>
-                                <span className="feed-profile-stat"><strong className="feed-profile-stat-value text-[var(--c-text-title)]">8.2M</strong> 获赞与收藏</span>
-                            </div>
-                            
-                            {/* Signature */}
-                            <div className="feed-profile-signature mt-[2px] text-left text-[var(--c-text)]">
-                                {editingSignature ? (
-                                    <input
-                                        ref={sigInputRef}
-                                        defaultValue={signature}
-                                        autoFocus
-                                        className="feed-profile-signature-input bg-transparent outline-none ts-14 text-[var(--c-text)] w-full border-b border-[var(--c-action-blue)] pb-1"
-                                        onBlur={(e) => handleSignatureSubmit(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === "Enter") handleSignatureSubmit((e.target as HTMLInputElement).value); }}
-                                    />
-                                ) : (
-                                    <span className="feed-profile-signature-text cursor-pointer ts-14 opacity-90 leading-[1.6]" onClick={() => setEditingSignature(true)}>
-                                        {signature || "编写你的个性签名..."}
-                                    </span>
-                                )}
-                            </div>
+                        <div className="moments-music-strip">
+                            <button type="button" className="moments-music-play" disabled={!selectedTrack || !music} onClick={() => { if (!selectedTrack || !music) return; music.currentTrack?.id === selectedTrack.id ? music.togglePlay() : music.playTrack(selectedTrack); }} aria-label="播放或暂停主页音乐">
+                                {selectedTrack?.coverUrl ? <img src={selectedTrack.coverUrl} alt="" /> : <Music2 size={19}/>}
+                                {music?.currentTrack?.id === selectedTrack?.id && music?.isPlaying ? <Pause className="moments-music-indicator" size={12}/> : <Play className="moments-music-indicator" size={12}/>}
+                            </button>
+                            <button type="button" className="moments-music-select" onClick={() => { loadAllTracks().then(setMusicTracks); setMusicPicker(true); }}><strong>{selectedTrack?.title || "选择一首主页音乐"}</strong><small>{selectedTrack?.artist || "从音乐收藏或播放列表选歌"}</small><ChevronRight size={16}/></button>
                         </div>
                     </div>
-                </div>
+                </section>
+                <section className="moments-featured-section">
+                    <div className="moments-section-title"><strong>我的照片</strong><button type="button" onClick={() => setShowGallery(true)}>看我的照片 <ChevronRight size={15}/></button></div>
+                    <div className="moments-featured-scroll">
+                        {featured.map(photo => <div className="moments-featured-tile" key={photo.url}>
+                            <button type="button" className="moments-featured-image" onClick={() => { setShowGallery(true); const index = galleryPhotos.findIndex(p => p.url === photo.url); if (index >= 0) setLightboxIndex(index); }}><MomentsPhotoImage url={photo.url} /></button>
+                            <button type="button" className="moments-featured-remove" onClick={() => removeFeaturedPhoto(photo.url)} aria-label="从主页照片移除">×</button>
+                        </div>)}
+                        {featured.length < 3 && <button type="button" className="moments-featured-add" disabled={uploadingPhoto} onClick={() => manualInputRef.current?.click()}><Camera size={23}/><span>{uploadingPhoto ? "上传中…" : "添加照片"}</span></button>}
+                    </div>
+                    <input ref={manualInputRef} type="file" accept="image/*" className="hidden" onChange={uploadStandalonePhoto}/>
+                </section>
 
                 {/* Unread notifications banner */}
                 {unreadNotifs.length > 0 && (
@@ -560,6 +555,7 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                             onRequestDelete={setConfirmDeleteId}
                             onOpenCommentComposer={openCommentComposer}
                             onOpenReplyComposer={openReplyComposer}
+                            onFeaturePhoto={(postId, url) => addFeaturedPhoto({ postId, url, addedAt: new Date().toISOString() })}
                         />
                     ))
                 )}
@@ -578,6 +574,11 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                     </div>
                 )}
 
+
+            {editProfile && <div className="moments-dialog-backdrop" role="presentation" onClick={() => setEditProfile(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="编辑朋友圈资料" onClick={e => e.stopPropagation()}><h3>编辑朋友圈资料</h3><label>网名<input maxLength={24} value={draftName} onChange={e => setDraftName(e.target.value)} /></label><label>签名<input maxLength={80} value={draftSignature} onChange={e => setDraftSignature(e.target.value)} /></label><div className="moments-dialog-actions"><button onClick={() => setEditProfile(false)}>取消</button><button onClick={() => { saveMomentsProfile(draftName, draftSignature); setEditProfile(false); }}>保存</button></div></div></div>}
+            {musicPicker && <div className="moments-dialog-backdrop" role="presentation" onClick={() => setMusicPicker(false)}><div className="moments-dialog" role="dialog" aria-modal="true" aria-label="选择主页音乐" onClick={e => e.stopPropagation()}><h3>主页音乐</h3><div className="moments-song-list">{Array.from(new Map<string, MusicTrack>([...musicTracks, ...(music?.queue || []), ...(music?.currentTrack ? [music.currentTrack] : [])].map(t => [t.id, t] as const)).values()).map(track => <button type="button" key={track.id} onClick={() => { setMomentsMusicId(track.id); setMusicPicker(false); }}><Music2 size={18}/><span>{track.title}<small>{track.artist}</small></span>{track.id === musicId ? "✓" : ""}</button>)}{musicTracks.length === 0 && !music?.queue.length && !music?.currentTrack && <p>先到音乐 App 添加歌曲，再回来选。</p>}</div><div className="moments-dialog-actions"><button onClick={() => { setMomentsMusicId(""); setMusicPicker(false); }}>移除音乐</button><button onClick={() => setMusicPicker(false)}>完成</button></div></div></div>}
+            {showGallery && <div className="moments-gallery" role="dialog" aria-modal="true" aria-label="我的照片"><div className="moments-gallery-header"><button type="button" onClick={() => { setShowGallery(false); setLightboxIndex(null); }}>‹ 返回</button><strong>我的照片</strong><span>{galleryPhotos.length} 张</span></div><div className="moments-gallery-grid">{galleryPhotos.map((photo, index) => <button type="button" key={photo.url} onClick={() => setLightboxIndex(index)}><MomentsPhotoImage url={photo.url} alt={`照片 ${index + 1}`}/></button>)}</div>{galleryPhotos.length === 0 && <p className="moments-gallery-empty">发动态或上传照片后，会出现在这里。</p>}</div>}
+            {showGallery && lightboxIndex !== null && lightboxPhoto && <div className="moments-lightbox" role="dialog" aria-modal="true" onTouchStart={e => { touchX.current = e.touches[0].clientX; }} onTouchEnd={e => { if (touchX.current === null) return; const diff = e.changedTouches[0].clientX - touchX.current; if (Math.abs(diff) > 40) setLightboxIndex(i => i === null ? null : Math.max(0, Math.min(galleryPhotos.length - 1, i + (diff < 0 ? 1 : -1)))); touchX.current = null; }}><button type="button" className="moments-lightbox-close" onClick={() => setLightboxIndex(null)}>关闭</button><button type="button" className="moments-lightbox-prev" disabled={lightboxIndex === 0} onClick={() => setLightboxIndex(lightboxIndex - 1)}>‹</button>{lightboxSrc && <img src={lightboxSrc} alt="照片原图"/>}<button type="button" className="moments-lightbox-next" disabled={lightboxIndex === galleryPhotos.length - 1} onClick={() => setLightboxIndex(lightboxIndex + 1)}>›</button><div className="moments-lightbox-bottom"><span>{lightboxIndex + 1} / {galleryPhotos.length}</span><button type="button" onClick={() => addFeaturedPhoto({ ...lightboxPhoto, addedAt: new Date().toISOString() })}>展示到主页</button>{lightboxPhoto.postId && posts.some(p => p.id === lightboxPhoto.postId) && <button type="button" onClick={() => jumpToPost(lightboxPhoto.postId!)}>查看原动态与评论</button>}</div></div>}
 
             {/* Delete confirm dialog */}
             {confirmDeleteId && (
