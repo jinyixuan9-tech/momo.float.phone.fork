@@ -7,7 +7,6 @@ import { MomentsFeed } from "./moments-feed";
 import { ChatRoom } from "./chat-room";
 import { MascotChatRoom } from "./mascot-chat-room";
 import { UserProfilePanel } from "./user-profile-panel";
-import { MessageCircle, Users, Aperture, UserRound } from "lucide-react";
 import { ChatSession, loadChatSessions, pushChatMessage, hydrateChatStorage, markChatSessionRead, setActiveChatSessionId } from "@/lib/chat-storage";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 import { loadCharacters } from "@/lib/character-storage";
@@ -29,7 +28,7 @@ export type PhoneChatAppProps = {
 };
 
 export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSessionId, onSessionChange, sharePayload, onShareDone }: PhoneChatAppProps) {
-    const [activeTab, setActiveTab] = useState<TabKey>("messages");
+    const [activeTab, setActiveTab] = useState<TabKey>("contacts");
     const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
     const [activeMascot, setActiveMascot] = useState(false);
     // Chat app-level custom CSS (affects all chat pages, lower priority than per-session CSS)
@@ -267,6 +266,7 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
                         onCloseApp={onClose}
                         onSelectSession={handleSelectContact}
                         onSelectMascot={handleSelectMascot}
+                        onOpenMoments={() => setActiveTab("feeds")}
                         pendingAddContactId={pendingAddContactId}
                         onPendingAddContactConsumed={() => setPendingAddContactId(null)}
                         onPendingAddContactBack={() => {
@@ -281,38 +281,46 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
                     />
                 )}
                 {activeTab === "feeds" && <MomentsFeed onCloseApp={onClose} />}
-                {activeTab === "me" && <UserProfilePanel onClose={() => setActiveTab("messages")} />}
+                {activeTab === "me" && <UserProfilePanel onClose={() => setActiveTab("contacts")} />}
             </div>
 
             {/* Bottom Navigation Bar — hide when inside a chat room */}
             <nav className="chat-tab-bar chat-bottom-glass-bar" data-ui="nav" style={{ display: activeSession || activeMascot || hideTabBar ? "none" : undefined }}>
                 <button
-                    className={`chat-tab ${activeTab === "messages" ? "chat-tab-active" : ""}`}
-                    onClick={() => setActiveTab("messages")}
-                >
-                    <MessageCircleIcon active={activeTab === "messages"} />
-                    <span style={{ fontSize: "calc(10px*var(--app-text-scale,1))", color: activeTab === "messages" ? undefined : "var(--c-text)" }}>消息</span>
-                </button>
-                <button
                     className={`chat-tab ${activeTab === "contacts" ? "chat-tab-active" : ""}`}
                     onClick={() => setActiveTab("contacts")}
+                    type="button"
+                    aria-label="联系人"
+                    aria-current={activeTab === "contacts" ? "page" : undefined}
                 >
-                    <UsersIcon active={activeTab === "contacts"} />
-                    <span style={{ fontSize: "calc(10px*var(--app-text-scale,1))", color: activeTab === "contacts" ? undefined : "var(--c-text)" }}>联系人</span>
+                    <span className="kkt-nav-glyph kkt-nav-contacts" aria-hidden="true" />
+                </button>
+                <button
+                    className={`chat-tab ${activeTab === "messages" ? "chat-tab-active" : ""}`}
+                    onClick={() => setActiveTab("messages")}
+                    type="button"
+                    aria-label="消息"
+                    aria-current={activeTab === "messages" ? "page" : undefined}
+                >
+                    <span className="kkt-nav-glyph kkt-nav-messages" aria-hidden="true" />
                 </button>
                 <button
                     className={`chat-tab ${activeTab === "feeds" ? "chat-tab-active" : ""}`}
                     onClick={() => setActiveTab("feeds")}
+                    type="button"
+                    aria-label="动态"
+                    aria-current={activeTab === "feeds" ? "page" : undefined}
                 >
-                    <CompassIcon active={activeTab === "feeds"} />
-                    <span style={{ fontSize: "calc(10px*var(--app-text-scale,1))", color: activeTab === "feeds" ? undefined : "var(--c-text)" }}>动态</span>
+                    <span className="kkt-nav-glyph kkt-nav-feeds" aria-hidden="true" />
                 </button>
                 <button
                     className={`chat-tab ${activeTab === "me" ? "chat-tab-active" : ""}`}
                     onClick={() => setActiveTab("me")}
+                    type="button"
+                    aria-label="主页"
+                    aria-current={activeTab === "me" ? "page" : undefined}
                 >
-                    <MeIcon active={activeTab === "me"} />
-                    <span style={{ fontSize: "calc(10px*var(--app-text-scale,1))", color: activeTab === "me" ? undefined : "var(--c-text)" }}>主页</span>
+                    <span className="kkt-nav-glyph kkt-nav-more" aria-hidden="true" />
                 </button>
             </nav>
 
@@ -346,19 +354,3 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
     );
 });
 
-// Refined Icons
-function MessageCircleIcon({ active }: { active: boolean }) {
-    return <MessageCircle fill="none" stroke="currentColor" strokeWidth={active ? 1.8 : 1.7} size={20} style={{ transform: active ? "scale(1.1)" : "scale(1)", transition: "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" }} />;
-}
-
-function UsersIcon({ active }: { active: boolean }) {
-    return <Users fill="none" stroke="currentColor" strokeWidth={active ? 1.8 : 1.7} size={20} style={{ transform: active ? "scale(1.1)" : "scale(1)", transition: "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" }} />;
-}
-
-function CompassIcon({ active }: { active: boolean }) {
-    return <Aperture fill="none" stroke="currentColor" strokeWidth={active ? 1.8 : 1.7} size={20} style={{ transform: active ? "scale(1.1) rotate(25deg)" : "scale(1) rotate(0deg)", transition: "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" }} />;
-}
-
-function MeIcon({ active }: { active: boolean }) {
-    return <UserRound fill="none" stroke="currentColor" strokeWidth={active ? 1.8 : 1.7} size={20} style={{ transform: active ? "scale(1.1)" : "scale(1)", transition: "all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" }} />;
-}

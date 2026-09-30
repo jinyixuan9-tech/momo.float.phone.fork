@@ -1,15 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useSyncExternalStore } from "react";
-import { ChevronLeft } from "lucide-react";
-import { CHAT_MESSAGE_PUSHED_EVENT, loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, addChatContact, loadChatMessages, getLastVisibleSessionMessage, getChatMessagePreview } from "@/lib/chat-storage";
+import { ChevronLeft, Search, MessageCirclePlus, UsersRound, Settings, ListPlus } from "lucide-react";
+import { CHAT_MESSAGE_PUSHED_EVENT, loadChatSessions, loadChatContacts, ChatSession, createOrGetSession, createGroupSession, pushChatMessage, getLastVisibleSessionMessage, getChatMessagePreview } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
-import { resolveUserIdentity, USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
-import type { UserIdentity } from "@/components/settings/user-identity";
-import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
-import { clearRequestsForCharacter, dispatchFriendRequestUpdated } from "@/lib/friend-request-storage";
-import { UserProfilePanel } from "./user-profile-panel";
+import { resolveUserIdentity } from "@/lib/settings-storage";
 import { PageShell } from "@/components/ui/page-shell";
 import { GroupCreateModal } from "./group-create-modal";
 import { Toggle } from "@/components/ui/form";
@@ -21,7 +17,6 @@ import {
     mergeDuplicateSessionGroup,
     type DuplicateSessionGroup,
 } from "@/lib/chat-session-merge";
-import { kvSet } from "@/lib/kv-db";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
     CHAT_CHARACTER_PROFILES_UPDATED_EVENT,
@@ -39,7 +34,6 @@ import {
     getMascotSettingsSnapshot,
     resolveMascotImageRef,
     subscribeMascotSettings,
-    updateMascotSettings,
 } from "@/lib/mascot-settings";
 
 function parseTime(value?: string | null): number {
@@ -94,44 +88,21 @@ type ChatMessageListProps = {
 export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, onSelectMascot }: ChatMessageListProps) {
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [listFilter, setListFilter] = useState("");
+    const [showChatSearch, setShowChatSearch] = useState(false);
+    const chatSearchRef = React.useRef<HTMLInputElement>(null);
     const [listTab, setListTab] = useState<"all" | "private" | "group">("all");
-    const [showPlusMenu, setShowPlusMenu] = useState(false);
-    const plusMenuRef = React.useRef<HTMLSpanElement>(null);
-    useEffect(() => {
-        if (!showPlusMenu) return;
-        const handler = (e: PointerEvent) => {
-            if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
-                setShowPlusMenu(false);
-            }
-        };
-        document.addEventListener("pointerdown", handler);
-        return () => document.removeEventListener("pointerdown", handler);
-    }, [showPlusMenu]);
-    const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
-    const [searchQuery, setSearchQuery] = useState("");
-    const [searchResult, setSearchResult] = useState<Character | null | undefined>(undefined);
-    // undefined: not searched yet, null: searched and not found, Character: found
-
-    const [isSendingRequest, setIsSendingRequest] = useState(false);
-    const [greetingText, setGreetingText] = useState("");
-
-    const [showUserProfile, setShowUserProfile] = useState(false);
     const [showContactPicker, setShowContactPicker] = useState(false);
     const [showGroupCreate, setShowGroupCreate] = useState(false);
     // 重复会话合并弹窗：进列表时检测一次，用户按组勾选
     const [mergePrompt, setMergePrompt] = useState<DuplicateSessionGroup[] | null>(null);
     const [mergeSelected, setMergeSelected] = useState<Set<string>>(new Set());
-    const [identity, setIdentity] = useState<UserIdentity | null>(null);
     const mascotSettings = useSyncExternalStore(subscribeMascotSettings, getMascotSettingsSnapshot, getMascotSettingsSnapshot);
     const mascotChat = useSyncExternalStore(subscribeMascotChat, getMascotChatSnapshot, getMascotChatSnapshot);
     const [mascotAvatarUrl, setMascotAvatarUrl] = useState(mascotSettings.avatarImage || DEFAULT_MASCOT_AVATAR);
 
     useEffect(() => {
-        setIdentity(resolveUserIdentity());
-        const syncIdentity = () => setIdentity(resolveUserIdentity());
-        window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, syncIdentity);
-        return () => window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, syncIdentity);
-    }, []);
+        if (showChatSearch) chatSearchRef.current?.focus();
+    }, [showChatSearch]);
 
     useEffect(() => {
         void hydrateMascotChat();
@@ -195,91 +166,28 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
     return (
         <div className="relative flex-1 h-full">
             <PageShell
-                leftAction={
-                    <div className="flex items-center min-w-max">
-                        <button className="page-back-btn shrink-0 mr-2" type="button" onClick={onCloseApp} aria-label="返回">
-                            <ChevronLeft size={24} strokeWidth={1.5} />
-                        </button>
-                        <div className="flex items-center gap-[10px]">
-                            <div className="w-[36px] h-[36px] rounded-full overflow-hidden bg-[var(--c-input)] flex items-center justify-center shrink-0">
-                                {identity?.avatarUrl ? (
-                                    <img src={identity.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                                ) : (
-                                    <ChatFallbackAvatar />
-                                )}
-                            </div>
-                            <div className="flex flex-col whitespace-nowrap">
-                                <span className="ts-16 font-bold text-[var(--c-text-title)] leading-tight">{identity?.name || "用户"}</span>
-                                <div className="flex items-center gap-1 mt-1">
-                                    <span className="w-[8px] h-[8px] rounded-full bg-[#2dd36f]"></span>
-                                    <span className="ts-10 text-[var(--c-icon)] font-medium">在线</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                }
+                className="kkt-list-page kkt-chats-page"
+                leftAction={<span className="kkt-title-wrap"><button type="button" className="kkt-header-exit" onClick={onCloseApp} aria-label="退出 Chat"><ChevronLeft size={17} strokeWidth={1.8}/></button><strong className="kkt-list-title">Chats</strong></span>}
                 rightAction={
-                    <span className="relative" ref={plusMenuRef}>
-                        <button
-                            onClick={() => setShowPlusMenu(!showPlusMenu)}
-                            className="page-back-btn"
-                            type="button"
-                        >
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg>
-                        </button>
-
-                        {/* Dropout '+' Menu */}
-                        {showPlusMenu && (
-                            <div className="g-dropdown absolute top-[40px] right-0 py-2 px-0 w-[140px] z-[100]">
-                                <MenuOption
-                                    icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>}
-                                    label="发起聊天"
-                                    onClick={() => {
-                                        setShowPlusMenu(false);
-                                        setShowContactPicker(true);
-                                    }}
-                                />
-                                <MenuOption
-                                    icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>}
-                                    label="创建群聊"
-                                    onClick={() => {
-                                        setShowPlusMenu(false);
-                                        setShowGroupCreate(true);
-                                    }}
-                                />
-                                <MenuOption
-                                    icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>}
-                                    label="添加好友"
-                                    onClick={() => {
-                                        setShowPlusMenu(false);
-                                        setIsSearchModalOpen(true);
-                                        setSearchQuery("");
-                                        setSearchResult(undefined);
-
-                                        setIsSendingRequest(false);
-                                        setGreetingText(identity?.name ? `我是${identity.name}` : "你好");
-                                    }}
-                                />
-                            </div>
-                        )}
-                    </span>
+                    <div className="kkt-header-actions">
+                        <button type="button" onClick={() => { if (showChatSearch) setListFilter(""); setShowChatSearch(open => !open); }} aria-label="搜索聊天"><Search size={22} strokeWidth={1.9}/></button>
+                        <button type="button" onClick={() => setShowContactPicker(true)} aria-label="发起聊天"><MessageCirclePlus size={22} strokeWidth={1.8}/></button>
+                        <button type="button" onClick={() => setShowGroupCreate(true)} aria-label="创建群聊"><UsersRound size={22} strokeWidth={1.8}/></button>
+                        <span className="kkt-header-decor" aria-hidden="true"><Settings size={21} strokeWidth={1.8}/></span>
+                    </div>
                 }
             >
-                <div className="px-5 pt-5 pb-3">
-                    <div className="flex items-center justify-between mb-4 mt-2">
-                        <span className="ts-28 font-bold text-[var(--c-text-title)]">Chats</span>
-                    </div>
-                    <div className="chat-search-bar">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-icon)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                        <input
-                            className="chat-search-input ts-15 w-full bg-transparent outline-none text-[var(--c-text-title)] placeholder:text-[var(--c-icon)]"
-                            placeholder="Search chats..."
-                            value={listFilter}
-                            onChange={(e) => setListFilter(e.target.value)}
-                        />
-                    </div>
-                </div>
-                <div className="chat-list-tabs" style={{ paddingLeft: 20, paddingRight: 20 }}>
+                {showChatSearch && <div className="chat-search-bar kkt-search-bar">
+                    <Search size={18} strokeWidth={2} aria-hidden="true"/>
+                    <input
+                        ref={chatSearchRef}
+                        className="chat-search-input ts-15 w-full bg-transparent outline-none text-[var(--c-text-title)] placeholder:text-[var(--c-icon)]"
+                        placeholder="Search chats..."
+                        value={listFilter}
+                        onChange={(e) => setListFilter(e.target.value)}
+                    />
+                </div>}
+                <div className="chat-list-tabs kkt-chat-filters">
                     {(["all", "private", "group"] as const).map(tab => (
                         <button
                             key={tab}
@@ -287,11 +195,12 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                             className={`chat-list-tab${listTab === tab ? " active" : ""}`}
                             onClick={() => setListTab(tab)}
                         >
-                            {{ all: "All", private: "Private", group: "Groups" }[tab]}
+                            {{ all: "All", private: "Private", group: "Group" }[tab]}
                         </button>
                     ))}
+                    <span className="kkt-group-decor" aria-hidden="true"><ListPlus size={18} strokeWidth={1.8}/></span>
                 </div>
-                <div className="px-5 pt-2 flex flex-col">
+                <div className="kkt-session-list">
                     {(() => {
                             const contactIds = new Set(loadChatContacts().map(c => c.characterId));
                             const allChars = loadCharacters();
@@ -326,7 +235,7 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                             if (!showMascot && regularItems.length === 0) {
                                 return (
                                     <div className="px-5 py-10 text-center text-[var(--c-icon)] ts-14">
-                                        暂无聊天记录，点击右上角「+」发起聊天
+                                        暂无聊天记录，点击右上角的发起聊天图标
                                     </div>
                                 );
                             }
@@ -347,237 +256,6 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                         })()}
                 </div>
             </PageShell>
-
-            {/* Add Friend Search Modal */}
-            {isSearchModalOpen && (
-                <div style={{ position: 'absolute', inset: 0, zIndex: 9999, background: '#ffffff' }}>
-                <div style={{ position: 'absolute', inset: 0, background: 'var(--c-page-body-bg)' }}>
-                <PageShell title="添加朋友" onBack={() => setIsSearchModalOpen(false)}>
-
-                    {!searchResult && searchResult !== null && (
-                        <div className="page-menu">
-                            <div className="menu-group">
-                                <div className="menu-item">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--c-icon)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                    <input
-                                        autoFocus
-                                        placeholder="微信号/手机号"
-                                        value={searchQuery}
-                                        onChange={(e) => {
-                                            setSearchQuery(e.target.value);
-                                            setSearchResult(undefined);
-                                        }}
-                                        className="ui-input ui-input-inline"
-                                    />
-                                    {searchQuery && (
-                                        <button onClick={() => setSearchQuery("")} className="ui-bare-btn text-[var(--c-icon)]">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" /></svg>
-                                        </button>
-                                    )}
-                                </div>
-
-                                {searchQuery.trim().length > 0 && (
-                                    <button
-                                        className="menu-item"
-                                        onClick={() => {
-                                            const chars = loadCharacters();
-                                            const found = chars.find(c => c.wechatID === searchQuery.trim() || c.id === searchQuery.trim());
-                                            setSearchResult(found || null);
-                                        }}
-                                    >
-                                        <div className="menu-icon">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--c-success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                        </div>
-                                        <div className="menu-label-group">
-                                            <span className="menu-label">搜索：<span className="text-[var(--c-success)]">{searchQuery}</span></span>
-                                        </div>
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* 备选：已有角色卡但还不在联系人里，点击直接填入号码 */}
-                            {(() => {
-                                const contactIds = new Set(loadChatContacts().map(c => c.characterId));
-                                const candidates = loadCharacters().filter(c => !contactIds.has(c.id));
-                                if (candidates.length === 0 && mascotSettings.chatEnabled) return null;
-                                return (
-                                    <div className="menu-group" style={{ marginTop: 12 }}>
-                                        <div className="menu-item" style={{ pointerEvents: "none" }}>
-                                            <span className="menu-desc">还不是好友的角色（点击填入号码）</span>
-                                        </div>
-                                        {!mascotSettings.chatEnabled && (
-                                            <button
-                                                className="menu-item"
-                                                onClick={() => {
-                                                    updateMascotSettings({ chatEnabled: true });
-                                                    setIsSearchModalOpen(false);
-                                                    setSearchQuery("");
-                                                    setSearchResult(undefined);
-                                                    onSelectMascot();
-                                                }}
-                                            >
-                                                <div className="add-friend-avatar" style={{ width: 36, height: 36, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "#fff" }}>
-                                                    <img src={mascotAvatarUrl} className="w-full h-full object-contain p-[2px]" alt="" />
-                                                </div>
-                                                <div className="menu-label-group" style={{ minWidth: 0 }}>
-                                                    <span className="menu-label">AI助手</span>
-                                                    <span className="menu-desc">内置创作助手</span>
-                                                </div>
-                                            </button>
-                                        )}
-                                        {candidates.map(c => (
-                                            <button
-                                                key={c.id}
-                                                className="menu-item"
-                                                onClick={() => {
-                                                    setSearchQuery(c.wechatID?.trim() || c.id);
-                                                    setSearchResult(undefined);
-                                                }}
-                                            >
-                                                <div className="add-friend-avatar" style={{ width: 36, height: 36, borderRadius: 8, overflow: "hidden", flexShrink: 0 }}>
-                                                    {c.avatar ? (
-                                                        <img src={c.avatar} className="w-full h-full object-cover" alt="" />
-                                                    ) : (
-                                                        <div className="w-full h-full flex items-center justify-center bg-[var(--c-page-body-bg)] text-[var(--c-icon)]" style={{ fontSize: 14 }}>
-                                                            {c.name.slice(0, 1)}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="menu-label-group" style={{ minWidth: 0 }}>
-                                                    <span className="menu-label" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
-                                                    <span className="menu-desc" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.wechatID?.trim() || c.id}</span>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                );
-                            })()}
-                        </div>
-                    )}
-
-                    {searchResult === null && (
-                        <div className="ui-empty">
-                            <span className="menu-desc">该用户不存在</span>
-                        </div>
-                    )}
-
-                    {searchResult && !isSendingRequest && (
-                        <div className="page-menu">
-                            <div className="menu-group">
-                                <div className="menu-item !items-start">
-                                    <div className="add-friend-avatar">
-                                        {searchResult.avatar ? (
-                                            <img src={searchResult.avatar} className="w-full h-full object-cover" alt="" />
-                                        ) : (
-                                            <ChatFallbackAvatar />
-                                        )}
-                                    </div>
-                                    <div className="menu-label-group">
-                                        <div className="ts-18 font-bold text-[var(--c-text-title)] mb-1">{searchResult.name || "UNNAMED"}</div>
-                                        <div className="menu-desc">微信号: {searchResult.wechatID || "N/A"}</div>
-                                        <div className="menu-desc">个性签名: {searchResult.persona ? searchResult.persona.slice(0, 30) + (searchResult.persona.length > 30 ? "..." : "") : "暂无"}</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setIsSendingRequest(true)}
-                                className="ui-btn ui-btn-success w-full"
-                            >
-                                添加到通讯录
-                            </button>
-                        </div>
-                    )}
-
-                    {isSendingRequest && searchResult && (
-                        <div className="page-menu">
-                            <p className="menu-group-desc mx-0">发送添加朋友申请</p>
-                            <div className="menu-group">
-                                <div className="menu-item !items-start">
-                                    <textarea
-                                        autoFocus
-                                        value={greetingText}
-                                        onChange={e => setGreetingText(e.target.value)}
-                                        placeholder="输入打招呼信息..."
-                                        className="ui-textarea ui-input-inline min-h-[60px]"
-                                    />
-                                    <button onClick={() => setGreetingText("")} className="ui-bare-btn text-[var(--c-icon)]">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div className="flex flex-col gap-3">
-                                <button
-                                    onClick={() => {
-                                        // 1. Add to contacts
-                                        addChatContact(searchResult.id);
-                                        clearRequestsForCharacter(searchResult.id);
-                                        dispatchFriendRequestUpdated();
-                                        // 2. Create or get session
-                                        const newSession = createOrGetSession(searchResult.id);
-
-                                        // Check if re-adding (session already has messages)
-                                        const isReAdd = loadChatMessages(newSession.id).length > 0;
-
-                                        // Resolve character-bound user identity
-                                        const charIdentity = resolveUserIdentity(searchResult.id, "chat");
-                                        const userName = charIdentity?.name || identity?.name || "你";
-
-                                        // 3. Insert system message(s)
-                                        if (isReAdd) {
-                                            // Re-add: single message with both lines for memory
-                                            const charName = searchResult.name || "用户";
-                                            pushChatMessage({
-                                                sessionId: newSession.id,
-                                                role: "system",
-                                                content: `${userName}向${charName}发起了好友申请\n${charName}通过了好友申请`,
-                                                status: "sent"
-                                            });
-                                            // Set flag to trigger AI reply on chat room mount
-                                            kvSet(PENDING_REPLY_PREFIX + newSession.id, "1");
-                                        } else {
-                                            pushChatMessage({
-                                                sessionId: newSession.id,
-                                                role: "system",
-                                                content: `${userName}已添加了${searchResult.name || "用户"}，现在可以开始聊天了。`,
-                                                status: "sent"
-                                            });
-                                        }
-
-                                        // 4. Insert user greeting message if any
-                                        if (greetingText.trim()) {
-                                            pushChatMessage({
-                                                sessionId: newSession.id,
-                                                role: "user",
-                                                content: greetingText.trim(),
-                                                status: "sent"
-                                            });
-                                        }
-
-                                        // 6. Open Chat
-                                        setSessions(loadChatSessions());
-                                        onSelectSession(newSession);
-                                        setIsSearchModalOpen(false);
-                                        setSearchQuery("");
-                                        setSearchResult(undefined);
-                                        setIsSendingRequest(false);
-                                    }}
-                                    className="ui-btn ui-btn-success w-full"
-                                >
-                                    发送
-                                </button>
-                                <button
-                                    onClick={() => setIsSendingRequest(false)}
-                                    className="ui-btn ui-btn-ghost w-full"
-                                >
-                                    取消
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </PageShell>
-                </div>
-                </div>
-            )}
 
             {/* Contact Picker */}
             {showContactPicker && (
@@ -669,22 +347,6 @@ export function ChatMessageList({ onCloseApp, activeSession, onSelectSession, on
                 />
             )}
 
-            {/* User Profile Panel */}
-            {showUserProfile && (
-                <UserProfilePanel onClose={() => { setShowUserProfile(false); setIdentity(resolveUserIdentity()); }} className="absolute inset-0 z-[100]" />
-            )}
-        </div>
-    );
-}
-
-function MenuOption({ icon, label, onClick }: { icon: React.ReactNode, label: string, onClick?: () => void }) {
-    return (
-        <div
-            onClick={onClick}
-            className="menu-option-border flex items-center gap-3 px-4 py-3 ts-14 text-[var(--c-text)] cursor-pointer"
-        >
-            <span className="flex items-center text-[var(--c-text)]">{icon}</span>
-            <span>{label}</span>
         </div>
     );
 }

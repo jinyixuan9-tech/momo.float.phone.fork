@@ -3,6 +3,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, useSyncExternalStore } from "react";
 import { loadChatContacts, ChatContact, createOrGetSession, ChatSession, addChatContact, pushChatMessage, loadChatMessages } from "@/lib/chat-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
+import { USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
+import { getMomentsScreenName, getMomentsSignature } from "@/lib/moments-profile";
+import { ChevronLeft, Search, UserRoundPlus, Settings } from "lucide-react";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
@@ -18,7 +21,6 @@ import { handleAcceptFriendRequest, triggerRejectReaction } from "@/lib/friend-r
 import { PageShell } from "@/components/ui/page-shell";
 import { pinyin } from "pinyin-pro";
 import { kvSet } from "@/lib/kv-db";
-import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
     CHAT_CHARACTER_PROFILES_UPDATED_EVENT,
@@ -37,6 +39,7 @@ type ChatContactsListProps = {
     onCloseApp: () => void;
     onSelectSession: (session: ChatSession | null) => void;
     onSelectMascot: () => void;
+    onOpenMoments: () => void;
     /** 名片点击「加好友」：切到本 tab 后待打开添加页的角色 id */
     pendingAddContactId?: string | null;
     onPendingAddContactConsumed?: () => void;
@@ -44,9 +47,15 @@ type ChatContactsListProps = {
     onPendingAddContactBack?: () => void;
 };
 
-export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, pendingAddContactId, onPendingAddContactConsumed, onPendingAddContactBack }: ChatContactsListProps) {
+export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, onOpenMoments, pendingAddContactId, onPendingAddContactConsumed, onPendingAddContactBack }: ChatContactsListProps) {
     const [contacts, setContacts] = useState<(ChatContact & { char?: Character })[]>([]);
     const [contactFilter, setContactFilter] = useState("");
+    const [showContactSearch, setShowContactSearch] = useState(false);
+    const contactSearchRef = useRef<HTMLInputElement>(null);
+    const [momentsName, setMomentsName] = useState(() => getMomentsScreenName());
+    const [momentsSignature, setMomentsSignature] = useState(() => getMomentsSignature());
+    const [profileAvatar, setProfileAvatar] = useState(() => resolveUserIdentity()?.avatarUrl || "");
+    const [previewIndex, setPreviewIndex] = useState(0);
     const [latestPost, setLatestPost] = useState<Record<string, string>>({});
     const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
     const [showRequestList, setShowRequestList] = useState(false);
@@ -66,7 +75,24 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
     const chars = useMemo(() => loadCharacters(), []);
     const deferredContactFilter = useDeferredValue(contactFilter);
     const bodyRef = useRef<HTMLDivElement>(null);
-    const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+    useEffect(() => {
+        const syncMomentsProfile = () => {
+            setMomentsName(getMomentsScreenName());
+            setMomentsSignature(getMomentsSignature());
+        };
+        const syncAvatar = () => setProfileAvatar(resolveUserIdentity()?.avatarUrl || "");
+        window.addEventListener("moments-profile-updated", syncMomentsProfile);
+        window.addEventListener(USER_IDENTITIES_UPDATED_EVENT, syncAvatar);
+        return () => {
+            window.removeEventListener("moments-profile-updated", syncMomentsProfile);
+            window.removeEventListener(USER_IDENTITIES_UPDATED_EVENT, syncAvatar);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (showContactSearch) contactSearchRef.current?.focus();
+    }, [showContactSearch]);
 
     useEffect(() => {
         let cancelled = false;
@@ -197,68 +223,70 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
     return (
         <div className="relative flex-1 h-full">
             <PageShell
-                title="Contacts"
-                onBack={onCloseApp}
+                className="kkt-list-page kkt-contacts-page"
+                leftAction={<span className="kkt-title-wrap"><button type="button" className="kkt-header-exit" onClick={onCloseApp} aria-label="退出 Chat"><ChevronLeft size={17} strokeWidth={1.8}/></button><strong className="kkt-list-title">Friends</strong></span>}
                 bodyRef={bodyRef}
                 rightAction={
-                    <button
-                        className="page-back-btn"
-                        type="button"
-                        onClick={() => {
+                    <div className="kkt-header-actions">
+                        <button type="button" onClick={() => { if (showContactSearch) setContactFilter(""); setShowContactSearch(open => !open); }} aria-label="搜索联系人"><Search size={22} strokeWidth={1.9}/></button>
+                        <button type="button" onClick={() => {
                             addFromCardRef.current = false;
                             setIsAddFriendOpen(true);
                             setAddQuery("");
                             setAddResult(undefined);
                             setIsSendingAdd(false);
                             setGreetingText(identity?.name ? `我是${identity.name}` : "你好");
-                        }}
-                    >
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg>
-                    </button>
+                        }} aria-label="添加好友"><UserRoundPlus size={22} strokeWidth={1.8}/></button>
+                        <span className="kkt-header-decor" aria-hidden="true"><Settings size={21} strokeWidth={1.8}/></span>
+                    </div>
                 }
             >
-            <div className="px-5">
-                {/* Search bar */}
-                <div className="pt-5 pb-1">
-                    <div className="flex items-center justify-between mb-4 mt-2">
-                        <span className="ts-28 font-bold text-[var(--c-text-title)]">Contacts</span>
-                    </div>
-                    <div className="chat-search-bar">
+            <div className="kkt-list-content">
+                {showContactSearch && <div className="chat-search-bar kkt-search-bar">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--c-icon)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         <input
+                            ref={contactSearchRef}
                             className="chat-search-input ts-15 w-full bg-transparent outline-none text-[var(--c-text-title)] placeholder:text-[var(--c-icon)]"
                             placeholder="Search contacts..."
                             value={contactFilter}
                             onChange={(e) => setContactFilter(e.target.value)}
                         />
-                    </div>
+                </div>}
+
+                <div className="kkt-own-profile">
+                    <div className="kkt-own-avatar">{profileAvatar ? <img src={profileAvatar} alt="我的头像" /> : <span>{momentsName[0] || "我"}</span>}</div>
+                    <div className="kkt-own-text"><strong>{momentsName}</strong><span>{momentsSignature}</span></div>
+                    <button type="button" className="kkt-profile-link" onClick={onOpenMoments}>Profile＋</button>
                 </div>
 
-                {/* New Friends entry */}
-                <div className="mb-3 mt-3">
-                    <div
-                        className="minimal-list-item"
-                        onClick={() => pendingRequests.length > 0 && setShowRequestList(true)}
-                    >
-                        <div className="w-[48px] h-[48px] rounded-full bg-[var(--c-action-blue,#246bfd)] flex items-center justify-center shrink-0">
-                            <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                                <circle cx="9" cy="7" r="4" />
-                                <line x1="19" y1="8" x2="19" y2="14" />
-                                <line x1="22" y1="11" x2="16" y2="11" />
-                            </svg>
-                        </div>
-                        <div className="flex-1 overflow-hidden h-[48px] flex flex-col justify-center">
-                            <div className="ts-16 font-medium text-[var(--c-text-title)]">New Friends</div>
-                        </div>
-                        {pendingRequests.length > 0 && (
-                            <div className="minimal-unread-count ml-auto shrink-0">{pendingRequests.length}</div>
-                        )}
-                    </div>
-                </div>
+                <section className="kkt-list-section kkt-updates-section">
+                    <div className="kkt-section-heading"><span>更新的个人资料</span><span aria-hidden="true">⌃</span></div>
+                    {contacts.length > 0 && (() => {
+                        const preview = contacts[previewIndex % contacts.length];
+                        const char = preview.char!;
+                        const avatar = resolveChatCharacterAvatar(char);
+                        return <button type="button" className="kkt-update-preview" onClick={() => setPreviewIndex(i => i + 1)} aria-label="换一个展示头像">
+                            <span className="kkt-update-avatar">{avatar ? <img src={avatar} alt="" /> : <ChatFallbackAvatar />}</span>
+                            <span>{resolveChatCharacterDisplayName(char)}</span>
+                        </button>;
+                    })()}
+                </section>
+
+                <section className="kkt-list-section kkt-recommend-section">
+                    <div className="kkt-section-heading"><span>推荐</span><span aria-hidden="true">⌃</span></div>
+                    <button type="button" className="kkt-recommend-row" onClick={() => setShowRequestList(true)}>
+                        <span className="kkt-ch-icon" aria-hidden="true"><svg viewBox="0 0 48 48" width="48" height="48"><rect width="48" height="48" rx="13" fill="#ffe500"/><path d="M24 8c-9.4 0-17 6.9-17 15.4 0 5.1 2.8 9.6 7.2 12.4L12.8 42l7.1-4.1c1.3.3 2.7.4 4.1.4 9.4 0 17-6.9 17-15.4S33.4 8 24 8Z" fill="#222"/><text x="24" y="28" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="14" fontWeight="bold" fill="#ffe500">Ch</text></svg></span>
+                        <span>发现更多人</span>
+                        {pendingRequests.length > 0 && <span className="kkt-request-count">{pendingRequests.length}</span>}
+                        <span className="kkt-chevron" aria-hidden="true">›</span>
+                    </button>
+                </section>
+
+                <section className="kkt-list-section kkt-friends-section">
+                    <div className="kkt-section-heading"><span>好友 {contacts.length}</span><span aria-hidden="true">⌃</span></div>
 
                 {mascotSettings.chatEnabled && (
-                    <div className="mb-3">
+                    <div className="kkt-mascot-row">
                         <div className="minimal-list-item" onClick={onSelectMascot}>
                             <div className="minimal-avatar-wrapper bg-white">
                                 <img src={mascotAvatarUrl} className="w-full h-full object-contain rounded-full p-[2px]" alt="" />
@@ -272,15 +300,15 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                     </div>
                 )}
 
-                {/* Contacts list grouped by pinyin initial */}
+                {/* Existing contacts and chat-opening behavior */}
                 {contacts.length === 0 ? (
                     <div className="ui-empty">
-                        <span className="menu-desc">暂无联系人，去消息页右上角添加吧</span>
+                        <span className="menu-desc">暂无联系人，点击右上角添加好友</span>
                     </div>
                 ) : (
                     <div className="flex flex-col gap-1">
                         {indexLetters.map(letter => (
-                            <div key={letter} ref={el => { sectionRefs.current[letter] = el; }} className="flex flex-col gap-0">
+                            <div key={letter} className="flex flex-col gap-0">
                                 <div className="contact-letter-header text-[var(--c-icon)] py-2 ts-13 pl-1 font-semibold">{letter}</div>
                                 {grouped[letter].map(c => {
                                     const char = c.char!;
@@ -318,22 +346,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                     </div>
                 )}
 
-                {/* Right-side alphabet index */}
-                {indexLetters.length > 0 && (
-                    <div className="contact-alpha-index">
-                        {indexLetters.map(letter => (
-                            <div
-                                key={letter}
-                                className="contact-alpha-letter"
-                                onClick={() => {
-                                    scrollElementWithinContainer(bodyRef.current, sectionRefs.current[letter], { behavior: "smooth", block: "start" });
-                                }}
-                            >
-                                {letter}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                </section>
             </div>
 
             {/* Friend Request List Modal */}
@@ -341,7 +354,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                 <div className="modal-overlay" onClick={() => setShowRequestList(false)}>
                     <div className="modal-dialog freq-dialog" onClick={e => e.stopPropagation()}>
                         <div className="ts-17 font-semibold text-center text-[var(--c-text-title)]">
-                            新的朋友
+                            推荐
                         </div>
                         {pendingRequests.length === 0 ? (
                             <div className="py-6 text-center text-[var(--c-text)] ts-14">
