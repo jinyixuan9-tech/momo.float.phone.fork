@@ -12,14 +12,23 @@ type PageShellProps = {
   footer?: ReactNode;
   className?: string;
   bodyRef?: Ref<HTMLDivElement>;
+  clearHeader?: boolean;
 };
 
-export function PageShell({ title = "", onBack, leftAction, rightAction, children, footer, className, bodyRef }: PageShellProps) {
+export function PageShell({ title = "", onBack, leftAction, rightAction, children, footer, className, bodyRef, clearHeader = false }: PageShellProps) {
   return (
     <div className={`page-shell ${className ?? ""}`}>
-      <header className="page-header" data-ui="header">
-        <div className="page-header-safe-area" />
-        <div className="page-header-content">
+      <header
+        className={clearHeader ? "moments-clear-header" : "page-header"}
+        data-ui={clearHeader ? "moments-header" : "header"}
+        style={clearHeader ? {
+          position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
+          display: "flex", flexDirection: "column", background: "transparent",
+          backdropFilter: "none", WebkitBackdropFilter: "none", boxShadow: "none",
+        } : undefined}
+      >
+        <div className="page-header-safe-area" style={clearHeader ? { background: "transparent", backdropFilter: "none", WebkitBackdropFilter: "none" } : undefined} />
+        <div className="page-header-content" style={clearHeader ? { background: "transparent", backdropFilter: "none", WebkitBackdropFilter: "none" } : undefined}>
           {onBack ? (
             <button className="page-back-btn" type="button" onClick={onBack} aria-label="返回">
               <ChevronLeft size={24} strokeWidth={1.5} />

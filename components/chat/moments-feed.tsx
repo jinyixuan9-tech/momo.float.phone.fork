@@ -113,7 +113,6 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
 
     const [unreadNotifs, setUnreadNotifs] = useState<ReturnType<typeof getUnreadMomentsNotifications>>([]);
     const [showNotifModal, setShowNotifModal] = useState(false);
-    const [headerScrolled, setHeaderScrolled] = useState(false);
     const [visiblePostCount, setVisiblePostCount] = useState(MOMENTS_INITIAL_POST_COUNT);
     const [activeComposer, setActiveComposer] = useState<ActiveMomentComposer | null>(null);
     const [composerText, setComposerText] = useState("");
@@ -320,17 +319,6 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
         watchLoadMoreAnchorImages(anchor);
     }, [getScrollElement, restoreScrollAnchor, visiblePostCount, watchLoadMoreAnchorImages]);
 
-    useEffect(() => {
-        const bodyEl = getScrollElement();
-        if (!bodyEl) return;
-        
-        const handleScroll = () => {
-            setHeaderScrolled(bodyEl.scrollTop > 160);
-        };
-        bodyEl.addEventListener('scroll', handleScroll, { passive: true });
-        return () => bodyEl.removeEventListener('scroll', handleScroll);
-    }, [getScrollElement]);
-
     // Load posts + start background service + load cover
     useEffect(() => {
         refreshPosts();
@@ -426,12 +414,13 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
         )}
         <PageShell
             title="动态"
+            clearHeader
             onBack={onCloseApp}
             rightAction={<div className="moments-header-actions">
                 <button type="button" className="moments-header-edit" onClick={() => { setDraftName(screenName); setDraftSignature(signature); setEditProfile(true); }} aria-label="编辑朋友圈资料">编辑</button>
                 <button type="button" className="moments-header-compose" onClick={openMyLife} aria-label="New Post，发朋友圈" title="New Post，发朋友圈"><Camera size={18} strokeWidth={1.8}/></button>
             </div>}
-            className={`moments-feed-page ${headerScrolled ? "is-scrolled" : ""} ${activeComposer ? "has-comment-modal" : ""}`}
+            className={`moments-feed-page ${activeComposer ? "has-comment-modal" : ""}`}
             bodyRef={scrollRef}
             footer={showCompose ? (
                 <MomentsCompose
