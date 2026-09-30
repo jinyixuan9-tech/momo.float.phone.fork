@@ -6577,18 +6577,16 @@
   font-weight: 700;
 }
 
-/* Moments Feed Dynamic Header */
-.moments-feed-page:not(.is-scrolled) .page-header {
+/* Moments header stays clear at every scroll position. */
+.moments-feed-page .page-header {
   background: transparent !important;
   backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   border-bottom-color: transparent !important;
+  box-shadow: none !important;
 }
-.moments-feed-page:not(.is-scrolled) .page-title {
+.moments-feed-page .page-title {
   opacity: 0;
-  transition: opacity 0.3s ease;
-}
-.moments-feed-page .page-header, .moments-feed-page .page-title {
-  transition: background 0.3s ease, backdrop-filter 0.3s ease, opacity 0.3s ease;
 }
 
 /* Consecutive Messages — data attribute only, no default style change.
@@ -7538,7 +7536,7 @@
 .moments-profile-actions button{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;height:100%;padding:0 8px;border:0;background:transparent;color:#fff;font-size:13px;font-weight:650;letter-spacing:.01em;white-space:nowrap}
 .moments-profile-actions button+button{border-left:1px solid rgba(255,255,255,.48)}.moments-profile-actions button:active{background:rgba(255,255,255,.16)}
 .moments-header-actions{display:flex;align-items:center;gap:8px}.moments-header-actions button{display:grid;place-items:center;height:36px;border:1px solid rgba(255,255,255,.25);border-radius:20px;background:rgba(0,0,0,.48);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:#fff}.moments-header-edit{min-width:53px;padding:0 12px;font-size:13px;font-weight:650}.moments-header-compose{width:36px;padding:0}
-.moments-feed-page:not(.is-scrolled) .page-back-btn{border-radius:50%;background:rgba(0,0,0,.48);color:#fff;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.moments-feed-page .page-back-btn{border-radius:50%;background:rgba(0,0,0,.48);color:#fff;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .moments-featured-section{padding:0;margin:0 0 18px;border:0;background:transparent}
 .moments-featured-scroll{gap:0;padding:0;overflow-x:auto}
 .moments-featured-tile{width:33.333%;height:auto;aspect-ratio:3/4;scroll-snap-align:start}
