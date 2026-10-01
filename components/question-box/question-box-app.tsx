@@ -7,6 +7,7 @@ import { generateBoxAnswers, generateBoxQuestions, generateBoxTopic, translateBo
 import { resolveUserIdentity, USER_IDENTITIES_UPDATED_EVENT } from "@/lib/settings-storage";
 import { emptyBoxState, loadBoxState, newBoxId, saveBoxState, type BoxProfile, type BoxQuestion, type BoxSession, type BoxState, type BoxTopicMode } from "@/lib/question-box-storage";
 import styles from "./question-box-app.module.css";
+import { DEFAULT_ROLE_SOCIAL_SOURCES } from "@/lib/role-social-sources";
 
 type Page = "home" | "box" | "archive";
 type Modal = "user" | "characters" | "delivery" | "participants" | "refresh" | null;
@@ -213,6 +214,8 @@ export function QuestionBoxApp({ onClose, onNotice }: { onClose: () => void; onN
       {editOwner === "user" && profileEditor("user")}
       <button className={styles.accordionHead} onClick={() => { setCharactersExpanded(!charactersExpanded); setEditOwner(null); }}>角色资料 <ChevronDown size={16} className={charactersExpanded ? styles.chevronOpen : ""}/></button>
       {charactersExpanded && (characters.length ? characters.map(c => profileEditor(c.id)) : <p className={styles.hint}>还没有引入角色。</p>)}
+      <h3>角色关联来源</h3><p className={styles.hint}>逐个角色开启，默认关闭；匿名发问者不会知道私人日历。</p>
+      {characters.map(char => { const source = state.socialSourcesByCharacter[char.id] || DEFAULT_ROLE_SOCIAL_SOURCES; return <div key={`source-${char.id}`} className={styles.profileFields}><strong>{char.name}</strong>{([["includeCalendar", "手机日历"], ["includeWeverseSchedule", "WVS 公开动态与日程"]] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={source[key]} onChange={event => setState(current => ({ ...current, socialSourcesByCharacter: { ...current.socialSourcesByCharacter, [char.id]: { ...(current.socialSourcesByCharacter[char.id] || DEFAULT_ROLE_SOCIAL_SOURCES), [key]: event.target.checked } } }))} />{label}</label>)}</div>; })}
       <p className={styles.hint}>这里的头像、昵称和封面只用于提问箱展示，不修改身份或人设。</p><button className={styles.eraseAll} onClick={eraseAll}><Trash2 size={16}/> 清除所有提问箱数据</button>
     </div></aside></div>}
   </div>;

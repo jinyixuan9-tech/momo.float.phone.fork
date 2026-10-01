@@ -86,7 +86,7 @@ export function createVirtualIdentity(state: SmsState, region: string): SmsIdent
 /** A WeChat ID can look like a phone number but is not proof of a real SMS number. */
 export function phoneFromPersona(persona: string): string {
   const match = persona.match(/(?:韩国电话|手机号码|手机(?:号|电话)|联系电话|phone\s*number|전화번호)\s*[：:]\s*(\+?\d[\d\s-]{7,19}\d)/i);
-  return match?.[1]?.trim() ?? "";
+  return match?.[1]?.replace(/\D/g, "") ?? "";
 }
 
 /** Compact shared-memory view. Keep full threads and virtual-number identity in SMS storage. */

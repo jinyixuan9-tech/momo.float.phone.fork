@@ -1,4 +1,4 @@
-import { createOrGetSession, pushChatMessage } from "./chat-storage";
+import { createOrGetSession, loadChatMessages, pushChatMessage, updateMessageMediaData } from "./chat-storage";
 import { loadShoppingState, saveShoppingState } from "./shopping-storage";
 import type { ShoppingAddress, ShoppingOrder, ShoppingShipment, ShoppingState } from "./shopping-types";
 
@@ -34,6 +34,14 @@ export function announceShoppingGift(characterId: string, item: { id: string; ti
   window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
 }
 
+function markChatDelivery(sessionId: string, matches: (data: NonNullable<ReturnType<typeof loadChatMessages>[number]["mediaData"]>) => boolean, deliveredAt: string): void {
+  for (const message of loadChatMessages(sessionId)) {
+    if (message.mediaType === "gift" && message.mediaData && matches(message.mediaData)) {
+      updateMessageMediaData(message.id, { ...message.mediaData, giftDeliveredAt: deliveredAt });
+    }
+  }
+}
+
 export function syncShoppingDeliveries(): void {
   if (typeof window === "undefined") return;
   const state = loadShoppingState();
@@ -42,7 +50,8 @@ export function syncShoppingDeliveries(): void {
   const shipments: ShoppingShipment[] = state.shipments.map(s => {
     if (s.noticeSentAt || new Date(s.deliverAt).getTime() > now) return s;
     const session = createOrGetSession(s.recipientCharacterId);
-    pushChatMessage({ sessionId: session.id, role: "system", content: `物流已签收：${s.recipientName}收到了${s.item.title}。${s.notifyRecipient ? "此前已收到寄送通知。" : "这是此前未通知对方的惊喜礼物。"}`, mediaData: { label: "__shopping_delivery__" } });
+    markChatDelivery(session.id, data => data.shoppingGiftId === s.id, s.deliverAt);
+    pushChatMessage({ sessionId: session.id, role: "system", content: `${s.item.title} 已送达${s.notifyRecipient ? " · 对方此前知道礼物在路上" : " · 对方现在才得知这份惊喜"}`, mediaData: { label: "__shopping_delivery__", shoppingGiftId: s.id } });
     window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
     changed = true;
     return { ...s, noticeSentAt: new Date().toISOString() };
@@ -53,7 +62,8 @@ export function syncShoppingDeliveries(): void {
     const delivered = o.shippingTimeline?.find(e => e.status === "delivered");
     if (!delivered || new Date(delivered.timestamp).getTime() > now) return o;
     const session = createOrGetSession(o.recipientCharacterId);
-    pushChatMessage({ sessionId: session.id, role: "system", content: `物流已签收：${o.recipientName || "收件人"}收到了${o.summary}。${o.notifyRecipient ? "此前已收到寄送通知。" : "这是此前未通知对方的惊喜礼物。"}`, mediaData: { label: "__shopping_delivery__" } });
+    markChatDelivery(session.id, data => data.shoppingOrderId === o.id || String(data.shoppingGiftId || "").startsWith(`${o.id}::`), delivered.timestamp);
+    pushChatMessage({ sessionId: session.id, role: "system", content: `${o.mode === "food" ? "外卖" : "包裹"}已送达 · ${o.summary}${o.notifyRecipient ? " · 对方此前知道配送中" : " · 对方现在才得知这份惊喜"}`, mediaData: { label: "__shopping_delivery__", shoppingOrderId: o.id } });
     window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
     changed = true;
     return { ...o, deliveryNoticeSentAt: new Date().toISOString() };

@@ -15,6 +15,7 @@ import { resolveMediaForUse } from "@/lib/media-resolver";
 import { generateTwitterText, type TwitterGeneratedLine, type TwitterCommentDraft } from "@/lib/twitter-engine";
 import { generateTwitterComments, generateTwitterCommunityText, generateTwitterDelayedReply, generateTwitterStrangerDms, generateTwitterStrangerReply, generateTwitterTrends, generateTwitterWorldBatch, translateTwitterLegacy, type TwitterWorldComment } from "@/lib/twitter-world-engine";
 import { TwitterManagement } from "./twitter-management";
+import { refreshCommentTimes, refreshPostTimes } from "@/lib/social-post-time";
 import {
   createTwitterId, loadTwitterState, saveTwitterState, TWITTER_UPDATED_EVENT,
   type TwitterEngagement, type TwitterMessage, type TwitterPost, type TwitterProfile, type TwitterState,
@@ -273,10 +274,13 @@ export function TwitterApp({ onClose, onNotice }: Props) {
     const accounts = { ...current.accounts };
     const existing = new Set(current.posts.filter(p => p.replyToId === parentId).map(p => p.original.trim()));
     const removed = new Set(current.deletedCommentFingerprints[parentId] || []);
-    const newPosts: TwitterPost[] = entries.filter(entry => !existing.has(entry.original.trim()) && !removed.has(entry.original.trim())).map((entry, index) => {
+    const accepted = entries.filter(entry => !existing.has(entry.original.trim()) && !removed.has(entry.original.trim()));
+    const postAt = current.posts.find(post => post.id === parentId)?.createdAt ?? createdAt;
+    const times = refreshCommentTimes(postAt, accepted.length, createdAt);
+    const newPosts: TwitterPost[] = accepted.map((entry, index) => {
       const commenterId = `npc:${createTwitterId()}`;
       accounts[commenterId] = { name: entry.name || "路人", handle: accountHandle(entry.handle || entry.name), bio: "", visibility: "public", avatarUrl: STRANGER_AVATAR };
-      return { id: createTwitterId(), authorId: commenterId, original: entry.original, translated: entry.translated, replyToId: parentId, createdAt: createdAt + index };
+      return { id: createTwitterId(), authorId: commenterId, original: entry.original, translated: entry.translated, replyToId: parentId, createdAt: times[index] };
     });
     return { ...current, accounts, posts: [...current.posts.map(p => p.id === parentId ? { ...p, commentsGenerated: true, engagement: { ...(p.engagement || engagementFor(p.id)), comments: Math.max(p.engagement?.comments || 0, current.posts.filter(c => c.replyToId === parentId).length + newPosts.length) } } : p), ...newPosts] };
   };
@@ -310,11 +314,11 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       const batch: Awaited<ReturnType<typeof generateTwitterWorldBatch>> = { posts: [], trends: [] };
       for (const segment of [{ count: desired - specialCount, sensitive: false }, { count: specialCount, sensitive: true }]) {
         if (!segment.count) continue;
-        const part = await generateTwitterWorldBatch(stateRef.current, hint, Math.min(5, segment.count), segment.sensitive);
+        const part = await generateTwitterWorldBatch(stateRef.current, hint, Math.min(5, segment.count), segment.sensitive, targetCommunity ? [...targetCommunity.characterIds, ...(targetCommunity.includeUserPersona ? ["user"] : [])] : []);
         for (let attempt = 0; attempt < 3 && part.posts.length < segment.count; attempt++) {
           try {
             const previous = part.posts.map(post => post.original).slice(-10);
-            const extra = await generateTwitterWorldBatch(stateRef.current, `${hint}。避开已生成的内容：${previous.join("；").slice(0, 800)}`, Math.min(5, segment.count - part.posts.length), segment.sensitive);
+            const extra = await generateTwitterWorldBatch(stateRef.current, `${hint}。避开已生成的内容：${previous.join("；").slice(0, 800)}`, Math.min(5, segment.count - part.posts.length), segment.sensitive, targetCommunity ? [...targetCommunity.characterIds, ...(targetCommunity.includeUserPersona ? ["user"] : [])] : []);
             const seen = new Set(part.posts.map(post => post.original.trim()));
             for (const post of extra.posts) if (!seen.has(post.original.trim())) { part.posts.push(post); seen.add(post.original.trim()); }
           } catch { break; }
@@ -329,6 +333,7 @@ export function TwitterApp({ onClose, onNotice }: Props) {
       const generatedIds: string[] = [];
       commit(current => {
         const now = Date.now();
+        const postTimes = refreshPostTimes(batch.posts.length, now);
         const trends = targetCommunity ? [] : batch.trends.map(t => ({ id: createTwitterId(), label: t.label, scope: t.scope, volume: Math.round(90 + stableFraction(t.label) * 9500), createdAt: now }));
         let next: TwitterState = { ...current };
         batch.posts.forEach((entry, index) => {
@@ -337,9 +342,9 @@ export function TwitterApp({ onClose, onNotice }: Props) {
           const authorId = `npc:${createTwitterId()}`;
           next = { ...next, accounts: { ...next.accounts, [authorId]: { name: entry.name, handle: accountHandle(entry.handle || entry.name), bio: "", followers: Math.floor(stableFraction(id) * 600), visibility: "public", avatarUrl: STRANGER_AVATAR } } };
           const trend = current.trends.find(t => t.label === topicHint) || trends.find(t => t.label === entry.trend) || current.trends.find(t => t.label === entry.trend);
-          const post: TwitterPost = { id, authorId, original: entry.original, translated: entry.translated, imageDescription: entry.imageDescription || undefined, sensitive: entry.sensitive || undefined, trendId: targetCommunity ? undefined : trend?.id, communityId: targetCommunity?.id, createdAt: now + index, engagement: engagementFor(id, next.accounts[authorId].followers, entry.comments.length), commentsGenerated: true };
+          const post: TwitterPost = { id, authorId, original: entry.original, translated: entry.translated, imageDescription: entry.imageDescription || undefined, sensitive: entry.sensitive || undefined, trendId: targetCommunity ? undefined : trend?.id, communityId: targetCommunity?.id, createdAt: postTimes[index], engagement: engagementFor(id, next.accounts[authorId].followers, entry.comments.length), commentsGenerated: true };
           next = { ...next, posts: [...next.posts, post] };
-          next = addComments(next, id, entry.comments, now + index + 1);
+          next = addComments(next, id, entry.comments, now);
         });
         return next;
       });

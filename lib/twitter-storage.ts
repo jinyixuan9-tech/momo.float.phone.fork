@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import type { RoleSocialSources } from "./role-social-sources";
 
 export const TWITTER_STORAGE_KEY = "ai_phone_twitter_v1";
 export const TWITTER_UPDATED_EVENT = "twitter-updated";
@@ -97,6 +98,7 @@ export type TwitterState = {
   regionName: string;
   publicWorldContext: string;
   worldBookIds: string[]; // X-only selection; never inherited from global bindings.
+  socialSourcesByCharacter: Record<string, RoleSocialSources>;
   sensitiveTopics: {
     frequency: 0 | 30 | 50 | 70 | 100;
     description: string;
@@ -120,7 +122,7 @@ function blankState(): TwitterState {
     posts: [], conversations: [], notices: [], following: [],
     accounts: {}, actions: [], pendingReplies: [], deletedCommentFingerprints: {}, communityCharacters: {}, importedCharacterIds: [], communities: [], trends: [], regionName: "", publicWorldContext: DEFAULT_TWITTER_WORLD,
     audienceLocales: ["日语（日本）", "韩语（韩国）", "英语国家"], alternateMediaPhotoIds: {},
-    worldBookIds: [], sensitiveTopics: { frequency: 0, description: "", worldBookIds: [], coverRef: "" },
+    worldBookIds: [], socialSourcesByCharacter: {}, sensitiveTopics: { frequency: 0, description: "", worldBookIds: [], coverRef: "" },
   };
 }
 
@@ -171,6 +173,7 @@ export function loadTwitterState(): TwitterState {
       trends: Array.isArray(row.trends) ? row.trends.filter(t => t && typeof t.id === "string" && typeof t.label === "string") : [],
       regionName: typeof row.regionName === "string" ? row.regionName : "",
       publicWorldContext: typeof row.publicWorldContext === "string" && row.publicWorldContext.trim() ? row.publicWorldContext : DEFAULT_TWITTER_WORLD,
+      socialSourcesByCharacter: row.socialSourcesByCharacter && typeof row.socialSourcesByCharacter === "object" && !Array.isArray(row.socialSourcesByCharacter) ? row.socialSourcesByCharacter : {},
       worldBookIds: Array.isArray(row.worldBookIds) ? row.worldBookIds.filter((id): id is string => typeof id === "string") : [],
       sensitiveTopics: {
         frequency: ([0, 30, 50, 70, 100] as number[]).includes(row.sensitiveTopics?.frequency as number) ? row.sensitiveTopics!.frequency : 0,

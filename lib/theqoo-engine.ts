@@ -4,6 +4,7 @@ import { loadOwnerCalendarPlans } from "./calendar-storage";
 import { loadCharacters } from "./character-storage";
 import { loadWeverseState } from "./weverse-storage";
 import type { TheqooComment, TheqooPost } from "./theqoo-storage";
+import { refreshCommentTimes, refreshPostTimes } from "./social-post-time";
 
 const pickText = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
 
@@ -147,7 +148,7 @@ export async function generateTheqooPosts(
       let parsed: { posts?: unknown[] };
       try {
         const raw = await sendLLMRequest(config, preset, [
-          { role: "system", content: `${prompt}\n本批只生成 ${needed} 篇帖子，每篇 10 条评论；这是整次刷新中第 ${batch + 1} 批。${plan.hot ? "这一批全部是 HOT 专属帖，category 必须为 HOT。话题要有自然热议感，不能照搬普通新闻帖。" : "这一批只生成普通板块帖子，category 不得为 HOT；尽量混合不同板块。"}${scheduleInstruction}\n以下主题已有帖子，不能换标题重写同一件事：${recentTopics.join("；") || "暂无"}。同一批内也不能重复事件、人物话题或生活故事。` },
+          { role: "system", content: `${prompt}\n本批只生成 ${needed} 篇帖子，每篇 10 条评论；这是整次刷新中第 ${batch + 1} 批。帖子可能发布于今天、昨天或前天；叙述事件时请符合当日时间线，评论可发生在发帖之后直到本次刷新。${plan.hot ? "这一批全部是 HOT 专属帖，category 必须为 HOT。话题要有自然热议感，不能照搬普通新闻帖。" : "这一批只生成普通板块帖子，category 不得为 HOT；尽量混合不同板块。"}${scheduleInstruction}\n以下主题已有帖子，不能换标题重写同一件事：${recentTopics.join("；") || "暂无"}。同一批内也不能重复事件、人物话题或生活故事。` },
           { role: "user", content: "生成这一批，只输出 JSON。" },
         ], [], undefined, { appId: "theqoo", appTags: ["theqoo", "forum", "anonymous"], skipOutputRegex: true });
         const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
@@ -175,6 +176,7 @@ export async function generateTheqooPosts(
   if (items.filter(item => item.category === "HOT").length < 2) throw new Error("HOT 帖子不足 2 篇，请重新刷新。");
 
   const now = Date.now();
+  const postTimes = refreshPostTimes(items.length, now);
   const posts = items.flatMap((item, index) => {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
@@ -198,6 +200,8 @@ export async function generateTheqooPosts(
     }
     if (!titleOriginal || !bodyOriginal) return [];
 
+    const postAt = postTimes[index];
+    const commentTimes = refreshCommentTimes(postAt, 10, now);
     const comments = Array.isArray(row.comments) ? row.comments.slice(0, 10).flatMap((comment, cIndex) => {
       if (!comment || typeof comment !== "object") return [];
       const c = comment as Record<string, unknown>;
@@ -208,7 +212,7 @@ export async function generateTheqooPosts(
         id: `tqc_${now}_${index}_${cIndex}`,
         original,
         translated,
-        createdAt: now - cIndex * 1000 * 60,
+        createdAt: commentTimes[cIndex],
         authoredByOP: !noOP && c.isOP === true,
       }];
     }) : [];
@@ -234,7 +238,7 @@ export async function generateTheqooPosts(
       titleTranslated,
       bodyOriginal,
       bodyTranslated,
-      createdAt: now - index * 1000 * 60 * 5,
+      createdAt: postAt,
       views: Math.max(category === "HOT" ? 12000 : 20, Number(row.views) || Math.floor(1000 + Math.random() * 30000)),
       comments,
       images,

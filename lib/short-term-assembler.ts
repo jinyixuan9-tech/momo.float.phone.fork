@@ -249,9 +249,13 @@ export function loadNativeTimeline(
                 }
                 else if (msg.mediaType === "gift") {
                     const giftName = msg.mediaData?.giftName || msg.mediaData?.label || "礼物";
-                    content = msg.mediaData?.recipientName
-                        ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
-                        : `[礼物:${giftName}]`;
+                    const shopping = Boolean(msg.mediaData?.shoppingGiftId || msg.mediaData?.shoppingOrderId);
+                    const food = msg.mediaData?.label === "外卖卡";
+                    content = shopping
+                        ? `[${food ? "外卖" : "礼物"}${msg.mediaData?.giftDeliveredAt ? "已送达" : "寄送通知，尚未收到"}:${giftName}:${msg.mediaData?.recipientName || "对方"}]`
+                        : msg.mediaData?.recipientName
+                            ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
+                            : `[礼物:${giftName}]`;
                 }
                 else if (msg.mediaType === "payment_request") content = formatShoppingPaymentRequestHistory({
                     amount: msg.mediaData?.amount,
@@ -352,9 +356,13 @@ export function loadNativeTimeline(
                 }
                 else if (msg.mediaType === "gift") {
                     const giftName = msg.mediaData?.giftName || msg.mediaData?.label || "礼物";
-                    content = msg.mediaData?.recipientName
-                        ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
-                        : `[礼物:${giftName}]`;
+                    const shopping = Boolean(msg.mediaData?.shoppingGiftId || msg.mediaData?.shoppingOrderId);
+                    const food = msg.mediaData?.label === "外卖卡";
+                    content = shopping
+                        ? `[${food ? "外卖" : "礼物"}${msg.mediaData?.giftDeliveredAt ? "已送达" : "寄送通知，尚未收到"}:${giftName}:${msg.mediaData?.recipientName || "对方"}]`
+                        : msg.mediaData?.recipientName
+                            ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
+                            : `[礼物:${giftName}]`;
                 }
                 else if (msg.mediaType === "payment_request") content = formatShoppingPaymentRequestHistory({
                     amount: msg.mediaData?.amount,

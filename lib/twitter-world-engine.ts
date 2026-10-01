@@ -2,6 +2,7 @@ import { sendLLMRequest } from "./chat-engine";
 import { loadApiConfigs, loadBindingConfig, loadPresets, resolveBinding } from "./settings-storage";
 import { twitterClueGuidance, twitterPublicAddress, type TwitterState, type TwitterPost, type TwitterCommunityCharacter } from "./twitter-storage";
 import { twitterWorldBookText } from "./twitter-worldbooks";
+import { roleSocialContext } from "./role-social-sources";
 
 export type TwitterWorldComment = { name: string; handle: string; original: string; translated?: string };
 export type TwitterWorldPost = { name: string; handle: string; original: string; translated?: string; trend?: string; imageDescription?: string; sensitive?: boolean; comments: TwitterWorldComment[] };
@@ -39,13 +40,14 @@ async function ask(instruction: string): Promise<Record<string, unknown>> {
 
 const publicWorld = (state: TwitterState, max = 2200) => `${state.publicWorldContext.trim()}\nX 专属世界书：${twitterWorldBookText(state, false, max)}`.slice(0, max);
 
-export async function generateTwitterWorldBatch(state: TwitterState, hint: string, desiredPosts = 5, sensitive = false): Promise<TwitterWorldBatch> {
+export async function generateTwitterWorldBatch(state: TwitterState, hint: string, desiredPosts = 5, sensitive = false, linkedCharacterIds: string[] = []): Promise<TwitterWorldBatch> {
   const context = publicWorld(state, 2300);
   const region = state.regionName.trim().slice(0, 70);
   const existing = state.trends.slice(-8).map(t => t.label).join("、");
   const locales = state.audienceLocales?.length ? state.audienceLocales.join("、") : "中文";
+  const linkedSources = linkedCharacterIds.slice(0, 3).map(id => roleSocialContext(id, state.socialSourcesByCharacter[id])).filter(Boolean).join("；").slice(0, 2000);
   const topicRule = sensitive ? `本批内容采用用户单独开启的话题设定：${state.sensitiveTopics.description.slice(0, 1400)}。这一话题所选世界书：${twitterWorldBookText(state, true, 1900) || "无"}。每条帖子都需提供 imageDescription，作为点开遮罩后的文字图片内容。` : "";
-  const request = `你为一个纯虚构的 X 世界生成生活化动态和虚构趋势。只采用以下明确公开的背景：${context || "普通现代城市的虚构日常"}。${topicRule}用户偏好或搜索目标：${hint.slice(0, 450) || "生活、校园、情感、游戏、都市传闻、艺人日常，内容混合"}。账号语言地区从${locales}中尽量均衡选用，如果六个地区全选则均匀分配。现有趋势：${existing || "无"}。趋势名称必须用中文；不要虚构实时现实新闻、外链或联系方式；除用户明确关联的角色外，不写现实艺人的实际行程；不要凭空确立影响世界观的大事件，不要透露私下关系、角色小号身份。输出 2 至 3 个趋势以及恰好 ${desiredPosts} 条不同虚构路人账号的帖子，每条附 5 至 10 条短评论；搜索或指定话题时每条必须相关。original 是作者使用的语言；外语需准确附简体中文译文；#标签始终沿用原文不翻译。如路人想发照片，用 imageDescription 写出照片画面供文字图片卡片显示；不发图则留空，禁止直接请求生图。JSON: {"trends":[{"label":"中文趋势","scope":"world"}],"posts":[{"name":"昵称","handle":"英文账号","original":"帖子","translated":"中文译文","trend":"趋势名称或空字符串","imageDescription":"可留空的图片描述","comments":[{"name":"昵称","handle":"英文账号","original":"评论","translated":"中文译文"}]}]}。`;
+  const request = `帖子可以发生在今天、昨天或前天；不要把后来才发生的事件写进更早的帖子，评论时间由应用按发帖后到刷新时分配。你为一个纯虚构的 X 世界生成生活化动态和虚构趋势。只采用以下明确公开的背景：${context || "普通现代城市的虚构日常"}。${linkedSources ? `仅在本次关联社群中可参考：${linkedSources}。日历属于私人参考，路人只可谈已公开的活动和 WVS 内容；不要把私事写成路人消息。` : ""}${topicRule}用户偏好或搜索目标：${hint.slice(0, 450) || "生活、校园、情感、游戏、都市传闻、艺人日常，内容混合"}。账号语言地区从${locales}中尽量均衡选用，如果六个地区全选则均匀分配。现有趋势：${existing || "无"}。趋势名称必须用中文；不要虚构实时现实新闻、外链或联系方式；除用户明确关联的角色外，不写现实艺人的实际行程；不要凭空确立影响世界观的大事件，不要透露私下关系、角色小号身份。输出 2 至 3 个趋势以及恰好 ${desiredPosts} 条不同虚构路人账号的帖子，每条附 5 至 10 条短评论；搜索或指定话题时每条必须相关。original 是作者使用的语言；外语需准确附简体中文译文；#标签始终沿用原文不翻译。如路人想发照片，用 imageDescription 写出照片画面供文字图片卡片显示；不发图则留空，禁止直接请求生图。JSON: {"trends":[{"label":"中文趋势","scope":"world"}],"posts":[{"name":"昵称","handle":"英文账号","original":"帖子","translated":"中文译文","trend":"趋势名称或空字符串","imageDescription":"可留空的图片描述","comments":[{"name":"昵称","handle":"英文账号","original":"评论","translated":"中文译文"}]}]}。`;
   const row = await ask(request);
   const proposedTrends = Array.isArray(row.trends) ? row.trends.slice(0, 4).flatMap(item => {
     const trend = item && typeof item === "object" ? item as Record<string, unknown> : {};

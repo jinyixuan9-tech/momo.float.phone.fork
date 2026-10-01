@@ -1194,6 +1194,7 @@ function CharAvatarFallbackInline({ name }: { name: string }) {
 function GiftBubble({ msg }: { msg: ChatMessage }) {
     const d = msg.mediaData;
     const isFood = d?.label === "外卖卡";
+    const isShoppingDelivery = Boolean(d?.shoppingGiftId || d?.shoppingOrderId);
     const title = d?.giftName || d?.label || "礼物";
     const recipient = d?.recipientName;
     const merchant = d?.giftMerchantLabel || "购物订单";
@@ -1219,7 +1220,7 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                             <div className="chat-gift-card-source ts-12 text-[var(--c-text)] mt-1 truncate">{merchant}</div>
                         </div>
                         <div className="chat-gift-card-status ts-11 font-semibold px-2 py-1 shrink-0">
-                            已送出
+                            {isShoppingDelivery ? d?.giftDeliveredAt ? "已送达" : "配送中" : "已送出"}
                         </div>
                     </div>
 
@@ -1241,6 +1242,7 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                         <GiftInfoCell label="编号" value={`G-${serial}`} />
                         <GiftInfoCell label="来源" value={merchant} />
                         <GiftInfoCell label={isFood ? "订单金额" : "礼物值"} value={d?.giftPriceLabel || "心意礼物"} />
+                        {isShoppingDelivery && <GiftInfoCell label="收货状态" value={d?.giftDeliveredAt ? "已送达" : "尚未收到 · 等待配送"} />}
                         {sentLabel && <GiftInfoCell label="送出" value={sentLabel} />}
                     </div>
 

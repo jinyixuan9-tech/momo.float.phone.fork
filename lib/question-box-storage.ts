@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import type { RoleSocialSources } from "./role-social-sources";
 
 export type BoxQuestion = {
   id: string;
@@ -24,20 +25,20 @@ export type BoxSession = {
   questions: BoxQuestion[];
   profileSnapshot: BoxProfile;
 };
-export type BoxState = { sessions: BoxSession[]; profiles: Record<string, BoxProfile> };
+export type BoxState = { sessions: BoxSession[]; profiles: Record<string, BoxProfile>; socialSourcesByCharacter: Record<string, RoleSocialSources> };
 const KEY = "ai_phone_question_box_v2";
 const OLD_KEY = "ai_phone_question_box_v1";
 registerKvMigration(KEY);
 registerKvMigration(OLD_KEY);
 export const newBoxId = () => `qb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-export const emptyBoxState = (): BoxState => ({ sessions: [], profiles: {} });
+export const emptyBoxState = (): BoxState => ({ sessions: [], profiles: {}, socialSourcesByCharacter: {} });
 export function loadBoxState(): BoxState {
   if (typeof window === "undefined") return emptyBoxState();
   try {
     const raw = kvGet(KEY);
     if (raw) {
       const row = JSON.parse(raw) as Partial<BoxState>;
-      return { sessions: Array.isArray(row.sessions) ? row.sessions : [], profiles: row.profiles && typeof row.profiles === "object" ? row.profiles : {} };
+      return { sessions: Array.isArray(row.sessions) ? row.sessions : [], profiles: row.profiles && typeof row.profiles === "object" ? row.profiles : {}, socialSourcesByCharacter: row.socialSourcesByCharacter && typeof row.socialSourcesByCharacter === "object" && !Array.isArray(row.socialSourcesByCharacter) ? row.socialSourcesByCharacter : {} };
     }
     // Earlier preview versions grouped all owners into one session. Preserve their questions in owner-specific archives.
     const old = JSON.parse(kvGet(OLD_KEY) || "null") as { sessions?: Array<{ id: string; startsAt: number; endsAt: number; participantIds: string[]; refreshCount: number; questions: BoxQuestion[] }> } | null;
@@ -48,7 +49,7 @@ export function loadBoxState(): BoxState {
       participantIds: ownerId === "user" ? row.participantIds.filter(id => id !== "user") : undefined,
       questions: (row.questions || []).filter(q => q.recipientId === ownerId).map(q => ({ ...q, senderName: "匿名" })), profileSnapshot: {},
     })));
-    return { sessions, profiles: {} };
+    return { sessions, profiles: {}, socialSourcesByCharacter: {} };
   } catch { return emptyBoxState(); }
 }
 export function saveBoxState(state: BoxState) { if (typeof window !== "undefined") kvSet(KEY, JSON.stringify(state)); }

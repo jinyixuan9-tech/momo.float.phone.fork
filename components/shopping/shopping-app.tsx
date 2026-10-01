@@ -1255,7 +1255,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     persist(current => ({ ...current, orders: [order, ...current.orders], foodCartItems: current.foodCartItems.filter(item => (item.currency || "CNY") !== foodCurrency) }));
     if (recipientId && notifyRecipient) {
       const session = createOrGetSession(recipientId);
-      pushChatMessage({ sessionId: session.id, role: "user", content: "", mediaType: "gift", mediaData: { giftName: `外卖 · ${order.summary}`, label: "外卖卡", giftMerchantLabel: order.merchantLabel, giftPriceLabel: order.totalLabel, giftPreviewIcon: order.items[0]?.previewIcon || "🥡", recipientId, recipientName: order.recipientName, shoppingOrderId: order.id } });
+      pushChatMessage({ sessionId: session.id, role: "user", content: "", mediaType: "gift", mediaData: { giftName: `外卖 · ${order.summary}`, label: "外卖卡", giftMerchantLabel: order.merchantLabel, giftPriceLabel: order.totalLabel, giftPreviewIcon: order.items[0]?.previewIcon || "🥡", giftSentAt: new Date().toISOString(), recipientId, recipientName: order.recipientName, shoppingOrderId: order.id } });
       window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
     }
     setFoodCheckoutOpen(false); setPaymentError(null); setOrdersMode("food"); setSelectedTab("orders"); setSelectedOrderId(order.id);

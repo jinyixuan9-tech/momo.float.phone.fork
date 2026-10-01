@@ -2,7 +2,8 @@ import { sendLLMRequest } from "./chat-engine";
 import { loadCharacters } from "./character-storage";
 import { loadApiConfigs, loadBindingConfig, loadPresets, loadWorldBooks, resolveBinding, resolveUserIdentity } from "./settings-storage";
 import type { BoxQuestion, BoxSession } from "./question-box-storage";
-import { newBoxId } from "./question-box-storage";
+import { newBoxId, loadBoxState } from "./question-box-storage";
+import { roleSocialContext } from "./role-social-sources";
 import { prepareShortTermContext } from "./short-term-assembler";
 import { loadMemoryConfig } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
@@ -27,13 +28,14 @@ async function ask(prompt: string, characterId?: string) {
     retrieveMemoriesForPrompt(characterId, shortTerm?.wbActivationContext || prompt, memoryConfig).catch(() => []),
     retrieveCoreMemoriesForPrompt(characterId, memoryConfig).catch(() => []),
   ]) : [[], []];
+  const linkedSources = characterId ? roleSocialContext(characterId, loadBoxState().socialSourcesByCharacter[characterId]) : "";
   const context = [
     ...(shortTerm?.recentBlocks || []).filter(block => block.content).map(block => block.content),
     core.length ? formatCoreMemories(core) : "",
     longTerm.length ? formatLongTermMemories(longTerm) : "",
   ].filter(Boolean).join("\n").slice(-11000);
   const output = await sendLLMRequest(api, preset, [
-    { role: "system", content: `${prompt}\n相关世界书：${world || "无"}。${context ? `\n角色近期经历及记忆（仅供理解角色，不能用来识破匿名发问者）：\n${context}` : ""}\n只输出 JSON，不能输出 Markdown。` },
+    { role: "system", content: `${prompt}\n相关世界书：${world || "无"}。${linkedSources ? `\n角色本人关联的日程与 WVS：${linkedSources}。日历仅供本人理解，匿名提问者不能据此得知隐私；公开回答不得泄漏私人安排。` : ""}${context ? `\n角色近期经历及记忆（仅供理解角色，不能用来识破匿名发问者）：\n${context}` : ""}\n只输出 JSON，不能输出 Markdown。` },
     { role: "user", content: "生成这次内容。" },
   ], [], undefined, { appId: "question_box", appTags: ["question_box", "questions"], skipOutputRegex: true });
   return parse(output);
@@ -67,7 +69,8 @@ export async function generateBoxQuestions(session: BoxSession, count: number, e
   const roster = candidates.map(row => {
     const recent = prepareShortTermContext(row.id, "question_box", { tokenBudgetOverride: 300 }).recentBlocks
       .filter(block => block.content).map(block => block.content).join(" ").slice(-850);
-    return `${row.id}=${row.name}：${row.persona.slice(0, 450)}${recent ? `。最近的经历和聊天：${recent}` : ""}`;
+    const linked = roleSocialContext(row.id, loadBoxState().socialSourcesByCharacter[row.id]);
+    return `${row.id}=${row.name}：${row.persona.slice(0, 450)}${recent ? `。最近的经历和聊天：${recent}` : ""}${linked ? `。本人关联日程与 WVS：${linked}。私人日历只供本人参考，不能让别的发问者知情` : ""}`;
   }).join("\n");
   const previous = session.questions.slice(-14).map(row => row.text).join("；");
   const topic = session.topic ? `本期主题「${session.topic}」，问题应围绕主题但角度多样。` : "没有指定主题，问题题材自然多样。";

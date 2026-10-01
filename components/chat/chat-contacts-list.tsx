@@ -8,6 +8,7 @@ import { getMomentsScreenName, getMomentsSignature } from "@/lib/moments-profile
 import { Search, UserRoundPlus, Settings, ChevronUp } from "lucide-react";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
+import { getCharacterPhoneNumber } from "@/lib/phone-storage";
 import { Character } from "@/lib/character-types";
 import { loadMomentPosts } from "@/lib/moments-storage";
 import {
@@ -117,7 +118,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
         if (!found) return;
         addFromCardRef.current = true;
         setIsAddFriendOpen(true);
-        setAddQuery(found.wechatID || found.id);
+        setAddQuery(getCharacterPhoneNumber(found.id) || found.wechatID || found.id);
         setAddResult(found);
         setIsSendingAdd(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -508,7 +509,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                                     <button
                                         className="menu-item"
                                         onClick={() => {
-                                            const found = chars.find(c => c.wechatID === addQuery.trim() || c.id === addQuery.trim());
+                                            const found = chars.find(c => getCharacterPhoneNumber(c.id) === addQuery.trim() || c.wechatID === addQuery.trim() || c.id === addQuery.trim());
                                             setAddResult(found || null);
                                         }}
                                     >
@@ -566,7 +567,7 @@ export function ChatContactsList({ onCloseApp, onSelectSession, onSelectMascot, 
                                     </div>
                                     <div className="menu-label-group">
                                         <div className="ts-18 font-bold text-[var(--c-text-title)] mb-1">{addResult.name || "UNNAMED"}</div>
-                                        <div className="menu-desc">微信号: {addResult.wechatID || "N/A"}</div>
+                                        <div className="menu-desc">手机号: {getCharacterPhoneNumber(addResult.id) || "N/A"}</div>
                                         <div className="menu-desc">个性签名: {addResult.persona ? addResult.persona.slice(0, 30) + (addResult.persona.length > 30 ? "..." : "") : "暂无"}</div>
                                     </div>
                                 </div>

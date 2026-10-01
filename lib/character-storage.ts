@@ -130,7 +130,7 @@ export function createCharacter(
   return {
     ...data,
     id: `char_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    wechatID: data.wechatID || generateWechatID(),
+    wechatID: data.wechatID?.replace(/\D/g, "") || generateWechatID(),
     tags: data.tags || [],
     createdAt: now,
     updatedAt: now,
@@ -212,7 +212,7 @@ export function parseCharacterFromJson(
       avatar: validAvatar(src.avatar),
       personality: typeof src.personality === "string" && src.personality.trim() ? src.personality : undefined,
       tags: Array.isArray(src.tags) ? src.tags.map(String) : [],
-      wechatID: typeof src.wechatID === "string" && src.wechatID.trim() ? src.wechatID : undefined,
+      wechatID: typeof src.wechatID === "string" && src.wechatID.trim() ? src.wechatID.replace(/\D/g, "") : undefined,
       timeZone: normalizeTimeZone(src.timeZone ?? src.timezone ?? src.time_zone),
       polaroidStyle,
       polaroidSize,

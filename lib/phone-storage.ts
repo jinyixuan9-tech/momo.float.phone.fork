@@ -1,6 +1,6 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { loadSms, saveSms, phoneFromPersona } from "./sms-storage";
-import { loadCharacters } from "./character-storage";
+import { loadCharacters, saveCharacters } from "./character-storage";
 
 export const PHONE_KEY = "ai_phone_native_phone_v1";
 export const PHONE_EVENT = "phone-updated";
@@ -61,9 +61,9 @@ export function setUserPhoneNumber(number: string): void {
 export function getCharacterPhoneNumber(characterId: string): string {
   const sms = loadSms();
   const existing = sms.characterNumbers[characterId];
-  if (existing) return existing;
+  if (existing) return existing.replace(/\D/g, "");
   const character = loadCharacters().find(c => c.id === characterId);
-  const fromPersona = character ? phoneFromPersona(character.persona || "") : "";
+  const fromPersona = (character?.wechatID || (character ? phoneFromPersona(character.persona || "") : "")).replace(/\D/g, "");
   if (fromPersona) {
     sms.characterNumbers[characterId] = fromPersona;
     saveSms(sms);
@@ -72,9 +72,14 @@ export function getCharacterPhoneNumber(characterId: string): string {
 }
 export function setCharacterPhoneNumber(characterId: string, number: string): void {
   const sms = loadSms();
-  sms.characterNumbers[characterId] = number.trim();
+  const digits = number.replace(/\D/g, "");
+  sms.characterNumbers[characterId] = digits;
   sms.threads.filter(thread => thread.characterId === characterId).forEach(thread => { thread.characterNumber = sms.characterNumbers[characterId]; });
   saveSms(sms);
+  const characters = loadCharacters();
+  if (digits && characters.some(character => character.id === characterId && character.wechatID !== digits)) {
+    saveCharacters(characters.map(character => character.id === characterId ? { ...character, wechatID: digits } : character));
+  }
   if (typeof window !== "undefined") window.dispatchEvent(new Event(PHONE_EVENT));
 }
 export function appendPhoneCall(record: PhoneCallRecord): void {

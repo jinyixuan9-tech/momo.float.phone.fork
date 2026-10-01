@@ -1511,6 +1511,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     useEffect(() => {
         syncShoppingDeliveries();
+        const timer = window.setInterval(syncShoppingDeliveries, 30_000);
+        return () => window.clearInterval(timer);
     }, [session.id]);
 
     const closeContextMenu = () => {
@@ -5419,7 +5421,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const seen = new Set<string>();
         return displayMessages.filter(m => {
             if (isReadingDiscussMessage(m)) return false;
-            if (m.role === "system" && m.mediaData?.label === "__shopping_delivery__") return false;
             if (seen.has(m.id)) return false;
             seen.add(m.id);
             return true;

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Character } from "@/lib/character-types";
 import {
   createCharacter,
+  generateWechatID,
   exportCharacterAsJson,
   exportCharacterAsPng,
   loadCharacters,
@@ -16,6 +17,8 @@ import {
 
   CHAR_BLOCKED_FIELDS,
 } from "@/lib/character-storage";
+import { getCharacterPhoneNumber, setCharacterPhoneNumber } from "@/lib/phone-storage";
+import { phoneFromPersona } from "@/lib/sms-storage";
 import { generateBriefPersonaText, isBriefPersonaStale } from "@/lib/brief-persona";
 import { generateSupportingCharacters, materializeSupportingCharacter, type GeneratedSupportingCharacter } from "@/lib/npc-generator";
 import {
@@ -318,12 +321,14 @@ export function PhoneCharacterApp({ onClose, onNotice }: PhoneCharacterAppProps)
                   updatedAt: new Date().toISOString(),
                 };
                 updateChars(characters.map((c) => (c.id === existing.id ? updated : c)));
+                setCharacterPhoneNumber(existing.id, data.wechatID || "");
                 setView({ type: "detail", id: existing.id, isEditing: false });
                 onNotice(createVersion
                   ? `已备份旧卡，当前为 V${nextVersion}`
                   : `已覆盖旧版本，当前为 V${nextVersion}`);
               } else {
                 const newChar = createCharacter(data);
+                setCharacterPhoneNumber(newChar.id, newChar.wechatID || "");
                 newChar.polaroidStyle = pendingPolaroidStyle;
                 setPendingPlacementChar(newChar);
                 setView({ type: "list", id: null, isEditing: false });
@@ -1875,6 +1880,7 @@ function CharArchiveView({
   const [deleteVersionTarget, setDeleteVersionTarget] = useState<CharacterVersion | null>(null);
   const [name, setName] = useState(char.name || "");
   const [persona, setPersona] = useState(char.persona || "");
+  const [phoneNumber, setPhoneNumber] = useState(getCharacterPhoneNumber(char.id) || char.wechatID || "");
   const [personality, setPersonality] = useState(char.personality || "");
   const [briefPersona, setBriefPersona] = useState(char.briefPersona || "");
   const [briefBusy, setBriefBusy] = useState(false);
@@ -1995,6 +2001,7 @@ function CharArchiveView({
     if (!isEditing) {
       setName(char.name || "");
       setPersona(char.persona || "");
+      setPhoneNumber(getCharacterPhoneNumber(char.id) || char.wechatID || "");
       setPersonality(char.personality || "");
       setBriefPersona(char.briefPersona || "");
       setBriefError("");
@@ -2059,6 +2066,7 @@ function CharArchiveView({
       onSave({
         name: name.trim() || char.name || "UNNAMED",
         persona,
+        wechatID: phoneNumber.replace(/\D/g, "") || generateWechatID(),
         personality: personality.trim() || undefined,
         briefPersona: trimmedBrief || undefined,
         // 简介变动才刷新时间戳；未动则保留原值（供「设定已更新」过期提示判断）
@@ -2314,10 +2322,8 @@ function CharArchiveView({
                 <span className="char-archive-val">{isEditing ? "EDITING" : "ACTIVE"}</span>
               </div>
               <div className="char-archive-cell" style={{ flex: 1.5 }}>
-                <span className="char-archive-label">WeChat</span>
-                <span className="char-archive-val select-text cursor-text tracking-[-0.5px]">
-                  {char.wechatID || "N/A"}
-                </span>
+                <span className="char-archive-label">手机号</span>
+                {isEditing ? <div className="flex items-center gap-1"><input className="char-archive-input min-w-0 w-full" inputMode="numeric" pattern="[0-9]*" placeholder="只输入数字" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value.replace(/\D/g, ""))}/><button type="button" title="从人设读取或随机刷新" onClick={() => setPhoneNumber(phoneFromPersona(persona).replace(/\D/g, "") || generateWechatID())}>刷新</button></div> : <span className="char-archive-val select-text cursor-text tracking-[-0.5px]">{getCharacterPhoneNumber(char.id) || char.wechatID || "N/A"}</span>}
               </div>
               <div className="char-archive-cell" style={{ flex: 1.1 }}>
                 <span className="char-archive-label">Update</span>
