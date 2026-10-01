@@ -1909,7 +1909,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     }, [session.id]);
 
     // The small “1” is transient display state, never saved into chat history.
-    // Each assistant response batch shares one key; a user send uses its own id.
+    // Each assistant response batch shares one key. User messages show their
+    // temporary unread mark only on the last visible message before a reply.
     useEffect(() => {
         if (session.isGroup) return;
         const seen = seenKktMessageIdsRef.current;
@@ -6162,7 +6163,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         ? (!prevVisibleMsg || new Date(msg.createdAt).getTime() - new Date(prevVisibleMsg.createdAt).getTime() > 60_000)
                         : shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null);
                     const isConsecutive = prevVisibleMsg && !showTime
-                        && (session.isGroup ? uiRole(prevVisibleMsg) === uiRole(msg) : chatKktBatchKey(prevVisibleMsg) === chatKktBatchKey(msg))
+                        && (session.isGroup ? uiRole(prevVisibleMsg) === uiRole(msg)
+                            : (msg.role === "user" && prevVisibleMsg.role === "user")
+                                || chatKktBatchKey(prevVisibleMsg) === chatKktBatchKey(msg))
                         && uiRole(msg) !== "system"
                         && (!session.isGroup || prevVisibleMsg.senderCharacterId === msg.senderCharacterId);
                     // Hide bubbles with no visible content (empty text, stripped music tags, etc.)
@@ -6180,7 +6183,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     const isBatchEnd = !session.isGroup && (msg.role === "user" || msg.role === "assistant")
                         && uiRole(msg) !== "system" && !msg.isRetracted
                         && !hiddenEmpty && !isEmptyBubble && !isSilentThought
-                        && (!nextVisibleMsg || chatKktBatchKey(nextVisibleMsg) !== chatKktBatchKey(msg));
+                        && (!nextVisibleMsg || (msg.role === "user"
+                            ? nextVisibleMsg.role !== "user"
+                            : chatKktBatchKey(nextVisibleMsg) !== chatKktBatchKey(msg)));
                     const batchTimeMessage = photoGroup[photoGroup.length - 1];
                     const batchMeta = isBatchEnd ? (
                         <div className="chat-kkt-batch-meta" data-role={msg.role}>
@@ -6188,6 +6193,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                             <time dateTime={batchTimeMessage.createdAt}>{formatKktChatClock(batchTimeMessage.createdAt)}</time>
                         </div>
                     ) : null;
+                    // A translated text message keeps its clock beside the
+                    // original white bubble; the translation remains below.
+                    const inlineKktMeta = msg.role === "assistant" && (!renderMsg.mediaType || renderMsg.mediaType === "quote")
+                        && batchMeta && splitBilingualText(msg.displayProjected ? renderMsg.content : bubbleDisplayContent)
+                        ? batchMeta : null;
                     const selectableStoredId = getSelectableStoredMessageId(msg);
                     const isMultiSelectable = isMultiSelectMode && !!selectableStoredId && !hiddenEmpty;
                     const isMultiSelected = !!selectableStoredId && selectedMessageIds.has(selectableStoredId);
@@ -6457,9 +6467,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 onActionSelect={(text) => chatTextInputRef.current?.appendText(text)}
                                                 onMeetingInviteAction={handleMeetingInviteAction}
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
+                                                inlineKktMeta={inlineKktMeta}
                                             />
                                         </div>
-                                        {msg.role === "assistant" && batchMeta}
+                                        {msg.role === "assistant" && !inlineKktMeta && batchMeta}
                                         </div>
                                         </div>}
                                         {msg.role !== "user" && !isSilentThought && !isEmptyBubble && hasFoldedPanel && (

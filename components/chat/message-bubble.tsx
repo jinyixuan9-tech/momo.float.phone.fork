@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo, type ReactNode } from "react";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -52,6 +52,7 @@ interface MessageBubbleProps {
     onMeetingInviteAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
     displayContent?: string;
     defaultTranslationExpanded?: boolean;
+    inlineKktMeta?: ReactNode;
 }
 
 /** 聊天插件自定义消息气泡：把裸 DOM 容器交给注册了该 kind 的插件渲染 */
@@ -95,7 +96,7 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUpdate, charName, userName, quoteCharacterName, quoteUserName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, onMeetingInviteAction, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUpdate, charName, userName, quoteCharacterName, quoteUserName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, onMeetingInviteAction, displayContent, defaultTranslationExpanded = false, inlineKktMeta }: MessageBubbleProps) {
     if (photoGroup && photoGroup.length > 1) return <ChatPhotoDeck messages={photoGroup} onUpdate={onUpdate} characterId={characterId} />;
     switch (msg.mediaType) {
         case "red_packet":
@@ -125,7 +126,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUp
                 msg.mediaData?.quoteRole === "user" || (!msg.mediaData?.quoteRole && msg.role === "assistant")
                     ? (quoteUserName || userName)
                     : (quoteCharacterName || charName)
-            } displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            } displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} inlineKktMeta={inlineKktMeta} />;
         case "music_share":
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
         case "media_file":
@@ -141,7 +142,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUp
             if (msg.mediaType?.startsWith("plugin:")) {
                 return <PluginKindBubble msg={msg} kind={msg.mediaType.slice("plugin:".length)} />;
             }
-            const textBubble = <TextBubble content={displayContent ?? msg.content} onActionSelect={onActionSelect} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            const textBubble = <TextBubble content={displayContent ?? msg.content} onActionSelect={onActionSelect} defaultTranslationExpanded={defaultTranslationExpanded} inlineKktMeta={inlineKktMeta} />;
             return (
                 <>
                     {textBubble}
@@ -177,6 +178,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, photoGroup, onUp
     if (prev.characterId !== next.characterId) return false;
     if (prev.displayContent !== next.displayContent) return false;
     if (prev.defaultTranslationExpanded !== next.defaultTranslationExpanded) return false;
+    if (prev.inlineKktMeta !== next.inlineKktMeta) return false;
     return true;
 });
 
@@ -667,6 +669,7 @@ export const BilingualTextBlock = memo(function BilingualTextBlock({
     className,
     defaultExpanded = false,
     htmlFrameVariant,
+    inlineKktMeta,
 }: {
     text: string;
     onActionSelect?: (text: string) => void;
@@ -675,6 +678,7 @@ export const BilingualTextBlock = memo(function BilingualTextBlock({
     className?: string;
     defaultExpanded?: boolean;
     htmlFrameVariant?: ChatHtmlFrameVariant;
+    inlineKktMeta?: ReactNode;
 }) {
     const bilingual = splitBilingualText(text);
     const [expanded, setExpanded] = useState(defaultExpanded);
@@ -696,9 +700,18 @@ export const BilingualTextBlock = memo(function BilingualTextBlock({
 
     return (
         <div className={`chat-bilingual-block ${className ?? ""}`.trim()}>
-            <div className="chat-bilingual-section">
-                {renderContent(bilingual.original, "chat-bilingual-content")}
-            </div>
+            {inlineKktMeta ? (
+                <div className="chat-kkt-original-row">
+                    <div className="chat-bilingual-section">
+                        {renderContent(bilingual.original, "chat-bilingual-content")}
+                    </div>
+                    {inlineKktMeta}
+                </div>
+            ) : (
+                <div className="chat-bilingual-section">
+                    {renderContent(bilingual.original, "chat-bilingual-content")}
+                </div>
+            )}
             <button
                 type="button"
                 className="chat-bilingual-toggle"
@@ -722,8 +735,8 @@ export const BilingualTextBlock = memo(function BilingualTextBlock({
     );
 });
 
-function TextBubble({ content, onActionSelect, defaultTranslationExpanded = false }: { content: string; onActionSelect?: (text: string) => void; defaultTranslationExpanded?: boolean }) {
-    return <BilingualTextBlock text={content} onActionSelect={onActionSelect} mode="markdown" defaultExpanded={defaultTranslationExpanded} />;
+function TextBubble({ content, onActionSelect, defaultTranslationExpanded = false, inlineKktMeta }: { content: string; onActionSelect?: (text: string) => void; defaultTranslationExpanded?: boolean; inlineKktMeta?: ReactNode }) {
+    return <BilingualTextBlock text={content} onActionSelect={onActionSelect} mode="markdown" defaultExpanded={defaultTranslationExpanded} inlineKktMeta={inlineKktMeta} />;
 }
 
 // ── Red Packet ─────────────────────────────
@@ -1771,7 +1784,7 @@ function StickerBubble({ msg, characterId }: { msg: ChatMessage; characterId?: s
 
 // ── Quote ─────────────────────────────
 
-function QuoteBubble({ msg, quotedSenderName, displayContent, defaultTranslationExpanded = false }: { msg: ChatMessage; quotedSenderName?: string; displayContent?: string; defaultTranslationExpanded?: boolean }) {
+function QuoteBubble({ msg, quotedSenderName, displayContent, defaultTranslationExpanded = false, inlineKktMeta }: { msg: ChatMessage; quotedSenderName?: string; displayContent?: string; defaultTranslationExpanded?: boolean; inlineKktMeta?: ReactNode }) {
     const d = msg.mediaData;
     // Old saved quotes may still include "original | translation".
     const originalPreview = d?.quotePreview
@@ -1784,7 +1797,7 @@ function QuoteBubble({ msg, quotedSenderName, displayContent, defaultTranslation
                     {quotedSenderName && <><strong>{quotedSenderName}:</strong>{" "}</>}{originalPreview}
                 </div>
             )}
-            {msg.content && <TextBubble content={displayContent ?? msg.content} defaultTranslationExpanded={defaultTranslationExpanded} />}
+            {msg.content && <TextBubble content={displayContent ?? msg.content} defaultTranslationExpanded={defaultTranslationExpanded} inlineKktMeta={inlineKktMeta} />}
         </div>
     );
 }
