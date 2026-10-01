@@ -455,7 +455,11 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
             className={`minimal-list-item${isPinned ? ' chat-pinned' : ''}`}
             onClick={onSelect}
         >
-            {isGroup ? (
+            {isGroup && session.groupAvatar ? (
+                <div className="minimal-avatar-wrapper overflow-hidden rounded-[34%] bg-[var(--c-card-border)]">
+                    <img src={session.groupAvatar} className="w-full h-full object-cover pointer-events-none" alt="群头像" />
+                </div>
+            ) : isGroup ? (
                 <div className="minimal-avatar-wrapper grid grid-cols-2 grid-rows-2 gap-[1px] p-[2px] bg-[var(--c-card-border)] rounded-full overflow-hidden">
                     {groupAvatarItems.map((c) => (
                         <div key={c.id} className="overflow-hidden rounded-[3px] bg-[var(--c-page-body-bg)]">

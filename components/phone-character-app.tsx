@@ -41,7 +41,7 @@ import { loadMomentsConfig, saveMomentsConfig } from "@/lib/moments-storage";
 import type { CanvasBgItem } from "@/lib/character-types";
 import { PageShell } from "@/components/ui/page-shell";
 import { ConfirmDialog } from "@/components/ui/modal";
-import { AlertCircle, History } from "lucide-react";
+import { AlertCircle, History, RefreshCw } from "lucide-react";
 import {
   backupCharacterVersion,
   clearCharacterVersions,
@@ -2323,7 +2323,7 @@ function CharArchiveView({
               </div>
               <div className="char-archive-cell" style={{ flex: 1.5 }}>
                 <span className="char-archive-label">手机号</span>
-                {isEditing ? <div className="flex items-center gap-1"><input className="char-archive-input min-w-0 w-full" inputMode="numeric" pattern="[0-9]*" placeholder="只输入数字" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value.replace(/\D/g, ""))}/><button type="button" title="从人设读取或随机刷新" onClick={() => setPhoneNumber(phoneFromPersona(persona).replace(/\D/g, "") || generateWechatID())}>刷新</button></div> : <span className="char-archive-val select-text cursor-text tracking-[-0.5px]">{getCharacterPhoneNumber(char.id) || char.wechatID || "N/A"}</span>}
+                {isEditing ? <div className="flex items-center gap-1"><input className="char-archive-input min-w-0 w-full" inputMode="numeric" pattern="[0-9]*" placeholder="只输入数字" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value.replace(/\D/g, ""))}/><button type="button" className="shrink-0 p-1.5" aria-label="从人设读取或随机刷新手机号" title="从人设读取或随机刷新手机号" onClick={() => setPhoneNumber(phoneFromPersona(persona).replace(/\D/g, "") || generateWechatID())}><RefreshCw size={16}/></button></div> : <span className="char-archive-val select-text cursor-text tracking-[-0.5px]">{getCharacterPhoneNumber(char.id) || char.wechatID || "N/A"}</span>}
               </div>
               <div className="char-archive-cell" style={{ flex: 1.1 }}>
                 <span className="char-archive-label">Update</span>

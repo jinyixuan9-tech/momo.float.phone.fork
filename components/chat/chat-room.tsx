@@ -34,6 +34,7 @@ import {
     resolveChatCharacterAvatar,
     resolveChatCharacterDisplayName,
 } from "@/lib/chat-profile-storage";
+import { applyGroupSelfNicknameTag, groupMemberName } from "@/lib/group-chat-profile";
 import { loadCustomAppChatPlusActions, type RegisteredCustomAppChatPlusAction } from "@/lib/custom-app-chat-directives";
 import { CUSTOM_APPS_UPDATED_EVENT, getInstalledCustomApp } from "@/lib/custom-app-storage";
 import { toCustomAppIconId, type InstalledCustomApp } from "@/lib/custom-app-types";
@@ -817,7 +818,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M7 14h10m-4-4 4 4-4 4" /></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
-        { icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
+        ...(!isGroup ? [{ icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") }] : []),
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
         ...customPlusActions.map(action => ({
@@ -2626,13 +2627,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             if (!(session.participantIds || []).includes(r.characterId)) continue;
             if (isGroupMuted(session, r.characterId)) continue;
             const responseBatchId = createResponseBatchId();
-            const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
+            const groupContent = applyGroupSelfNicknameTag(session, r.characterId, r.responseText);
+            const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(groupContent, getCurrentStateForCharacter(r.characterId));
             const parts = stripInvalidStickerParts(rawParts, r.characterId);
             let attachedState = false;
             let savedAnyPart = false;
             for (const part of parts) {
                 throwIfGenerationStopped(guard);
                 if (part.mediaType === "meeting_invite") continue;
+                if (part.mediaType === "gift") continue; // 礼物及外卖只投递到单聊
                 // Filter action types
                 if (part.mediaType === "voice_call" || part.mediaType === "video_call") {
                     if (session.isSpectator) continue; // 围观群不能把用户卷进群通话
@@ -3790,8 +3793,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     }, [character?.name, groupCharacters, session.contactId, session.groupName, session.id, session.isGroup, session.participantIds]);
 
     const sendShoppingGiftMessage = (gift: ShoppingGiftCandidate, recipient?: Character): boolean => {
-        if (session.isGroup && !recipient) {
-            showChatToast("请选择收礼对象");
+        if (session.isGroup) {
+            showChatToast("礼物请在单聊赠送");
             return false;
         }
         const sent = sendRichMessage("gift", {
@@ -3880,13 +3883,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const responseRoundId = senderInfo.responseRoundId || createResponseRoundId();
                         const editableResponseText = senderInfo.editableResponseText || `[${senderInfo.characterName}]: ${cleanedEditableText}`;
                         const previousState = getLatestCharacterStateValues(senderInfo.characterId);
-                        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(text, previousState);
+                        const groupText = applyGroupSelfNicknameTag(session, senderInfo.characterId, text);
+                        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(groupText, previousState);
                         const parts = stripInvalidStickerParts(rawParts, senderInfo.characterId);
                         let attachedState = false;
                         let savedAnyPart = false;
                         for (const part of parts) {
                             throwIfGenerationStopped(generationGuard);
                             if (part.mediaType === "meeting_invite") continue;
+                            if (part.mediaType === "gift") continue;
                             if (!part.content.trim() && !part.mediaType) continue;
                             const draft = buildAssistantMessageDraft(part, {
                                 sessionId: session.id,
@@ -4931,13 +4936,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             };
             for (const segment of segments) {
                 const responseBatchId = createResponseBatchId();
-                const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(segment.responseText, getCurrentStateForCharacter(segment.characterId));
+                const groupText = applyGroupSelfNicknameTag(session, segment.characterId, segment.responseText);
+                const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(groupText, getCurrentStateForCharacter(segment.characterId));
                 const parts = stripInvalidStickerParts(rawParts, segment.characterId);
                 const normalizedParts = normalizeEditedAssistantParts(parts, segment.characterName, {
                     omitHandledFinancialActions: true,
                 });
                 let attachedState = false;
                 for (const part of normalizedParts) {
+                    if (part.mediaType === "gift") continue;
                     if (!part.content.trim() && !part.mediaType && (!(statusPanel || innerMonologue) || attachedState)) continue;
                     // 面板只挂到能显示它的正常气泡上（拍一拍/通话留痕是系统小字）
                     const attachHere = !attachedState && canCarryFoldedPanel(part);
@@ -5029,9 +5036,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId, stateCutoff ? { before: stateCutoff } : undefined);
 
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(editedResponseContent, previousState);
+        const editedVisibleContent = session.isGroup && batchMessages[0]?.senderCharacterId
+            ? applyGroupSelfNicknameTag(session, batchMessages[0].senderCharacterId, editedResponseContent)
+            : editedResponseContent;
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(editedVisibleContent, previousState);
         const parts = stripInvalidStickerParts(rawParts);
-        const normalizedParts = normalizeEditedAssistantParts(parts);
+        const normalizedParts = normalizeEditedAssistantParts(parts).filter(part => !session.isGroup || part.mediaType !== "gift");
         if (normalizedParts.length === 0 && (statusPanel || innerMonologue)) {
             normalizedParts.push({ content: "" });
         }
@@ -6125,7 +6135,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 <div key={gMsg.id} className={`flex ${gMsg.role === "user" ? "justify-end" : "justify-start"}`}>
                                                     <div className="flex flex-col min-w-0 max-w-[75%]">
                                                         {session.isGroup && gMsg.role !== "user" && (
-                                                            <span className="chat-group-sender-name">{gMsg.senderName || ""}{renderGroupRoleBadge(gMsg.senderCharacterId)}</span>
+                                                            <span className="chat-group-sender-name">{groupMemberName(session, gMsg.senderCharacterId || "", gMsg.senderCharacterId ? groupCharMap.get(gMsg.senderCharacterId) : null, gMsg.senderName || "群成员")}{renderGroupRoleBadge(gMsg.senderCharacterId)}</span>
                                                         )}
                                                         <div
                                                             onPointerDown={(e) => { e.stopPropagation(); handleMessagePointerDown(e, gMsg.id); }}
@@ -6419,8 +6429,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             className={`chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
                                             {...(isStandaloneHtmlPreview ? { "data-html": "true" } : {})}
                                         >
-                                            {session.isGroup && msg.role !== "user" && (
-                                                <span className="chat-group-sender-name">{msg.senderName || ""}{renderGroupRoleBadge(msg.senderCharacterId)}</span>
+                                            {session.isGroup && (
+                                                <span className="chat-group-sender-name">{msg.role === "user"
+                                                    ? groupMemberName(session, "self", null, userIdentity?.name || "我")
+                                                    : groupMemberName(session, msg.senderCharacterId || "", msg.senderCharacterId ? groupCharMap.get(msg.senderCharacterId) : null, msg.senderName || "未知成员")}
+                                                    {msg.role !== "user" && renderGroupRoleBadge(msg.senderCharacterId)}</span>
                                             )}
                                             {!session.isGroup && msg.role === "assistant" && !isConsecutive && (
                                                 <span className="chat-kkt-sender-name">{quoteCharacterName}</span>
@@ -6577,7 +6590,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     </div>
                                     {/* Signature */}
                                     <div className="chat-thought-sig">
-                                        — {session.isGroup ? (msg.senderName || "群成员") : (character?.name || "TA")}
+                                        — {session.isGroup ? groupMemberName(session, msg.senderCharacterId || "", msg.senderCharacterId ? groupCharMap.get(msg.senderCharacterId) : null, msg.senderName || "群成员") : (character?.name || "TA")}
                                     </div>
                                 </div>
                             )}
@@ -6602,7 +6615,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 </div>
                                             </div>
                                             <div className="chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%]">
-                                                <span className="chat-group-sender-name">{part.characterName}</span>
+                                                <span className="chat-group-sender-name">{groupMemberName(session, part.characterId, senderChar, part.characterName)}</span>
                                                 <div className="chat-bubble-role-assistant chat-stream-bubble break-words rounded-md px-3 py-2">
                                                     {/* 流式预览用轻量 pre-wrap 渲染：避免每帧跑 markdown/双语解析导致闪烁卡顿 */}
                                                     <div className="chat-stream-text whitespace-pre-wrap break-words">{segText}</div>
@@ -6869,7 +6882,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     onClose={() => setRichModal(null)}
                 />
             )}
-            {richModal === "gift" && (
+            {richModal === "gift" && !session.isGroup && (
                 <GiftPickerModal
                     gifts={availableShoppingGifts}
                     isGroup={session.isGroup}

@@ -249,6 +249,9 @@ export function loadNativeTimeline(
                 }
                 else if (msg.mediaType === "gift") {
                     const giftName = msg.mediaData?.giftName || msg.mediaData?.label || "礼物";
+                    if (msg.mediaData?.takeoutOrderId) {
+                        content = `[外卖${msg.mediaData.giftDeliveredAt ? "已送达" : "配送中"}:${msg.mediaData.takeoutShop || "店铺"}:${msg.mediaData.takeoutItems || giftName}:${msg.mediaData.takeoutDestination || "用户所在地"}:${msg.mediaData.giftPriceLabel || ""}]`;
+                    } else {
                     const shopping = Boolean(msg.mediaData?.shoppingGiftId || msg.mediaData?.shoppingOrderId);
                     const food = msg.mediaData?.label === "外卖卡";
                     content = shopping
@@ -256,6 +259,7 @@ export function loadNativeTimeline(
                         : msg.mediaData?.recipientName
                             ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
                             : `[礼物:${giftName}]`;
+                    }
                 }
                 else if (msg.mediaType === "payment_request") content = formatShoppingPaymentRequestHistory({
                     amount: msg.mediaData?.amount,
@@ -356,6 +360,9 @@ export function loadNativeTimeline(
                 }
                 else if (msg.mediaType === "gift") {
                     const giftName = msg.mediaData?.giftName || msg.mediaData?.label || "礼物";
+                    if (msg.mediaData?.takeoutOrderId) {
+                        content = `[外卖${msg.mediaData.giftDeliveredAt ? "已送达" : "配送中"}:${msg.mediaData.takeoutShop || "店铺"}:${msg.mediaData.takeoutItems || giftName}:${msg.mediaData.takeoutDestination || "用户所在地"}:${msg.mediaData.giftPriceLabel || ""}]`;
+                    } else {
                     const shopping = Boolean(msg.mediaData?.shoppingGiftId || msg.mediaData?.shoppingOrderId);
                     const food = msg.mediaData?.label === "外卖卡";
                     content = shopping
@@ -363,6 +370,7 @@ export function loadNativeTimeline(
                         : msg.mediaData?.recipientName
                             ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
                             : `[礼物:${giftName}]`;
+                    }
                 }
                 else if (msg.mediaType === "payment_request") content = formatShoppingPaymentRequestHistory({
                     amount: msg.mediaData?.amount,

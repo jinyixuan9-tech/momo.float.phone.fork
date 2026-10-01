@@ -14,6 +14,7 @@ import type { StateValue } from "./chat-storage";
 import { parseStateValues, mergeStateValues } from "./state-value-parser";
 import { stripActionShells } from "./action-parser";
 import { stripTextToolDirectives } from "./text-tool-protocol";
+import { formatCurrencyAmount, walletCurrency, WALLET_CURRENCIES } from "./wallet-storage";
 import {
     formatCustomAppDirectiveSummary,
     getCustomAppDirectiveSyntaxHead,
@@ -124,6 +125,35 @@ const RICH_PATTERNS: {
                 paymentRequestedAt: new Date().toISOString(),
             },
         }),
+    },
+    {
+        // 私聊角色赠礼：[礼物:商品名:KRW 100000]，金额与真实钱包流水一致。
+        regex: new RegExp(`\\[礼物${C}([^\\]：:]+)${C}([A-Za-z]{3})\\s+(\\d+(?:\\.\\d+)?)\\]`),
+        build: (m) => {
+            const currency = WALLET_CURRENCIES.includes(m[2].toUpperCase() as typeof WALLET_CURRENCIES[number]) ? walletCurrency(m[2].toUpperCase()) : undefined;
+            const amount = Number(m[3]);
+            return { content: "", mediaType: "gift" as const, mediaData: {
+                giftName: m[1].trim(), label: m[1].trim(), giftMerchantLabel: "角色赠礼",
+                giftPriceLabel: currency ? formatCurrencyAmount(amount, currency) : "币种无效", amount, currency,
+                giftSentAt: new Date().toISOString(), giftDeliveredAt: new Date().toISOString(),
+            } };
+        },
+    },
+    {
+        // 角色给用户点外卖：[外卖:店铺:餐品:KRW 18000:35]，最后是预计送达分钟数。
+        regex: new RegExp(`\\[外卖${C}([^\\]：:]+)${C}([^\\]：:]+)${C}([A-Za-z]{3})\\s+(\\d+(?:\\.\\d+)?)${C}(\\d{1,3})\\]`),
+        build: (m) => {
+            const currency = WALLET_CURRENCIES.includes(m[3].toUpperCase() as typeof WALLET_CURRENCIES[number]) ? walletCurrency(m[3].toUpperCase()) : undefined;
+            const amount = Number(m[4]);
+            const minutes = Math.max(10, Math.min(180, Number(m[5])));
+            return { content: "", mediaType: "gift" as const, mediaData: {
+                label: "外卖卡", giftName: m[2].trim(), takeoutShop: m[1].trim(), takeoutItems: m[2].trim(),
+                giftMerchantLabel: m[1].trim(), giftPriceLabel: currency ? formatCurrencyAmount(amount, currency) : "币种无效",
+                amount, currency, takeoutOrderId: `takeout_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                takeoutDeliverAt: new Date(Date.now() + minutes * 60_000).toISOString(),
+                giftSentAt: new Date().toISOString(),
+            } };
+        },
     },
     {
         // 群聊赠礼：[礼物:商品名:收礼人]，兼容旧格式：[礼物:商品名:送给收礼人]

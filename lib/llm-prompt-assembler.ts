@@ -1164,6 +1164,7 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
         }
         case "gift": {
             const giftName = d?.giftName || d?.label || "礼物";
+            if (d?.takeoutOrderId) return `[外卖${d.giftDeliveredAt ? "已送达" : "配送中"}:${d.takeoutShop || "店铺"}:${d.takeoutItems || giftName}:${d.takeoutDestination || "用户所在地"}:${d.giftPriceLabel || ""}]`;
             return isGroup && d?.recipientName
                 ? `[礼物:${giftName}:${d.recipientName}]`
                 : `[礼物:${giftName}]`;

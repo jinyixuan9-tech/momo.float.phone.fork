@@ -282,6 +282,7 @@ function scheduleGroupMemorySummarization(
  */
 export type GroupChatPromptBuildOptions = {
     appTags?: string[];
+    callFormatInstruction?: string;
     excludeOfflineSessionId?: string;
     disableTools?: boolean;
     promptProfile?: CustomAppPromptProfile | null;
@@ -503,6 +504,25 @@ async function buildGroupChatPromptMessages(
             role: "system",
             content: "本次自定义 APP AI 任务只输出严格 JSON。不要输出 Markdown 代码块、解释文字或聊天富媒体指令。",
         });
+    }
+    if (options?.callFormatInstruction) {
+        llmMessages.push({ role: "system", content: [
+            "群视频通话中，每一段仍须以 [角色名]: 开头；该角色说的话标记【台词】，画面里可见的动作或神态标记【动作】。每个角色可以有多段台词或动作，按发生顺序分别输出。",
+            options.callFormatInstruction,
+        ].join("\n") });
+    }
+    if (activeAppTags.includes("group_chat") && !promptProfile) {
+        const nicknameLines = Object.entries(session.groupNicknames || {})
+            .map(([id, nickname]) => {
+                const canonical = id === "self" ? userName : charMap.get(id)?.name;
+                return canonical && nickname.trim() ? `${canonical} 在本群使用昵称「${nickname.trim()}」` : "";
+            }).filter(Boolean);
+        llmMessages.push({ role: "system", content: [
+            "当前是群聊。礼物及外卖订单只能在对应的单聊中发出，群里不得输出这两类卡片；已经发生的单聊事件可以自然提及。",
+            "群聊回复的 [角色名]: 标记仍使用成员本名，供系统识别；昵称只用于群内称呼和展示。",
+            "角色若自行更改自己的群昵称，可在自己的段落写 [我的群昵称:新昵称]；只能更改自己，不能替别人改。系统会处理该标记，不要向用户解释格式。",
+            ...nicknameLines,
+        ].join("\n") });
     }
     appendEmptyGenerateGuardMessage(llmMessages, config, history);
 
@@ -801,6 +821,7 @@ export async function generateGroupChatCompletion(
 ): Promise<{ characterId: string; characterName: string; responseText: string }[]> {
     const { llmMessages, config, preset, regexes, nameToId, memberNames, enabledTools, userName, appTags } = await buildGroupChatPromptMessages(session, history, {
         appTags: options?.appTags,
+        callFormatInstruction: options?.callFormatInstruction,
         disableTools: options?.disableTools,
         promptProfile: options?.promptProfile,
         apiConfigId: options?.apiConfigId,

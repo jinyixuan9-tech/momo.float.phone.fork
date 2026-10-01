@@ -2003,6 +2003,14 @@ export async function buildChatPromptMessages(
     const senderWallet = loadWalletState(character.id);
     llmMessages.push({ role: "system", content: `如果自然聊天中发送转账或红包，使用角色的钱包设定：默认结算币种 ${senderWallet.primaryCurrency}，其他常用币种 ${(senderWallet.commonCurrencies || []).join("、") || "无"}。发送时务必在富媒体金额中写出实际币种 ISO（例如 [转账:KRW 1000:留言]），金额与币种必须对应真实扣款，绝不省略 ISO 或默认假定人民币。角色当前可用资金：${getWalletVisibleCurrencies(senderWallet).map(currency => `${currency} ${formatCurrencyAmount(getWalletCurrencyBalance(senderWallet, currency), currency)}`).join("；")}。币种随人物所在地和场景选择，不得超过可用余额。` });
     if (!session.isGroup && resolvedAppId === "chat" && !effectiveAppTags.includes("voice") && !effectiveAppTags.includes("video")) {
+        llmMessages.push({ role: "system", content: [
+            "若确实自发给用户送礼，必须输出 [礼物:具体商品名:ISO 币种金额]，例如 [礼物:Samsung 笔记本电脑:KRW 1300000]。收到即送达；价格应符合人物消费能力且会从角色钱包实际扣款。品牌可用当地名称，商品描述用中文。不要输出没有价格的旧礼物格式。",
+            session.allowCharacterTakeout && session.userTakeoutLocation?.trim() && session.characterTakeoutLocation?.trim()
+                ? `此私聊允许你为用户点外卖。你的位置：${session.characterTakeoutLocation.trim()}；用户收餐位置：${session.userTakeoutLocation.trim()}。只有在情境合适时输出 [外卖:店铺名:中文餐品描述:ISO 币种金额:预计送达分钟数]，例如 [外卖:BBQ Chicken:原味炸鸡双拼:KRW 18000:35]。店铺及结算货币按用户收餐地点确定；异地时按用户所在地选择外卖，不把这单写成你自己手机的外卖订单。价格符合当地购买力并从你的钱包扣款；送达由系统通知。` 
+                : "此私聊未开启角色给用户点外卖。不要输出 [外卖:...] 订单卡片。",
+        ].join("\n") });
+    }
+    if (!session.isGroup && resolvedAppId === "chat" && !effectiveAppTags.includes("voice") && !effectiveAppTags.includes("video")) {
         const userNumber = loadSms().realNumber.trim();
         llmMessages.push({ role: "system", content: [
             "这里是封闭的虚构小手机。普通电话走 Phone App，Chat 语音和视频走 Chat 内通话，不会拨现实号码。根据上下文和你自己的意愿选择，不要仅凭‘打电话’三个字固定选某个渠道。",

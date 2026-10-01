@@ -13,7 +13,9 @@ import { isCallRecordingSupported, resolveCloudSttConfig } from "@/lib/stt-cloud
 import { useHoldToTalk } from "./use-hold-to-talk";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
 import { BilingualTextBlock } from "./message-bubble";
-import { splitBilingualText } from "@/lib/bilingual-text";
+import { CallTranscriptBubble } from "./call-transcript-bubble";
+import { displayCallAction, originalCallSpeech, splitCallTranscript, VIDEO_CALL_FORMAT } from "@/lib/call-transcript";
+import { groupMemberAvatar, groupMemberName } from "@/lib/group-chat-profile";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
 import { isAndroidBrowser, isIOSDevice } from "./voice-input-platform";
@@ -37,14 +39,8 @@ type SubtitleEntry = {
     text: string;
     senderName?: string;
     senderCharacterId?: string;
+    kind?: "speech" | "action";
 };
-
-function stripBilingualForSpeech(text: string): string {
-    return text
-        .split("\n")
-        .map(line => splitBilingualText(line)?.original || line)
-        .join("\n");
-}
 
 type GroupCallScreenProps = {
     type: "voice" | "video";
@@ -79,11 +75,14 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
     const [isMuted, setIsMuted] = useState(false);
     const [inputMode, setInputMode] = useState<"voice" | "text">(() => androidTextInputOnly ? "text" : "voice");
     const [typedText, setTypedText] = useState("");
+    const [composeKind, setComposeKind] = useState<"speech" | "action">("speech");
+    const [playingSubtitleId, setPlayingSubtitleId] = useState<string | null>(null);
     // Track who is currently speaking (for video mode highlight)
     const [speakingCharId, setSpeakingCharId] = useState<string | null>(null);
 
     const sttRef = useRef<STTSession | null>(null);
     const audioAbortRef = useRef<(() => void) | null>(null);
+    const subtitleAudioCacheRef = useRef<Map<string, Blob>>(new Map());
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const callStartRef = useRef<number>(0);
     const stateRef = useRef<string>(answered ? "IDLE" : "CONNECTING");
@@ -223,13 +222,16 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
     };
 
     // ── Conversation turn ────────────────────────────
-    const runConversationTurn = useCallback(async (userText?: string) => {
+    const runConversationTurn = useCallback(async (userText?: string, userKind: "speech" | "action" = "speech") => {
         if (userText) {
+            const kind = isVideo ? userKind : "speech";
             const userMsg = pushChatMessage({
-                sessionId: session.id, role: "user", content: userText,
+                sessionId: session.id, role: "user", content: kind === "action" ? `【动作】${userText}` : userText,
+                ...(isVideo ? { mediaData: { callLineKind: kind } } : {}),
             });
             messagesRef.current = [...messagesRef.current, userMsg];
-            setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: userText }]);
+            setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: userText, kind,
+                senderName: groupMemberName(session, "self", null, userNameRef.current) }]);
         }
 
         setCallState("PROCESSING");
@@ -239,6 +241,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
             const results = await generateGroupChatCompletion(session, messagesRef.current, undefined, {
                 appTags: ["group_chat", isVideo ? "video" : "voice"],
                 disableTools: true,
+                ...(isVideo ? { callFormatInstruction: VIDEO_CALL_FORMAT } : {}),
             });
             if (stateRef.current === "ENDED") return;
 
@@ -251,9 +254,35 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                 );
                 const textParts = parts.filter(p => !p.mediaType && p.content.trim());
                 const displayText = textParts.map(p => p.content).join("\n");
-                const speechText = stripBilingualForSpeech(displayText);
 
                 if (!displayText && !(statusPanel || innerMonologue)) continue;
+
+                if (isVideo) {
+                    const lines = textParts.flatMap(part => splitCallTranscript(part.content, true));
+                    const entries = lines.length ? lines : [{ kind: "speech" as const, text: "" }];
+                    const saved = entries.map((line, index) => pushChatMessage({
+                        sessionId: session.id, role: "assistant",
+                        content: line.kind === "action" ? `【动作】${line.text}` : line.text,
+                        mediaData: { callLineKind: line.kind },
+                        statusPanel: index === 0 ? statusPanel || undefined : undefined,
+                        statusRegionMode: index === 0 && statusPanel && isCustomStatusRegionActive(getStatusRegionConfig(session.id, false))
+                            ? ("custom" as const) : undefined,
+                        innerMonologue: index === 0 ? innerMonologue || undefined : undefined,
+                        stateValues: index === 0 && stateValues.length > 0 ? stateValues : undefined,
+                        freshStateValues: index === 0 ? freshStateValues : undefined,
+                        senderCharacterId: r.characterId,
+                        senderName: r.characterName,
+                    }));
+                    messagesRef.current = [...messagesRef.current, ...saved];
+                    setSubtitles(prev => [...prev, ...saved.filter(message => message.content.trim()).map(message => ({
+                        id: message.id, role: "assistant" as const,
+                        kind: message.mediaData?.callLineKind || "speech",
+                        text: message.mediaData?.callLineKind === "action"
+                            ? displayCallAction(message.content.replace(/^【动作】/, "")) : message.content,
+                        senderName: groupMemberName(session, r.characterId, characters.find(c => c.id === r.characterId)), senderCharacterId: r.characterId,
+                    }))]);
+                    continue;
+                }
 
                 const aiMsg = pushChatMessage({
                     sessionId: session.id, role: "assistant",
@@ -274,29 +303,9 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                 setSubtitles(prev => [...prev, {
                     id: aiMsg.id, role: "assistant",
                     text: displayText,
-                    senderName: r.characterName,
+                    senderName: groupMemberName(session, r.characterId, characters.find(c => c.id === r.characterId)),
                     senderCharacterId: r.characterId,
                 }]);
-
-                // TTS with this character's own voice config
-                setCallState("AI_SPEAKING");
-                setSpeakingCharId(r.characterId);
-                const voiceConfig = resolveVoiceConfig(r.characterId);
-                if (voiceConfig && speechText.trim()) {
-                    try {
-                        const audioBlob = await synthesizeSpeech(speechText, voiceConfig);
-                        if (stateRef.current === "ENDED") return;
-                        if (audioBlob) {
-                            const { promise, abort } = playCallAudio(audioBlob);
-                            audioAbortRef.current = abort;
-                            await promise;
-                            audioAbortRef.current = null;
-                        }
-                    } catch (e) {
-                        console.warn("[GroupCall] TTS failed:", e);
-                    }
-                }
-                setSpeakingCharId(null);
             }
 
             if (stateRef.current !== "ENDED") setCallState("IDLE");
@@ -310,7 +319,35 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                 setCallState("IDLE");
             }
         }
-    }, [isVideo, session, playCallAudio]);
+    }, [isVideo, session, characters]);
+
+    const playSubtitle = useCallback(async (subtitle: SubtitleEntry) => {
+        if (playingSubtitleId === subtitle.id) { audioAbortRef.current?.(); return; }
+        if (stateRef.current !== "IDLE" || !subtitle.senderCharacterId) return;
+        const voiceConfig = resolveVoiceConfig(subtitle.senderCharacterId);
+        if (!voiceConfig) return;
+        if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
+        setPlayingSubtitleId(subtitle.id);
+        setCallState("AI_SPEAKING");
+        setSpeakingCharId(subtitle.senderCharacterId);
+        try {
+            let blob = subtitleAudioCacheRef.current.get(subtitle.id);
+            if (!blob) {
+                blob = await synthesizeSpeech(originalCallSpeech(subtitle.text), voiceConfig) || undefined;
+                if (blob) subtitleAudioCacheRef.current.set(subtitle.id, blob);
+            }
+            if (!blob || (stateRef.current as string) === "ENDED") return;
+            const { promise, abort } = playCallAudio(blob);
+            audioAbortRef.current = abort;
+            await promise;
+        } catch (error) { console.warn("[GroupCall] manual TTS failed:", error); }
+        finally {
+            audioAbortRef.current = null;
+            setSpeakingCharId(null);
+            setPlayingSubtitleId(null);
+            if ((stateRef.current as string) !== "ENDED") setCallState("IDLE");
+        }
+    }, [playCallAudio, playingSubtitleId]);
 
     // ── Auto-listen ──────────────────────────────────
     const startListening = useCallback(() => {
@@ -399,8 +436,8 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
         if (!text || callState !== "IDLE") return;
         if (sttRef.current) { sttRef.current.abort(); sttRef.current = null; }
         setTypedText("");
-        runConversationTurn(text);
-    }, [typedText, callState, runConversationTurn]);
+        runConversationTurn(text, isVideo ? composeKind : "speech");
+    }, [typedText, callState, runConversationTurn, isVideo, composeKind]);
 
     // 按住说话（非 iOS）：按下录音，松开转写后走对话轮。群聊无单角色绑定，
     // 识别配置取第一个可用的 OpenAI 兼容语音配置。
@@ -460,12 +497,16 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                     handleTextSubmit();
                 }}
             >
+                {isVideo && <div className="call-compose-modes" role="group" aria-label="输入内容类型">
+                    <button type="button" className={composeKind === "speech" ? "selected" : ""} onClick={() => setComposeKind("speech")} aria-pressed={composeKind === "speech"}>消息</button>
+                    <button type="button" className={composeKind === "action" ? "selected" : ""} onClick={() => setComposeKind("action")} aria-pressed={composeKind === "action"}>动作</button>
+                </div>}
                 <div className="call-text-input-shell">
                     <input
                         value={typedText}
                         onChange={e => setTypedText(e.target.value)}
                         className="call-text-input"
-                        placeholder={callState === "IDLE" ? "输入你想说的话..." : "稍等对方说完..."}
+                        placeholder={callState === "IDLE" ? (isVideo && composeKind === "action" ? "输入你要做的动作..." : "输入你想说的话...") : "稍等对方说完..."}
                         disabled={callState !== "IDLE"}
                     />
                     <button
@@ -677,18 +718,18 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                             <div key={char.id} className="gcall-video-tile"
                                 style={tileBg ? { backgroundImage: `url(${tileBg})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
                             >
-                                {!tileBg && (char.avatar ? (
+                                {!tileBg && (groupMemberAvatar(char) ? (
                                     <img
-                                        src={char.avatar}
-                                        alt={char.name}
+                                        src={groupMemberAvatar(char) || ""}
+                                        alt={groupMemberName(session, char.id, char)}
                                         className={`w-full h-full object-cover transition-opacity duration-300 ${callState === "CONNECTING" ? "gcall-video-avatar-dim" : "gcall-video-avatar-bright"}`}
                                     />
                                 ) : (
                                     <div className="gcall-video-tile-fallback">
-                                        <span className="ts-40 opacity-60">{char.name?.[0] || "?"}</span>
+                                        <span className="ts-40 opacity-60">{groupMemberName(session, char.id, char)?.[0] || "?"}</span>
                                     </div>
                                 ))}
-                                <div className="gcall-video-tile-name videocall-name">{char.name}</div>
+                                <div className="gcall-video-tile-name videocall-name">{groupMemberName(session, char.id, char)}</div>
                                 {isSpeaking && <div className="gcall-video-speaking-ring" />}
                             </div>
                         );
@@ -710,7 +751,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                                 <circle cx="12" cy="7" r="4" />
                             </svg>
                         ))}
-                        <div className="gcall-video-tile-name videocall-name">{userNameRef.current}</div>
+                        <div className="gcall-video-tile-name videocall-name">{groupMemberName(session, "self", null, userNameRef.current)}</div>
                     </div>
                 </div>
 
@@ -730,16 +771,20 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
 
                 {/* Subtitle overlay at bottom */}
                 <div className="call-subtitles-log call-subtitles-log-video" ref={subtitleScrollRef}>
-                    {subtitles.map((sub) => (
-                        <div
+                    {subtitles.map((sub) => sub.kind === "action" ? (
+                        <div key={sub.id} className="call-video-action" data-role={sub.role}>{sub.senderName ? `${sub.senderName}：` : ""}{sub.text}</div>
+                    ) : <div
                             key={sub.id}
                             className="call-subtitle"
                             data-role={sub.role}
                         >
                             {sub.senderName && <div className="call-subtitle-sender">{sub.senderName}</div>}
-                            <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                            {sub.role === "assistant" && sub.senderCharacterId
+                                ? <CallTranscriptBubble text={sub.text} onPlay={() => { void playSubtitle(sub); }}
+                                    playing={playingSubtitleId === sub.id} disabled={callState !== "IDLE" && playingSubtitleId !== sub.id} />
+                                : <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />}
                         </div>
-                    ))}
+                    )}
                     {interimText && callState === "USER_SPEAKING" && (
                         <div className="call-subtitle" data-interim="">{interimText}</div>
                     )}
@@ -768,7 +813,10 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
             <div className="gcall-body voicecall-controls">
                 {/* Top bar */}
                 <div className="gcall-topbar">
-                    <div className="gcall-topbar-title">群语音通话 ({characters.length + 1}人)</div>
+                    <div className="gcall-topbar-title flex items-center justify-center gap-2">
+                        {session.groupAvatar && <img src={session.groupAvatar} alt="群头像" className="h-8 w-8 rounded-[34%] object-cover" />}
+                        群语音通话 ({characters.length + 1}人)
+                    </div>
                     <div
                         className="gcall-topbar-sub"
                         {...(callState === "CONNECTING" || callState === "PROCESSING" ? { "data-anim": "" } : {})}
@@ -785,13 +833,13 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                         return (
                             <div key={char.id} className="gcall-tile" {...(isSpeaking ? { "data-speaking": "" } : {})}>
                                 <div className="gcall-tile-avatar">
-                                    {char.avatar ? (
-                                        <img src={char.avatar} alt={char.name} />
+                                    {groupMemberAvatar(char) ? (
+                                        <img src={groupMemberAvatar(char) || ""} alt={groupMemberName(session, char.id, char)} />
                                     ) : (
-                                        <span className="gcall-tile-initial">{char.name?.[0] || "?"}</span>
+                                        <span className="gcall-tile-initial">{groupMemberName(session, char.id, char)?.[0] || "?"}</span>
                                     )}
                                 </div>
-                                <div className="gcall-tile-name">{char.name}</div>
+                                <div className="gcall-tile-name">{groupMemberName(session, char.id, char)}</div>
                                 <div className="gcall-wave-bars">
                                     <div className="gcall-wave-bar" />
                                     <div className="gcall-wave-bar" />
@@ -816,7 +864,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                                 </svg>
                             )}
                         </div>
-                        <div className="gcall-tile-name">{userNameRef.current}</div>
+                        <div className="gcall-tile-name">{groupMemberName(session, "self", null, userNameRef.current)}</div>
                         <div className="gcall-wave-bars">
                             <div className="gcall-wave-bar" />
                             <div className="gcall-wave-bar" />
@@ -831,7 +879,10 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                     {subtitles.map((sub) => (
                         <div key={sub.id} className="gcall-subtitle-bubble" data-role={sub.role}>
                             {sub.senderName && <div className="gcall-subtitle-sender">{sub.senderName}</div>}
-                            <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
+                            {sub.role === "assistant" && sub.senderCharacterId
+                                ? <CallTranscriptBubble text={sub.text} onPlay={() => { void playSubtitle(sub); }}
+                                    playing={playingSubtitleId === sub.id} disabled={callState !== "IDLE" && playingSubtitleId !== sub.id} />
+                                : <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />}
                         </div>
                     ))}
                     {interimText && callState === "USER_SPEAKING" && (

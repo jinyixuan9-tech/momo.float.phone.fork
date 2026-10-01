@@ -1194,11 +1194,11 @@ function CharAvatarFallbackInline({ name }: { name: string }) {
 function GiftBubble({ msg }: { msg: ChatMessage }) {
     const d = msg.mediaData;
     const isFood = d?.label === "外卖卡";
-    const isShoppingDelivery = Boolean(d?.shoppingGiftId || d?.shoppingOrderId);
+    const isShoppingDelivery = Boolean(d?.shoppingGiftId || d?.shoppingOrderId || d?.takeoutOrderId);
     const title = d?.giftName || d?.label || "礼物";
     const recipient = d?.recipientName;
     const merchant = d?.giftMerchantLabel || "购物订单";
-    const serial = (d?.shoppingGiftId || d?.giftOrderId || msg.id || "gift")
+    const serial = (d?.takeoutOrderId || d?.shoppingGiftId || d?.giftOrderId || msg.id || "gift")
         .replace(/[^a-z0-9]/gi, "")
         .slice(-6)
         .toUpperCase() || "GIFT01";
@@ -1241,6 +1241,8 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                         )}
                         <GiftInfoCell label="编号" value={`G-${serial}`} />
                         <GiftInfoCell label="来源" value={merchant} />
+                        {d?.takeoutDestination && <GiftInfoCell label="送达地点" value={d.takeoutDestination} />}
+                        {d?.takeoutDeliverAt && !d.giftDeliveredAt && <GiftInfoCell label="预计送达" value={new Date(d.takeoutDeliverAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} />}
                         <GiftInfoCell label={isFood ? "订单金额" : "礼物值"} value={d?.giftPriceLabel || "心意礼物"} />
                         {isShoppingDelivery && <GiftInfoCell label="收货状态" value={d?.giftDeliveredAt ? "已送达" : "尚未收到 · 等待配送"} />}
                         {sentLabel && <GiftInfoCell label="送出" value={sentLabel} />}

@@ -4053,6 +4053,8 @@ export async function generateCheckPhoneTakeout(
       snapshotSummary: previousPayload ? formatSnapshotSummary(previousPayload) : "",
       lastRefreshAt: previousUpdatedAt ?? "",
     });
+    const takeoutWallet = loadWalletState(characterId);
+    messages.push({ role: "system", content: `查手机外卖只记录角色给自己下的历史订单，不包括 Chat 中给用户点的外卖。角色钱包主币种是 ${takeoutWallet.primaryCurrency}，常用币种 ${(takeoutWallet.commonCurrencies || []).join("、") || "无"}；订单的[金额]字段只写数字，必须按角色所在地和 ${takeoutWallet.primaryCurrency} 的真实购买力量级生成，不得把人民币数额套成韩元。店铺与商品符合角色所在地。刷新旧记录不要重复从钱包扣款。` });
     const rawOutput = await sendLLMRequest(
       apiConfig,
       preset,

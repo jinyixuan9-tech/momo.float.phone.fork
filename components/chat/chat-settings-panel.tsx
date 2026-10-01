@@ -36,6 +36,7 @@ import {
     type GroupAdminAction,
 } from "@/lib/group-admin";
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
+import { canSetGroupNickname, groupMemberAvatar, groupMemberName } from "@/lib/group-chat-profile";
 import { removeChatSessionCompletely } from "@/lib/chat-session-remove";
 import { triggerBlacklistReaction, triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
 import { loadSms, saveSms } from "@/lib/sms-storage";
@@ -59,7 +60,7 @@ import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
 import { SessionChatSoundsSection } from "@/components/chat/session-chat-sounds";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, Ban, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, Camera, RefreshCw, type LucideIcon } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, Ban, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, Camera, RefreshCw, UtensilsCrossed, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -479,6 +480,13 @@ export function ChatSettingsPanel({
     const [chatTransferBusy, setChatTransferBusy] = useState(false);
     const [chatTransferStatus, setChatTransferStatus] = useState<{ success: boolean; message: string } | null>(null);
     const [showAvatarDialog, setShowAvatarDialog] = useState(false);
+    const [editingGroupNicknameKey, setEditingGroupNicknameKey] = useState<string | null>(null);
+    const [groupNicknameDraft, setGroupNicknameDraft] = useState("");
+    const groupAvatarInputRef = useRef<HTMLInputElement | null>(null);
+    const [allowCharacterTakeout, setAllowCharacterTakeout] = useState(session.allowCharacterTakeout === true);
+    const [userTakeoutLocation, setUserTakeoutLocation] = useState(session.userTakeoutLocation || "");
+    const [characterTakeoutLocation, setCharacterTakeoutLocation] = useState(session.characterTakeoutLocation || "");
+    const [showTakeoutLocations, setShowTakeoutLocations] = useState(false);
     const [chatProfileName, setChatProfileName] = useState(() => getChatCharacterProfile(session.contactId)?.displayName || "");
     const [, setAvatarRevision] = useState(0);
     const ownAvatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -620,6 +628,14 @@ export function ChatSettingsPanel({
     const effectiveUserAvatar = resolveChatUserAvatar(session, userIdentity?.avatarUrl);
     const [notifyAvatarChange, setNotifyAvatarChange] = useState(session.notifyCharacterOnUserAvatarChange !== false);
 
+    const updateGroupAvatar = async (file: File) => {
+        try {
+            const avatar = await fileToAvatarDataUrl(file);
+            updateSession({ groupAvatar: avatar });
+            setAvatarRevision(value => value + 1);
+        } catch { alert("群头像图片处理失败，请换一张图片重试"); }
+    };
+
     const updateOwnAvatar = async (file: File) => {
         const avatarUrl = await fileToAvatarDataUrl(file);
         updateSession({ userAvatarOverride: avatarUrl });
@@ -671,14 +687,14 @@ export function ChatSettingsPanel({
         ? [
             ...(session.isSpectator ? [] : [{
                 key: GROUP_SELF_KEY,
-                name: `${userName}（我）`,
+                name: `${groupMemberName(session, GROUP_SELF_KEY, null, userName)}（我）`,
                 avatar: effectiveUserAvatar || undefined,
                 muteMs: getGroupMuteRemainingMs(session, GROUP_SELF_KEY),
             }]),
             ...groupChars.map(c => ({
                 key: c!.id,
-                name: c!.name,
-                avatar: c!.avatar || undefined,
+                name: groupMemberName(session, c!.id, c),
+                avatar: groupMemberAvatar(c) || undefined,
                 muteMs: getGroupMuteRemainingMs(session, c!.id),
             })),
         ]
@@ -693,6 +709,22 @@ export function ChatSettingsPanel({
         if (canGroupAdminAct(session, GROUP_SELF_KEY, "unmute", key)) items.push({ action: "unmute", label: "解除禁言" });
         if (canGroupAdminAct(session, GROUP_SELF_KEY, "kick", key)) items.push({ action: "kick", label: "移出群聊", danger: true });
         return items;
+    };
+    const openGroupNickname = (key: string) => {
+        if (!canSetGroupNickname(session, GROUP_SELF_KEY, key)) return;
+        setGroupNicknameDraft(session.groupNicknames?.[key] || "");
+        setMemberActionKey(null);
+        setEditingGroupNicknameKey(key);
+    };
+    const saveGroupNickname = () => {
+        if (!editingGroupNicknameKey || !canSetGroupNickname(session, GROUP_SELF_KEY, editingGroupNicknameKey)) return;
+        const updated = { ...session.groupNicknames };
+        const nickname = Array.from(groupNicknameDraft.trim()).slice(0, 24).join("");
+        if (nickname) updated[editingGroupNicknameKey] = nickname;
+        else delete updated[editingGroupNicknameKey];
+        updateSession({ groupNicknames: updated });
+        setEditingGroupNicknameKey(null);
+        setRosterVersion(value => value + 1);
     };
     const pushAdminNotice = (action: GroupAdminAction, actorName: string, targetKey: string, muteMinutes?: number) => {
         const targetName = getGroupMemberDisplayName(targetKey, userName);
@@ -1071,6 +1103,25 @@ export function ChatSettingsPanel({
                             <ChevronRight size={16} />
                         </div>
                     </button>
+                    {session.isGroup && <>
+                        <button className="menu-item" onClick={() => groupAvatarInputRef.current?.click()}>
+                            <ChatInfoIcon icon={Camera} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group"><span className="menu-label">群头像</span><span className="menu-desc">从手机图片选择，仅用于当前群聊</span></div>
+                            <div className="menu-right gap-2">
+                                {session.groupAvatar && <img src={session.groupAvatar} alt="群头像" className="h-8 w-8 rounded-[34%] object-cover" />}
+                                <ChevronRight size={16} />
+                            </div>
+                        </button>
+                        <input ref={groupAvatarInputRef} type="file" accept="image/*" className="hidden" onChange={event => {
+                            const file = event.target.files?.[0]; event.target.value = "";
+                            if (file) void updateGroupAvatar(file);
+                        }} />
+                        {!session.isSpectator && <button className="menu-item" onClick={() => openGroupNickname(GROUP_SELF_KEY)}>
+                            <ChatInfoIcon icon={Users} color={BINDING_ACCENTS.voice} />
+                            <div className="menu-label-group"><span className="menu-label">我的群昵称</span><span className="menu-desc">仅在当前群聊显示</span></div>
+                            <div className="menu-right"><span className="menu-desc mr-1">{session.groupNicknames?.self || "跟随 Chat 网名"}</span><ChevronRight size={16} /></div>
+                        </button>}
+                    </>}
                     {!session.isGroup && (
                         <button className="menu-item" onClick={requestCharacterRemark} disabled={refreshingCharacterRemark}>
                             <ChatInfoIcon icon={UserPlus} color={BINDING_ACCENTS.preset} />
@@ -1102,6 +1153,11 @@ export function ChatSettingsPanel({
                             </div>
                         </button>
                     )}
+                    {!session.isGroup && <button className="menu-item" onClick={() => setShowTakeoutLocations(true)}>
+                        <ChatInfoIcon icon={UtensilsCrossed} color={BINDING_ACCENTS.voice} />
+                        <div className="menu-label-group"><span className="menu-label">TA 给我点外卖</span><span className="menu-desc">{allowCharacterTakeout ? `${userTakeoutLocation || "未填我的位置"} · ${characterTakeoutLocation || "未填 TA 的位置"}` : "关闭 · 设置双方位置后可开启"}</span></div>
+                        <div className="menu-right"><span className="menu-desc mr-1">{allowCharacterTakeout ? "已开启" : "未开启"}</span><ChevronRight size={16} /></div>
+                    </button>}
                     <button className="menu-item" onClick={openSearchPanel}>
                         <ChatInfoIcon icon={Search} color={BINDING_ACCENTS.api} />
                         <div className="menu-label-group"><span className="menu-label">查找聊天记录</span></div>
@@ -1169,7 +1225,7 @@ export function ChatSettingsPanel({
                         </div>
                         {memberEntries.map(entry => {
                             const badge = roleLabel(entry.key);
-                            const actionable = memberActionsFor(entry.key).length > 0;
+                            const actionable = memberActionsFor(entry.key).length > 0 || canSetGroupNickname(session, GROUP_SELF_KEY, entry.key);
                             return (
                                 <button
                                     key={entry.key}
@@ -1182,7 +1238,8 @@ export function ChatSettingsPanel({
                                     </div>
                                     <div className="menu-label-group">
                                         <span className="menu-label">{entry.name}</span>
-                                        {entry.muteMs > 0 && (
+                                    {session.groupNicknames?.[entry.key] && <span className="menu-desc">群昵称 · {session.groupNicknames[entry.key]}</span>}
+                                    {entry.muteMs > 0 && (
                                             <span className="menu-desc">禁言中 · 剩余{formatMuteRemainingLabel(entry.muteMs)}</span>
                                         )}
                                     </div>
@@ -1647,6 +1704,7 @@ export function ChatSettingsPanel({
                             {roleLabel(memberActionKey) ? `（${roleLabel(memberActionKey)}）` : ""}
                         </span>
                         <div className="flex flex-col gap-2 w-full">
+                            {canSetGroupNickname(session, GROUP_SELF_KEY, memberActionKey) && <button className="ui-btn ui-btn-ghost w-full" onClick={() => openGroupNickname(memberActionKey)}>设置群昵称</button>}
                             {memberActionsFor(memberActionKey).map(item => (
                                 <button
                                     key={item.action}
@@ -1739,6 +1797,45 @@ export function ChatSettingsPanel({
                                 }
                                 setEditingAlias(false);
                             }} className="ui-btn ui-btn-success flex-1">保存</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {editingGroupNicknameKey && (
+                <div className="modal-overlay" onClick={() => setEditingGroupNicknameKey(null)}>
+                    <div className="modal-dialog" onClick={event => event.stopPropagation()}>
+                        <div className="ts-17 font-semibold text-center text-[var(--c-text)]">设置群昵称</div>
+                        <span className="menu-desc">{editingGroupNicknameKey === GROUP_SELF_KEY ? "我的群昵称" : groupMemberName(session, editingGroupNicknameKey, characters.find(c => c.id === editingGroupNicknameKey), userName)} · 留空恢复 Chat 网名</span>
+                        <Input value={groupNicknameDraft} maxLength={24} onChange={event => setGroupNicknameDraft(event.target.value)} placeholder="输入群昵称" />
+                        <div className="flex gap-3 w-full">
+                            <button className="ui-btn ui-btn-ghost flex-1" onClick={() => setEditingGroupNicknameKey(null)}>取消</button>
+                            <button className="ui-btn ui-btn-success flex-1" onClick={saveGroupNickname}>保存</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showTakeoutLocations && !session.isGroup && (
+                <div className="modal-overlay" onClick={() => setShowTakeoutLocations(false)}>
+                    <div className="modal-dialog" onClick={event => event.stopPropagation()}>
+                        <div className="ts-17 font-semibold text-center text-[var(--c-text)]">TA 给我点外卖</div>
+                        <span className="menu-desc">外卖送到我的位置；双方异地时，店铺和价格按我的所在地生成。</span>
+                        <label className="w-full ts-13">我的位置<Input value={userTakeoutLocation} onChange={event => setUserTakeoutLocation(event.target.value)} placeholder="例如：中国上海" /></label>
+                        <label className="w-full ts-13">TA 的位置<Input value={characterTakeoutLocation} onChange={event => setCharacterTakeoutLocation(event.target.value)} placeholder="例如：韩国首尔" /></label>
+                        <div className="menu-item w-full">
+                            <div className="menu-label-group"><span className="menu-label">允许 TA 给我点外卖</span></div>
+                            <div className="menu-right"><Toggle checked={allowCharacterTakeout} onChange={setAllowCharacterTakeout} /></div>
+                        </div>
+                        <div className="flex gap-3 w-full">
+                            <button className="ui-btn ui-btn-ghost flex-1" onClick={() => setShowTakeoutLocations(false)}>取消</button>
+                            <button className="ui-btn ui-btn-success flex-1" onClick={() => {
+                                if (allowCharacterTakeout && (!userTakeoutLocation.trim() || !characterTakeoutLocation.trim())) {
+                                    alert("开启前请填写双方位置"); return;
+                                }
+                                updateSession({ allowCharacterTakeout, userTakeoutLocation: userTakeoutLocation.trim().slice(0, 120), characterTakeoutLocation: characterTakeoutLocation.trim().slice(0, 120) });
+                                setShowTakeoutLocations(false);
+                            }}>保存</button>
                         </div>
                     </div>
                 </div>

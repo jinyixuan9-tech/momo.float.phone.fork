@@ -1,4 +1,4 @@
-import { createOrGetSession, loadChatMessages, pushChatMessage, updateMessageMediaData } from "./chat-storage";
+import { createOrGetSession, loadChatMessages, loadChatSessions, pushChatMessage, updateMessageMediaData } from "./chat-storage";
 import { loadShoppingState, saveShoppingState } from "./shopping-storage";
 import type { ShoppingAddress, ShoppingOrder, ShoppingShipment, ShoppingState } from "./shopping-types";
 
@@ -44,6 +44,7 @@ function markChatDelivery(sessionId: string, matches: (data: NonNullable<ReturnT
 
 export function syncShoppingDeliveries(): void {
   if (typeof window === "undefined") return;
+  syncCharacterTakeoutDeliveries();
   const state = loadShoppingState();
   const now = Date.now();
   let changed = false;
@@ -69,4 +70,25 @@ export function syncShoppingDeliveries(): void {
     return { ...o, deliveryNoticeSentAt: new Date().toISOString() };
   });
   if (changed) saveShoppingState({ ...state, shipments, orders });
+}
+
+/** Chat-only orders have no Shopping order; the card and the centered notice are the receipt. */
+export function syncCharacterTakeoutDeliveries(): void {
+  if (typeof window === "undefined") return;
+  const now = Date.now();
+  for (const session of loadChatSessions()) {
+    if (session.isGroup) continue;
+    for (const message of loadChatMessages(session.id)) {
+      const data = message.mediaData;
+      if (message.role !== "assistant" || message.mediaType !== "gift" || !data?.takeoutOrderId
+        || !data.takeoutDeliverAt || data.giftDeliveredAt) continue;
+      const eta = Date.parse(data.takeoutDeliverAt);
+      if (!Number.isFinite(eta) || eta > now) continue;
+      updateMessageMediaData(message.id, { ...data, giftDeliveredAt: new Date(now).toISOString() });
+      pushChatMessage({ sessionId: session.id, role: "system",
+        content: `外卖已送达 · ${data.takeoutShop || "店铺"} · ${data.takeoutItems || data.giftName || "餐品"}`,
+        mediaData: { label: "__shopping_delivery__", takeoutOrderId: data.takeoutOrderId } });
+      window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+    }
+  }
 }

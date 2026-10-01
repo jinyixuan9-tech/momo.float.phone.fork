@@ -12,7 +12,7 @@ import { resolveUserIdentity } from "./settings-storage";
 import { loadCharacters } from "./character-storage";
 import { updateChatCharacterProfile } from "./chat-profile-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import { recordWalletPayment, walletCurrency } from "./wallet-storage";
+import { recordWalletPayment, walletCurrency, WALLET_CURRENCIES } from "./wallet-storage";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
 import { extractTextToolDirectiveText } from "./text-tool-protocol";
@@ -91,8 +91,16 @@ export type ChatSession = {
     // Group chat fields
     isGroup?: boolean;
     groupName?: string;
+    /** 群头像覆盖图；不改变成员各自的 Chat 头像。 */
+    groupAvatar?: string;
+    /** 群内显示昵称；self 为用户，其余键为角色 id。 */
+    groupNicknames?: Record<string, string>;
     participantIds?: string[]; // characterId array
     groupVideoBackgrounds?: Record<string, string>; // characterId|"self" → image ID
+    /** 是否允许当前私聊的角色给用户点外卖；默认关闭。 */
+    allowCharacterTakeout?: boolean;
+    userTakeoutLocation?: string;
+    characterTakeoutLocation?: string;
     // Group admin fields ("self" = the user)
     groupOwnerId?: string; // "self" | characterId; legacy groups default to "self", spectator groups to first member
     groupAdminIds?: string[]; // characterId | "self"
@@ -179,6 +187,11 @@ export type ChatMessage = {
         giftTone?: "ivory" | "mist" | "blush" | "graphite";
         giftDeliveredAt?: string;// 到货时间
         giftSentAt?: string;     // 送出时间
+        takeoutOrderId?: string; // 角色在当前单聊为用户下的外卖订单
+        takeoutShop?: string;
+        takeoutItems?: string;
+        takeoutDeliverAt?: string;
+        takeoutDestination?: string;
         paymentRequestId?: string; // 代付请求 ID
         shoppingOrderId?: string;  // 代付关联购物订单 ID
         paymentRequestAmountLabel?: string; // 代付金额展示
@@ -1390,6 +1403,21 @@ function createMessageId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Check the destination currency when the location clearly names a country or city. */
+function takeoutCurrencyForLocation(location: string): string | undefined {
+    const value = location.toLowerCase();
+    const regions: Array<[RegExp, string]> = [
+        [/香港|hong kong/, "HKD"], [/台湾|台北|taiwan|taipei/, "TWD"],
+        [/中国|大陆|北京|上海|广州|深圳|成都|杭州|china|beijing|shanghai/, "CNY"],
+        [/韩国|首尔|釜山|仁川|korea|seoul|busan/, "KRW"],
+        [/日本|东京|大阪|京都|japan|tokyo|osaka/, "JPY"],
+        [/美国|纽约|洛杉矶|旧金山|usa|united states|new york|los angeles/, "USD"],
+        [/澳大利亚|悉尼|墨尔本|australia|sydney|melbourne/, "AUD"],
+        [/法国|德国|意大利|西班牙|巴黎|柏林|euro|france|germany|paris|berlin/, "EUR"],
+    ];
+    return regions.find(([pattern]) => pattern.test(value))?.[1];
+}
+
 export function createResponseBatchId(): string {
     return `resp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -1431,19 +1459,52 @@ export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "sta
         }
     }
 
-    // AI-created money cards use the same ledger as user-initiated transfers.
+    // A character may order food only in an enabled private chat with both locations set.
+    const paymentSession = _sessionsCache.find(item => item.id === newMsg.sessionId);
+    if (newMsg.role === "assistant" && newMsg.mediaType === "gift" && newMsg.mediaData?.takeoutOrderId
+        && (paymentSession?.isGroup || !paymentSession?.allowCharacterTakeout
+            || !paymentSession?.userTakeoutLocation?.trim() || !paymentSession?.characterTakeoutLocation?.trim())) {
+        newMsg.content = "外卖订单未生成：此聊天尚未开启角色点外卖并设置双方位置。";
+        newMsg.mediaType = undefined;
+        newMsg.mediaData = undefined;
+    }
+    if (newMsg.role === "assistant" && newMsg.mediaType === "gift" && newMsg.mediaData?.takeoutOrderId) {
+        const destinationCurrency = takeoutCurrencyForLocation(paymentSession?.userTakeoutLocation || "");
+        if (destinationCurrency && newMsg.mediaData.currency !== destinationCurrency) {
+            newMsg.content = `外卖订单未生成：收餐地点应使用 ${destinationCurrency} 计价。`;
+            newMsg.mediaType = undefined;
+            newMsg.mediaData = undefined;
+        }
+    }
+    if (newMsg.role === "assistant" && newMsg.mediaType === "gift" && paymentSession?.isGroup) {
+        newMsg.mediaType = undefined;
+        newMsg.mediaData = undefined;
+        newMsg.content = "";
+    }
+    if (newMsg.role === "assistant" && newMsg.mediaType === "gift" && newMsg.mediaData?.takeoutOrderId) {
+        newMsg.mediaData = { ...newMsg.mediaData, takeoutDestination: paymentSession?.userTakeoutLocation?.trim(), recipientName: "我" };
+    }
+
+    // AI-created money cards and priced gifts/food use the same character ledger.
     if (typeof window !== "undefined" && newMsg.role === "assistant" && newMsg.status !== "rejected"
-        && (newMsg.mediaType === "red_packet" || newMsg.mediaType === "transfer") && !newMsg.mediaData?.walletTransactionId) {
-        const senderId = newMsg.senderCharacterId || _sessionsCache.find(item => item.id === newMsg.sessionId)?.contactId;
+        && (newMsg.mediaType === "red_packet" || newMsg.mediaType === "transfer" || newMsg.mediaType === "gift") && !newMsg.mediaData?.walletTransactionId) {
+        const senderId = newMsg.senderCharacterId || paymentSession?.contactId;
         const amount = Number(newMsg.mediaData?.amount);
-        if (senderId && Number.isFinite(amount) && amount > 0) {
+        const pricedGift = newMsg.mediaType === "gift";
+        if (pricedGift && (!Number.isFinite(amount) || amount <= 0 || !WALLET_CURRENCIES.includes(newMsg.mediaData?.currency as typeof WALLET_CURRENCIES[number]))) {
+            newMsg.content = "礼物未送出：缺少真实价格或币种。";
+            newMsg.mediaType = undefined;
+            newMsg.mediaData = undefined;
+        } else if (senderId && Number.isFinite(amount) && amount > 0) {
+            const isTakeout = Boolean(newMsg.mediaData?.takeoutOrderId);
             const result = recordWalletPayment({ ownerId: senderId, amount, currency: walletCurrency(newMsg.mediaData?.currency),
-                title: newMsg.mediaType === "red_packet" ? "发红包" : "发转账", category: newMsg.mediaType === "red_packet" ? "红包" : "转账",
-                detail: `Chat 发给用户 ${amount}`, relatedMessageId: newMsg.id });
+                title: isTakeout ? `为用户点外卖 · ${newMsg.mediaData?.takeoutShop || "外卖"}` : newMsg.mediaType === "gift" ? `送礼 · ${newMsg.mediaData?.giftName || "礼物"}` : newMsg.mediaType === "red_packet" ? "发红包" : "发转账",
+                category: isTakeout ? "外卖" : newMsg.mediaType === "gift" ? "礼物" : newMsg.mediaType === "red_packet" ? "红包" : "转账",
+                detail: `${isTakeout ? `送到 ${newMsg.mediaData?.takeoutDestination || "用户所在地"}` : "Chat 发给用户"} ${amount}`, relatedMessageId: newMsg.id });
             if (result.ok && result.transaction) {
                 newMsg.mediaData = { ...newMsg.mediaData, walletTransactionId: result.transaction.id };
             } else {
-                newMsg.content = `${newMsg.content ? `${newMsg.content}\n` : ""}${newMsg.mediaType === "red_packet" ? "红包" : "转账"}未成功：${result.error || "钱包余额不足"}`;
+                newMsg.content = `${newMsg.content ? `${newMsg.content}\n` : ""}${isTakeout ? "外卖" : newMsg.mediaType === "gift" ? "礼物" : newMsg.mediaType === "red_packet" ? "红包" : "转账"}未成功：${result.error || "钱包余额不足"}`;
                 newMsg.mediaType = undefined;
                 newMsg.mediaData = undefined;
             }
