@@ -6029,7 +6029,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             return next;
                                         });
                                     }}
-                                    className="chat-sys-msg flex items-center justify-center gap-[6px] py-[6px] px-[14px] mx-auto rounded-2xl cursor-pointer relative"
+                                    className="chat-sys-msg chat-vc-group-toggle flex items-center justify-center gap-[6px] py-[6px] px-[14px] mx-auto rounded-2xl cursor-pointer relative"
                                     {...(activeMessageId === `vc-${vcGroup.startId}` ? { "data-active": "" } : {})}
                                 >
                                     {vcGroup.callType === "video" ? (
@@ -6178,8 +6178,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     // Empty bubble: no visible content AND no visual media AND no folded panel.
                     const isEmptyBubble = !isVisualMedia && !visibleContent && uiRole(msg) !== "system" && !hasFoldedPanel;
                     const isBatchEnd = !session.isGroup && (msg.role === "user" || msg.role === "assistant")
+                        && uiRole(msg) !== "system" && !msg.isRetracted
                         && !hiddenEmpty && !isEmptyBubble && !isSilentThought
                         && (!nextVisibleMsg || chatKktBatchKey(nextVisibleMsg) !== chatKktBatchKey(msg));
+                    const batchTimeMessage = photoGroup[photoGroup.length - 1];
+                    const batchMeta = isBatchEnd ? (
+                        <div className="chat-kkt-batch-meta" data-role={msg.role}>
+                            {unreadKktBatches.has(chatKktBatchKey(msg)) && <span className="chat-kkt-batch-unread">1</span>}
+                            <time dateTime={batchTimeMessage.createdAt}>{formatKktChatClock(batchTimeMessage.createdAt)}</time>
+                        </div>
+                    ) : null;
                     const selectableStoredId = getSelectableStoredMessageId(msg);
                     const isMultiSelectable = isMultiSelectMode && !!selectableStoredId && !hiddenEmpty;
                     const isMultiSelected = !!selectableStoredId && selectedMessageIds.has(selectableStoredId);
@@ -6235,6 +6243,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         {isMultiSelected && <Check size={14} strokeWidth={2.5} />}
                                     </span>
                                 )}
+                                {msg.role === "user" && batchMeta}
                                 {uiRole(msg) === "system" ? (
                                     <div
                                         onPointerDown={(e) => { e.stopPropagation(); handleMessagePointerDown(e, msg.id); }}
@@ -6450,6 +6459,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             />
                                         </div>
                                         </div>}
+                                        {msg.role === "assistant" && batchMeta}
                                         {msg.role !== "user" && !isSilentThought && !isEmptyBubble && hasFoldedPanel && (
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); setExpandedThinkingId(prev => prev === msg.id ? null : msg.id); }}
@@ -6506,12 +6516,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         />
                                     </div>
                                     {msg.role === "user" && <div className="w-[40px] shrink-0" />}
-                                </div>
-                            )}
-                            {isBatchEnd && (
-                                <div className="chat-kkt-batch-meta" data-role={msg.role}>
-                                    {unreadKktBatches.has(chatKktBatchKey(msg)) && <span className="chat-kkt-batch-unread">1</span>}
-                                    <time dateTime={msg.createdAt}>{formatKktChatClock(msg.createdAt)}</time>
                                 </div>
                             )}
                             {/* 状态栏：一律裸渲染，不套便利贴外框（自定义模式下交给用户的渲染代码，
