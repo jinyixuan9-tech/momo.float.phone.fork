@@ -4,7 +4,7 @@
 
 .chat-app {
   background: transparent;
-  --kkt-avatar-radius: 34%;
+  --kkt-avatar-radius: 45%;
   --ctx-menu-bg: #2c2c2c;
   --page-header-content-height: 54px;
   --chat-tabbar-content-height: 68px;
@@ -7876,3 +7876,31 @@
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+
+/* One continuous KKT avatar contour at each location's existing width and height.
+   Shape is a 2.6-exponent superellipse, sampled as an SVG path for consistent rendering.
+   The outer mask does all clipping; inner images must not round the outline again. */
+.chat-app, .moments-feed-page { --kkt-avatar-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik01MC4wMDAsMC4wMDAgTDU0LjE0NCwwLjAzMCBMNTcuMDU4LDAuMTE5IEw1OS42MzIsMC4yNjcgTDYyLjAwMSwwLjQ3NCBMNjQuMjIzLDAuNzQxIEw2Ni4zMjksMS4wNjYgTDY4LjMzNywxLjQ1MCBMNzAuMjYwLDEuODkzIEw3Mi4xMDcsMi4zOTUgTDczLjg4MiwyLjk1NCBMNzUuNTkxLDMuNTcyIEw3Ny4yMzcsNC4yNDcgTDc4LjgyMiw0Ljk4MCBMODAuMzQ3LDUuNzcwIEw4MS44MTQsNi42MTggTDgzLjIyNCw3LjUyMiBMODQuNTc3LDguNDgyIEw4NS44NzMsOS40OTkgTDg3LjExNCwxMC41NzIgTDg4LjI5OSwxMS43MDEgTDg5LjQyOCwxMi44ODYgTDkwLjUwMSwxNC4xMjcgTDkxLjUxOCwxNS40MjMgTDkyLjQ3OCwxNi43NzYgTDkzLjM4MiwxOC4xODYgTDk0LjIzMCwxOS42NTMgTDk1LjAyMCwyMS4xNzggTDk1Ljc1MywyMi43NjMgTDk2LjQyOCwyNC40MDkgTDk3LjA0NiwyNi4xMTggTDk3LjYwNSwyNy44OTMgTDk4LjEwNywyOS43NDAgTDk4LjU1MCwzMS42NjMgTDk4LjkzNCwzMy42NzEgTDk5LjI1OSwzNS43NzcgTDk5LjUyNiwzNy45OTkgTDk5LjczMyw0MC4zNjggTDk5Ljg4MSw0Mi45NDIgTDk5Ljk3MCw0NS44NTYgTDEwMC4wMDAsNTAuMDAwIEw5OS45NzAsNTQuMTQ0IEw5OS44ODEsNTcuMDU4IEw5OS43MzMsNTkuNjMyIEw5OS41MjYsNjIuMDAxIEw5OS4yNTksNjQuMjIzIEw5OC45MzQsNjYuMzI5IEw5OC41NTAsNjguMzM3IEw5OC4xMDcsNzAuMjYwIEw5Ny42MDUsNzIuMTA3IEw5Ny4wNDYsNzMuODgyIEw5Ni40MjgsNzUuNTkxIEw5NS43NTMsNzcuMjM3IEw5NS4wMjAsNzguODIyIEw5NC4yMzAsODAuMzQ3IEw5My4zODIsODEuODE0IEw5Mi40NzgsODMuMjI0IEw5MS41MTgsODQuNTc3IEw5MC41MDEsODUuODczIEw4OS40MjgsODcuMTE0IEw4OC4yOTksODguMjk5IEw4Ny4xMTQsODkuNDI4IEw4NS44NzMsOTAuNTAxIEw4NC41NzcsOTEuNTE4IEw4My4yMjQsOTIuNDc4IEw4MS44MTQsOTMuMzgyIEw4MC4zNDcsOTQuMjMwIEw3OC44MjIsOTUuMDIwIEw3Ny4yMzcsOTUuNzUzIEw3NS41OTEsOTYuNDI4IEw3My44ODIsOTcuMDQ2IEw3Mi4xMDcsOTcuNjA1IEw3MC4yNjAsOTguMTA3IEw2OC4zMzcsOTguNTUwIEw2Ni4zMjksOTguOTM0IEw2NC4yMjMsOTkuMjU5IEw2Mi4wMDEsOTkuNTI2IEw1OS42MzIsOTkuNzMzIEw1Ny4wNTgsOTkuODgxIEw1NC4xNDQsOTkuOTcwIEw1MC4wMDAsMTAwLjAwMCBMNDUuODU2LDk5Ljk3MCBMNDIuOTQyLDk5Ljg4MSBMNDAuMzY4LDk5LjczMyBMMzcuOTk5LDk5LjUyNiBMMzUuNzc3LDk5LjI1OSBMMzMuNjcxLDk4LjkzNCBMMzEuNjYzLDk4LjU1MCBMMjkuNzQwLDk4LjEwNyBMMjcuODkzLDk3LjYwNSBMMjYuMTE4LDk3LjA0NiBMMjQuNDA5LDk2LjQyOCBMMjIuNzYzLDk1Ljc1MyBMMjEuMTc4LDk1LjAyMCBMMTkuNjUzLDk0LjIzMCBMMTguMTg2LDkzLjM4MiBMMTYuNzc2LDkyLjQ3OCBMMTUuNDIzLDkxLjUxOCBMMTQuMTI3LDkwLjUwMSBMMTIuODg2LDg5LjQyOCBMMTEuNzAxLDg4LjI5OSBMMTAuNTcyLDg3LjExNCBMOS40OTksODUuODczIEw4LjQ4Miw4NC41NzcgTDcuNTIyLDgzLjIyNCBMNi42MTgsODEuODE0IEw1Ljc3MCw4MC4zNDcgTDQuOTgwLDc4LjgyMiBMNC4yNDcsNzcuMjM3IEwzLjU3Miw3NS41OTEgTDIuOTU0LDczLjg4MiBMMi4zOTUsNzIuMTA3IEwxLjg5Myw3MC4yNjAgTDEuNDUwLDY4LjMzNyBMMS4wNjYsNjYuMzI5IEwwLjc0MSw2NC4yMjMgTDAuNDc0LDYyLjAwMSBMMC4yNjcsNTkuNjMyIEwwLjExOSw1Ny4wNTggTDAuMDMwLDU0LjE0NCBMMC4wMDAsNTAuMDAwIEwwLjAzMCw0NS44NTYgTDAuMTE5LDQyLjk0MiBMMC4yNjcsNDAuMzY4IEwwLjQ3NCwzNy45OTkgTDAuNzQxLDM1Ljc3NyBMMS4wNjYsMzMuNjcxIEwxLjQ1MCwzMS42NjMgTDEuODkzLDI5Ljc0MCBMMi4zOTUsMjcuODkzIEwyLjk1NCwyNi4xMTggTDMuNTcyLDI0LjQwOSBMNC4yNDcsMjIuNzYzIEw0Ljk4MCwyMS4xNzggTDUuNzcwLDE5LjY1MyBMNi42MTgsMTguMTg2IEw3LjUyMiwxNi43NzYgTDguNDgyLDE1LjQyMyBMOS40OTksMTQuMTI3IEwxMC41NzIsMTIuODg2IEwxMS43MDEsMTEuNzAxIEwxMi44ODYsMTAuNTcyIEwxNC4xMjcsOS40OTkgTDE1LjQyMyw4LjQ4MiBMMTYuNzc2LDcuNTIyIEwxOC4xODYsNi42MTggTDE5LjY1Myw1Ljc3MCBMMjEuMTc4LDQuOTgwIEwyMi43NjMsNC4yNDcgTDI0LjQwOSwzLjU3MiBMMjYuMTE4LDIuOTU0IEwyNy44OTMsMi4zOTUgTDI5Ljc0MCwxLjg5MyBMMzEuNjYzLDEuNDUwIEwzMy42NzEsMS4wNjYgTDM1Ljc3NywwLjc0MSBMMzcuOTk5LDAuNDc0IEw0MC4zNjgsMC4yNjcgTDQyLjk0MiwwLjExOSBMNDUuODU2LDAuMDMwIEw1MC4wMDAsMC4wMDAgWiIvPjwvc3ZnPg=="); }
+.moments-feed-page .moments-squircle-avatar,
+.moments-feed-page .feed-post-author-avatar,
+.moments-feed-page .feed-comment-avatar-root,
+.moments-feed-page .feed-comment-avatar-child,
+.chat-app .kkt-own-avatar,
+.chat-app .kkt-update-avatar,
+.chat-app .kkt-list-page .minimal-avatar-wrapper {
+  -webkit-mask-image: var(--kkt-avatar-mask);
+  mask-image: var(--kkt-avatar-mask);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  border-radius: 45%; /* Fallback where CSS masks are unsupported. */
+  overflow: hidden;
+}
+.moments-feed-page .moments-squircle-avatar img,
+.moments-feed-page .feed-post-author-avatar img,
+.moments-feed-page .feed-comment-avatar img,
+.chat-app .kkt-own-avatar img,
+.chat-app .kkt-update-avatar img { border-radius: 0 !important; }
+.chat-app .kkt-list-page .minimal-avatar-wrapper > img,
+.chat-app .kkt-list-page .minimal-avatar-wrapper .rounded-full { border-radius: 0 !important; }
