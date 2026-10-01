@@ -3176,22 +3176,34 @@
   box-shadow: none;
   padding: 0;
 }
+.chat-kkt-bubble-line { display: contents; }
+.chat-kkt-bubble-line[data-has-batch-meta] {
+  display: flex;
+  align-items: flex-end;
+  align-self: flex-start;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+}
+.chat-kkt-bubble-line[data-has-batch-meta][data-role="user"] { align-self: flex-end; }
+.chat-kkt-bubble-line[data-has-batch-meta] > [data-ui] { min-width: 0; flex: 0 1 auto; }
 .chat-kkt-batch-meta {
   display: flex;
   flex-direction: column;
   flex: none;
   align-self: flex-end;
   width: max-content;
-  gap: 1px;
-  margin-bottom: 2px;
+  gap: 0;
+  margin-bottom: 1px;
   color: #686868;
   font-size: calc(10px * var(--app-text-scale, 1));
   line-height: 1.2;
   white-space: nowrap;
   pointer-events: none;
 }
-.chat-kkt-batch-meta[data-role="assistant"] { align-items: flex-start; }
-.chat-kkt-batch-meta[data-role="user"] { align-items: flex-end; }
+.chat-kkt-batch-meta[data-role="assistant"] { align-items: flex-start; text-align: left; }
+.chat-kkt-batch-meta[data-role="user"] { align-items: flex-end; text-align: right; }
 .chat-kkt-batch-unread { color: #c5a500; font-size: 11px; font-weight: 700; }
 
 /* Call history uses the same system-message token as date chips. Keep its
@@ -7878,9 +7890,9 @@
 }
 
 /* One continuous KKT avatar contour at each location's existing width and height.
-   Shape is a 2.9-exponent, slightly wide superellipse, sampled as an SVG path for consistent rendering.
+   Shape follows a hand-shaped continuous curve traced from the original avatar examples.
    The outer mask does all clipping; inner images must not round the outline again. */
-.chat-app, .moments-feed-page { --kkt-avatar-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik01MC4wMDAsMy40NDAgTDU1LjIwMCwzLjQ2NSBMNTguMzg0LDMuNTM5IEw2MS4wNzgsMy42NjMgTDYzLjQ5MywzLjgzNiBMNjUuNzEzLDQuMDU5IEw2Ny43ODMsNC4zMzEgTDY5LjczMiw0LjY1MyBMNzEuNTc4LDUuMDI0IEw3My4zMzIsNS40NDQgTDc1LjAwNiw1LjkxNCBMNzYuNjA0LDYuNDMzIEw3OC4xMzQsNy4wMDIgTDc5LjU5Nyw3LjYyMCBMODAuOTk3LDguMjg4IEw4Mi4zMzcsOS4wMDUgTDgzLjYxOSw5Ljc3MSBMODQuODQzLDEwLjU4OCBMODYuMDEzLDExLjQ1NCBMODcuMTI4LDEyLjM3MSBMODguMTg5LDEzLjMzOSBMODkuMTk3LDE0LjM1NyBMOTAuMTUyLDE1LjQyNyBMOTEuMDU0LDE2LjU1MCBMOTEuOTA1LDE3LjcyNiBMOTIuNzAzLDE4Ljk1NiBMOTMuNDUwLDIwLjI0MyBMOTQuMTQ2LDIxLjU4OCBMOTQuNzkwLDIyLjk5MiBMOTUuMzgxLDI0LjQ2MCBMOTUuOTIzLDI1Ljk5NCBMOTYuNDEzLDI3LjYwMSBMOTYuODUwLDI5LjI4NiBMOTcuMjM3LDMxLjA1NyBMOTcuNTcyLDMyLjkyOCBMOTcuODU1LDM0LjkxNiBMOTguMDg4LDM3LjA0NyBMOTguMjY4LDM5LjM2NSBMOTguMzk3LDQxLjk1MiBMOTguNDc0LDQ1LjAwNyBMOTguNTAwLDUwLjAwMCBMOTguNDc0LDU0Ljk5MyBMOTguMzk3LDU4LjA0OCBMOTguMjY4LDYwLjYzNSBMOTguMDg4LDYyLjk1MyBMOTcuODU1LDY1LjA4NCBMOTcuNTcyLDY3LjA3MiBMOTcuMjM3LDY4Ljk0MyBMOTYuODUwLDcwLjcxNCBMOTYuNDEzLDcyLjM5OSBMOTUuOTIzLDc0LjAwNiBMOTUuMzgxLDc1LjU0MCBMOTQuNzkwLDc3LjAwOCBMOTQuMTQ2LDc4LjQxMiBMOTMuNDUwLDc5Ljc1NyBMOTIuNzAzLDgxLjA0NCBMOTEuOTA1LDgyLjI3NCBMOTEuMDU0LDgzLjQ1MCBMOTAuMTUyLDg0LjU3MyBMODkuMTk3LDg1LjY0MyBMODguMTg5LDg2LjY2MSBMODcuMTI4LDg3LjYyOSBMODYuMDEzLDg4LjU0NiBMODQuODQzLDg5LjQxMiBMODMuNjE5LDkwLjIyOSBMODIuMzM3LDkwLjk5NSBMODAuOTk3LDkxLjcxMiBMNzkuNTk3LDkyLjM4MCBMNzguMTM0LDkyLjk5OCBMNzYuNjA0LDkzLjU2NyBMNzUuMDA2LDk0LjA4NiBMNzMuMzMyLDk0LjU1NiBMNzEuNTc4LDk0Ljk3NiBMNjkuNzMyLDk1LjM0NyBMNjcuNzgzLDk1LjY2OSBMNjUuNzEzLDk1Ljk0MSBMNjMuNDkzLDk2LjE2NCBMNjEuMDc4LDk2LjMzNyBMNTguMzg0LDk2LjQ2MSBMNTUuMjAwLDk2LjUzNSBMNTAuMDAwLDk2LjU2MCBMNDQuODAwLDk2LjUzNSBMNDEuNjE2LDk2LjQ2MSBMMzguOTIyLDk2LjMzNyBMMzYuNTA3LDk2LjE2NCBMMzQuMjg3LDk1Ljk0MSBMMzIuMjE3LDk1LjY2OSBMMzAuMjY4LDk1LjM0NyBMMjguNDIyLDk0Ljk3NiBMMjYuNjY4LDk0LjU1NiBMMjQuOTk0LDk0LjA4NiBMMjMuMzk2LDkzLjU2NyBMMjEuODY2LDkyLjk5OCBMMjAuNDAzLDkyLjM4MCBMMTkuMDAzLDkxLjcxMiBMMTcuNjYzLDkwLjk5NSBMMTYuMzgxLDkwLjIyOSBMMTUuMTU3LDg5LjQxMiBMMTMuOTg3LDg4LjU0NiBMMTIuODcyLDg3LjYyOSBMMTEuODExLDg2LjY2MSBMMTAuODAzLDg1LjY0MyBMOS44NDgsODQuNTczIEw4Ljk0Niw4My40NTAgTDguMDk1LDgyLjI3NCBMNy4yOTcsODEuMDQ0IEw2LjU1MCw3OS43NTcgTDUuODU0LDc4LjQxMiBMNS4yMTAsNzcuMDA4IEw0LjYxOSw3NS41NDAgTDQuMDc3LDc0LjAwNiBMMy41ODcsNzIuMzk5IEwzLjE1MCw3MC43MTQgTDIuNzYzLDY4Ljk0MyBMMi40MjgsNjcuMDcyIEwyLjE0NSw2NS4wODQgTDEuOTEyLDYyLjk1MyBMMS43MzIsNjAuNjM1IEwxLjYwMyw1OC4wNDggTDEuNTI2LDU0Ljk5MyBMMS41MDAsNTAuMDAwIEwxLjUyNiw0NS4wMDcgTDEuNjAzLDQxLjk1MiBMMS43MzIsMzkuMzY1IEwxLjkxMiwzNy4wNDcgTDIuMTQ1LDM0LjkxNiBMMi40MjgsMzIuOTI4IEwyLjc2MywzMS4wNTcgTDMuMTUwLDI5LjI4NiBMMy41ODcsMjcuNjAxIEw0LjA3NywyNS45OTQgTDQuNjE5LDI0LjQ2MCBMNS4yMTAsMjIuOTkyIEw1Ljg1NCwyMS41ODggTDYuNTUwLDIwLjI0MyBMNy4yOTcsMTguOTU2IEw4LjA5NSwxNy43MjYgTDguOTQ2LDE2LjU1MCBMOS44NDgsMTUuNDI3IEwxMC44MDMsMTQuMzU3IEwxMS44MTEsMTMuMzM5IEwxMi44NzIsMTIuMzcxIEwxMy45ODcsMTEuNDU0IEwxNS4xNTcsMTAuNTg4IEwxNi4zODEsOS43NzEgTDE3LjY2Myw5LjAwNSBMMTkuMDAzLDguMjg4IEwyMC40MDMsNy42MjAgTDIxLjg2Niw3LjAwMiBMMjMuMzk2LDYuNDMzIEwyNC45OTQsNS45MTQgTDI2LjY2OCw1LjQ0NCBMMjguNDIyLDUuMDI0IEwzMC4yNjgsNC42NTMgTDMyLjIxNyw0LjMzMSBMMzQuMjg3LDQuMDU5IEwzNi41MDcsMy44MzYgTDM4LjkyMiwzLjY2MyBMNDEuNjE2LDMuNTM5IEw0NC44MDAsMy40NjUgTDUwLjAwMCwzLjQ0MCBaIi8+PC9zdmc+"); }
+.chat-app, .moments-feed-page { --kkt-avatar-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik01MCAyIEM2Ny41IDIgODkgMTAuNSA5Ni41IDI4LjUgQzk5IDM0LjUgOTguNSA0MyA5OC41IDUwIEM5OC41IDU3IDk5IDY1LjUgOTYuNSA3MS41IEM4OSA4OS41IDY3LjUgOTggNTAgOTggQzMyLjUgOTggMTEgODkuNSAzLjUgNzEuNSBDMSA2NS41IDEuNSA1NyAxLjUgNTAgQzEuNSA0MyAxIDM0LjUgMy41IDI4LjUgQzExIDEwLjUgMzIuNSAyIDUwIDIgWiIvPjwvc3ZnPg=="); }
 .moments-feed-page .moments-squircle-avatar,
 .moments-feed-page .feed-post-author-avatar,
 .moments-feed-page .feed-comment-avatar-root,

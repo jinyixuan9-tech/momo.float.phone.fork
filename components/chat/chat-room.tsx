@@ -6243,7 +6243,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         {isMultiSelected && <Check size={14} strokeWidth={2.5} />}
                                     </span>
                                 )}
-                                {msg.role === "user" && batchMeta}
                                 {uiRole(msg) === "system" ? (
                                     <div
                                         onPointerDown={(e) => { e.stopPropagation(); handleMessagePointerDown(e, msg.id); }}
@@ -6408,6 +6407,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             {!session.isGroup && msg.role === "assistant" && !isConsecutive && (
                                                 <span className="chat-kkt-sender-name">{quoteCharacterName}</span>
                                             )}
+                                            <div className="chat-kkt-bubble-line" data-role={msg.role} {...(batchMeta ? { "data-has-batch-meta": "" } : {})}>
+                                            {msg.role === "user" && batchMeta}
                                             <div
                                             {...(editingMessageId !== msg.id ? {
                                                 onPointerDown: (e: React.PointerEvent) => { e.stopPropagation(); handleMessagePointerDown(e, msg.id); },
@@ -6458,8 +6459,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
                                             />
                                         </div>
-                                        </div>}
                                         {msg.role === "assistant" && batchMeta}
+                                        </div>
+                                        </div>}
                                         {msg.role !== "user" && !isSilentThought && !isEmptyBubble && hasFoldedPanel && (
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); setExpandedThinkingId(prev => prev === msg.id ? null : msg.id); }}
