@@ -57,7 +57,7 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, CalendarDays, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -458,14 +458,14 @@ function cancelOfflineGenerationRun(sessionId: string): boolean {
 
 // ── Rich media reprocessing on mount ──────────────────────────
 
-const TIME_GAP = 10 * 60 * 1000;
+function kktCalendarDay(dateStr: string): string {
+    const date = new Date(dateStr);
+    return Number.isNaN(date.getTime()) ? dateStr : `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
 
-function shouldShowTimestamp(currentMsg: string, prevMsg: string | null): boolean {
-    if (!prevMsg) return true; // First message always shows time
-    const current = new Date(currentMsg);
-    const previous = new Date(prevMsg);
-    return current.toDateString() !== previous.toDateString()
-        || current.getTime() - previous.getTime() >= TIME_GAP;
+function kktCalendarMinute(dateStr: string): string {
+    const date = new Date(dateStr);
+    return Number.isNaN(date.getTime()) ? dateStr : String(Math.floor(date.getTime() / 60_000));
 }
 
 function formatKktChatDate(dateStr: string): string {
@@ -490,12 +490,59 @@ function formatKktChatClock(dateStr: string): string {
     return `${hour % 12 || 12}:${String(date.getMinutes()).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
 }
 
-function chatKktBatchKey(message: ChatMessage): string {
-    const speaker = message.role === "assistant" ? message.senderCharacterId || "assistant" : message.role;
-    const batch = message.role === "assistant"
-        ? message.responseBatchId || message.responseRoundId || message.id
-        : message.mediaData?.photoBatchId || message.id;
-    return `${speaker}:${batch}`;
+function KktDateDivider({ dateTime }: { dateTime: string }) {
+    return (
+        <div className="flex justify-center w-full">
+            <span className="chat-sys-msg chat-kkt-day-divider py-[2px] px-2 rounded select-none">
+                <CalendarDays size={12} aria-hidden="true" />
+                <span>{formatKktChatDate(dateTime)}</span>
+                <ChevronRight size={12} aria-hidden="true" />
+            </span>
+        </div>
+    );
+}
+
+type KktMessageGroup = { key: string; firstId: string; lastId: string };
+
+/** Build display groups without changing message history or generation behavior. */
+function buildKktDisplayGroups(items: ChatMessage[], isGroup: boolean) {
+    const byId = new Map<string, KktMessageGroup>();
+    const groups = new Map<string, KktMessageGroup>();
+    const dateStarts = new Set<string>();
+    let previousDay: string | null = null;
+    let previousUser: { minute: string; key: string } | null = null;
+    for (const message of items) {
+        const day = kktCalendarDay(message.createdAt);
+        if (day !== previousDay) dateStarts.add(message.id);
+        previousDay = day;
+        const role = uiRole(message);
+        if (role !== "user" && role !== "assistant") {
+            previousUser = null;
+            continue; // Centered state/receipt notices have no side clock or unread mark.
+        }
+        // Retracted messages and panel-only records have no visible speech/card edge.
+        if (message.isRetracted || (!message.mediaType &&
+            !getChatFlowVisibleContent(message) &&
+            (message.statusPanel || message.innerMonologue || message.reasoningText))) {
+            previousUser = null;
+            continue;
+        }
+        let key: string;
+        if (role === "user") {
+            const minute = kktCalendarMinute(message.createdAt);
+            key = previousUser?.minute === minute ? previousUser.key : `user:${minute}:${message.id}`;
+            previousUser = { minute, key };
+        } else {
+            previousUser = null;
+            const batch = message.responseBatchId || message.responseRoundId || message.id;
+            key = `assistant:${isGroup ? message.senderCharacterId || message.senderName || "assistant" : "assistant"}:${day}:${batch}`;
+        }
+        const group = groups.get(key) || { key, firstId: message.id, lastId: message.id };
+        group.lastId = message.id;
+        groups.set(key, group);
+        byId.set(message.id, group);
+    }
+    return { byId, dateStarts };
 }
 
 type ChatRoomProps = {
@@ -1126,9 +1173,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [unreadKktBatches, setUnreadKktBatches] = useState<Set<string>>(() => new Set());
     const seenKktMessageIdsRef = useRef<Set<string> | null>(null);
-    const unreadKktTimersRef = useRef<Map<string, number>>(new Map());
-    const userKktReadTimerRef = useRef<number | null>(null);
-    const wasKktGeneratingRef = useRef(false);
     const [transientMessages, setTransientMessages] = useState<ChatMessage[]>([]);
     const [stickerReady, setStickerReady] = useState(false);
     const [character, setCharacter] = useState<Character | null>(() => {
@@ -1908,9 +1952,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
     }, [session.id]);
 
-    // The small “1” is transient display state, never saved into chat history.
-    // Each assistant response batch shares one key. User messages show their
-    // temporary unread mark only on the last visible message before a reply.
+    // The small “1” is session display state. A side's unanswered groups stay
+    // marked until a real message from the other side arrives (not on summon).
     useEffect(() => {
         if (session.isGroup) return;
         const seen = seenKktMessageIdsRef.current;
@@ -1921,51 +1964,24 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const lastKnownIndex = messages.reduce((index, message, current) => seen.has(message.id) ? current : index, -1);
         const fresh = messages.filter((message, index) => index > lastKnownIndex && !seen.has(message.id));
         messages.forEach(message => seen.add(message.id));
-        const keys = fresh.filter(message => message.role === "user" || message.role === "assistant")
-            .map(chatKktBatchKey);
-        if (!keys.length) return;
-        setUnreadKktBatches(previous => new Set([...previous, ...keys]));
-        for (const message of fresh) {
-            if (message.role !== "assistant") continue;
-            const key = chatKktBatchKey(message);
-            const previousTimer = unreadKktTimersRef.current.get(key);
-            if (previousTimer) window.clearTimeout(previousTimer);
-            unreadKktTimersRef.current.set(key, window.setTimeout(() => {
-                setUnreadKktBatches(previous => {
-                    const next = new Set(previous);
-                    next.delete(key);
-                    return next;
-                });
-                unreadKktTimersRef.current.delete(key);
-            }, 2500));
-        }
+        if (!fresh.length) return;
+        const { byId } = buildKktDisplayGroups(messages.filter(message =>
+            !isHiddenChatFlowMessage(message) && !isCallSysMsg(message)), false);
+        setUnreadKktBatches(previous => {
+            const next = new Set(previous);
+            for (const message of fresh) {
+                const group = byId.get(message.id);
+                if (!group) continue;
+                const otherRole = message.role === "user" ? "assistant:" : "user:";
+                for (const key of next) if (key.startsWith(otherRole)) next.delete(key);
+                next.add(group.key);
+            }
+            return next;
+        });
     }, [messages, session.isGroup]);
 
-    useEffect(() => {
-        if (session.isGroup) return;
-        if (isGenerating && !wasKktGeneratingRef.current) {
-            if (userKktReadTimerRef.current) window.clearTimeout(userKktReadTimerRef.current);
-            userKktReadTimerRef.current = window.setTimeout(() => {
-                setUnreadKktBatches(previous => {
-                    const next = new Set(previous);
-                    for (const message of messages) {
-                        if (message.role === "user") next.delete(chatKktBatchKey(message));
-                    }
-                    return next;
-                });
-                userKktReadTimerRef.current = null;
-            }, 2500);
-        }
-        wasKktGeneratingRef.current = isGenerating;
-    }, [isGenerating, messages, session.isGroup]);
-
     useEffect(() => () => {
-        for (const timer of unreadKktTimersRef.current.values()) window.clearTimeout(timer);
-        unreadKktTimersRef.current.clear();
-        if (userKktReadTimerRef.current) window.clearTimeout(userKktReadTimerRef.current);
-        userKktReadTimerRef.current = null;
         seenKktMessageIdsRef.current = null;
-        wasKktGeneratingRef.current = false;
     }, [session.id]);
 
     const needsInitialScrollRef = useRef(true);
@@ -5550,6 +5566,29 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return { groups, memberSet };
     }, [projectedMessages]);
 
+    // Reuse date and batch grouping in single and group chat. A photo deck has
+    // one visible representative even though its pictures are stored separately.
+    const kktDisplayGroups = useMemo(() => {
+        const visible: ChatMessage[] = [];
+        let previousPhoto: ChatMessage | null = null;
+        projectedMessages.forEach((message, index) => {
+            if (voiceCallGroups.memberSet.has(index) &&
+                !voiceCallGroups.groups.some(group => group.startIdx === index)) return;
+            if (isHiddenChatFlowMessage(message, getMessageDisplayContent(message))) return;
+            const isPhoto = message.mediaType === "image" ||
+                (message.mediaType === "media_file" && message.mediaData?.fileType === "image");
+            const photoKey = isPhoto && (message.mediaData?.photoBatchId ||
+                (message.role === "assistant" ? message.responseBatchId : undefined));
+            const previousPhotoKey = previousPhoto && (previousPhoto.mediaData?.photoBatchId ||
+                (previousPhoto.role === "assistant" ? previousPhoto.responseBatchId : undefined));
+            if (photoKey && previousPhotoKey === photoKey && previousPhoto?.role === message.role &&
+                previousPhoto.senderCharacterId === message.senderCharacterId) return;
+            visible.push(message);
+            previousPhoto = isPhoto ? message : null;
+        });
+        return buildKktDisplayGroups(visible, !!session.isGroup);
+    }, [getMessageDisplayContent, projectedMessages, session.isGroup, voiceCallGroups]);
+
     const getSelectableStoredMessageId = useCallback((msg: RenderChatMessage): string | null => {
         const id = msg.displaySourceId || msg.id;
         if (!id || id.startsWith("vc-") || isTransientMessage(id)) return null;
@@ -6008,6 +6047,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const chatCount = groupMessages.filter(m => uiRole(m) !== "system").length;
                         return (
                             <div key={`vc-${vcGroup.startId}`} className="flex flex-col gap-2">
+                                {kktDisplayGroups.dateStarts.has(msg.id) && <KktDateDivider dateTime={msg.createdAt} />}
                                 <div
                                     onPointerDown={(e) => { e.stopPropagation(); handleMessagePointerDown(e, `vc-${vcGroup.startId}`); }}
                                     onPointerUp={(e) => handleMessagePointerUp(e)}
@@ -6141,33 +6181,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     const renderMsg = msg;
                     const isSystemInstruction = isSystemInstructionMessage(renderMsg);
                     const bubbleDisplayContent = getMessageDisplayContent(renderMsg);
-                    let prevVisibleMsg: RenderChatMessage | null = null;
-                    for (let prevIdx = idx - 1; prevIdx >= 0; prevIdx -= 1) {
-                        if (voiceCallGroups.memberSet.has(prevIdx)) continue;
-                        const candidate = projectedMessages[prevIdx];
-                        const candidateDisplayContent = getMessageDisplayContent(candidate);
-                        if (isHiddenChatFlowMessage(candidate, candidateDisplayContent)) continue;
-                        prevVisibleMsg = candidate;
-                        break;
-                    }
-                    let nextVisibleMsg: RenderChatMessage | null = null;
-                    for (let nextIdx = idx + 1; nextIdx < projectedMessages.length; nextIdx += 1) {
-                        if (voiceCallGroups.memberSet.has(nextIdx)) continue;
-                        const candidate = projectedMessages[nextIdx];
-                        if (samePhotoBatch(candidate)) continue;
-                        if (isHiddenChatFlowMessage(candidate, getMessageDisplayContent(candidate))) continue;
-                        nextVisibleMsg = candidate;
-                        break;
-                    }
-                    const showTime = session.isGroup
-                        ? (!prevVisibleMsg || new Date(msg.createdAt).getTime() - new Date(prevVisibleMsg.createdAt).getTime() > 60_000)
-                        : shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null);
-                    const isConsecutive = prevVisibleMsg && !showTime
-                        && (session.isGroup ? uiRole(prevVisibleMsg) === uiRole(msg)
-                            : (msg.role === "user" && prevVisibleMsg.role === "user")
-                                || chatKktBatchKey(prevVisibleMsg) === chatKktBatchKey(msg))
-                        && uiRole(msg) !== "system"
-                        && (!session.isGroup || prevVisibleMsg.senderCharacterId === msg.senderCharacterId);
+                    const displayGroup = kktDisplayGroups.byId.get(msg.id);
+                    const showDay = kktDisplayGroups.dateStarts.has(msg.id);
+                    const isConsecutive = !!displayGroup && displayGroup.firstId !== msg.id;
                     // Hide bubbles with no visible content (empty text, stripped music tags, etc.)
                     const visibleContent = getChatFlowVisibleContent(renderMsg, bubbleDisplayContent);
                     const isVisualMedia = isChatVisualMedia(renderMsg);
@@ -6180,16 +6196,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     const isMediaBubble = (renderMsg.mediaType && CHAT_MEDIA_BUBBLE_TYPES.has(renderMsg.mediaType)) || isStandaloneHtmlPreview;
                     // Empty bubble: no visible content AND no visual media AND no folded panel.
                     const isEmptyBubble = !isVisualMedia && !visibleContent && uiRole(msg) !== "system" && !hasFoldedPanel;
-                    const isBatchEnd = !session.isGroup && (msg.role === "user" || msg.role === "assistant")
+                    const isBatchEnd = !!displayGroup && displayGroup.lastId === msg.id
                         && uiRole(msg) !== "system" && !msg.isRetracted
-                        && !hiddenEmpty && !isEmptyBubble && !isSilentThought
-                        && (!nextVisibleMsg || (msg.role === "user"
-                            ? nextVisibleMsg.role !== "user"
-                            : chatKktBatchKey(nextVisibleMsg) !== chatKktBatchKey(msg)));
+                        && !hiddenEmpty && !isEmptyBubble && !isSilentThought;
                     const batchTimeMessage = photoGroup[photoGroup.length - 1];
                     const batchMeta = isBatchEnd ? (
                         <div className="chat-kkt-batch-meta" data-role={msg.role}>
-                            {unreadKktBatches.has(chatKktBatchKey(msg)) && <span className="chat-kkt-batch-unread">1</span>}
+                            {!session.isGroup && displayGroup && unreadKktBatches.has(displayGroup.key) && <span className="chat-kkt-batch-unread">1</span>}
                             <time dateTime={batchTimeMessage.createdAt}>{formatKktChatClock(batchTimeMessage.createdAt)}</time>
                         </div>
                     ) : null;
@@ -6214,14 +6227,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     } : {};
 
                     return (
-                        <div key={msg.id} className="flex flex-col gap-4" {...(hiddenEmpty ? { style: { display: "none" } } : {})} {...(isEmptyBubble && renderMsg.reasoningText && !showTime ? { "data-reasoning-only": "" } : {})}>
-                            {showTime && (
-                                <div className="flex justify-center w-full">
-                                    <span className="chat-sys-msg py-[2px] px-2 rounded select-none">
-                                        {session.isGroup ? formatChatUiTime(msg.createdAt) : formatKktChatDate(msg.createdAt)}
-                                    </span>
-                                </div>
-                            )}
+                        <div key={msg.id} className="flex flex-col gap-4" {...(hiddenEmpty ? { style: { display: "none" } } : {})} {...(isEmptyBubble && renderMsg.reasoningText && !showDay ? { "data-reasoning-only": "" } : {})}>
+                            {showDay && <KktDateDivider dateTime={msg.createdAt} />}
                             {/* 思维链触发条（Claude app 风格）：点击打开底部弹窗 */}
                             {renderMsg.reasoningText && msg.role !== "user" && uiRole(msg) !== "system" && (
                                 <div className="chat-msg-wrapper" data-role={uiRole(msg)} data-reasoning-row="" style={{ marginBottom: -8 }}>

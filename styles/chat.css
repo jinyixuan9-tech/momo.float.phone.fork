@@ -3178,16 +3178,16 @@
 }
 .chat-kkt-bubble-line { display: contents; }
 .chat-kkt-bubble-line[data-has-batch-meta] {
-  display: flex;
-  align-items: flex-end;
+  display: block;
   align-self: flex-start;
-  gap: 4px;
-  width: max-content;
+  position: relative;
+  width: fit-content;
   max-width: 100%;
   min-width: 0;
+  overflow: visible;
 }
 .chat-kkt-bubble-line[data-has-batch-meta][data-role="user"] { align-self: flex-end; }
-.chat-kkt-bubble-line[data-has-batch-meta] > [data-ui] { min-width: 0; flex: 0 1 auto; }
+.chat-kkt-bubble-line[data-has-batch-meta] > [data-ui] { min-width: 0; }
 .chat-kkt-batch-meta {
   display: flex;
   flex-direction: column;
@@ -3205,6 +3205,25 @@
 .chat-kkt-batch-meta[data-role="assistant"] { align-items: flex-start; text-align: left; }
 .chat-kkt-batch-meta[data-role="user"] { align-items: flex-end; text-align: right; }
 .chat-kkt-batch-unread { color: #c5a500; font-size: 11px; font-weight: 700; }
+.chat-kkt-bubble-line[data-has-batch-meta] > .chat-kkt-batch-meta {
+  position: absolute;
+  bottom: 0;
+}
+.chat-kkt-bubble-line[data-role="assistant"] > .chat-kkt-batch-meta { left: calc(100% + 4px); }
+.chat-kkt-bubble-line[data-role="user"] > .chat-kkt-batch-meta { right: calc(100% + 4px); }
+.chat-kkt-original-row { position: relative; width: fit-content; max-width: 100%; }
+.chat-kkt-original-row > .chat-kkt-batch-meta {
+  position: absolute;
+  bottom: 0;
+  left: calc(100% + 4px);
+}
+.chat-kkt-day-divider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
 
 /* Call history uses the same system-message token as date chips. Keep its
    icon, label and chevron together even when a room theme styles date chips. */
