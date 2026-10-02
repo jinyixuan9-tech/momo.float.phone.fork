@@ -1164,10 +1164,14 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
         }
         case "gift": {
             const giftName = d?.giftName || d?.label || "礼物";
-            if (d?.takeoutOrderId) return `[外卖${d.giftDeliveredAt ? "已送达" : "配送中"}:${d.takeoutShop || "店铺"}:${d.takeoutItems || giftName}:${d.takeoutDestination || "用户所在地"}:${d.giftPriceLabel || ""}]`;
+            const deliveredWhenSent = Boolean(d?.giftDeliveredAt && Date.parse(d.giftDeliveredAt) <= Date.parse(msg.createdAt));
+            if (d?.takeoutOrderId) return `[外卖${deliveredWhenSent ? "已送达" : "正在配送"}:${d.takeoutShop || "店铺"}:${d.takeoutItems || giftName}:${d.takeoutDestination || "用户所在地"}:${d.giftPriceLabel || ""}]`;
+            if (d?.label === "外卖卡") return `[外卖${deliveredWhenSent ? "已送达" : "正在配送"}:${d.takeoutShop || d.giftMerchantLabel || "店铺"}:${d.takeoutItems || giftName}:${d.takeoutDestination || "收餐地址"}:${d.giftPriceLabel || ""}]`;
             return isGroup && d?.recipientName
                 ? `[礼物:${giftName}:${d.recipientName}]`
-                : `[礼物:${giftName}]`;
+                : d?.shoppingGiftId || d?.shoppingOrderId
+                    ? `[礼物${deliveredWhenSent ? "已送达" : "尚未送达"}:${giftName}:${d.recipientName || "对方"}]`
+                    : `[礼物:${giftName}]`;
         }
         case "payment_request":
             return formatShoppingPaymentRequestHistory({

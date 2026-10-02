@@ -3406,6 +3406,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Stored (prompt): [XX向YY发起了语音通话] / [我向XX发起了语音通话]
     // UI: XX向群聊发起了视频通话 / 你向XX发起了语音通话 / XX向你发起了语音通话
     const formatSysMsgForUI = (content: string, msg?: ChatMessage): string => {
+        if (msg?.mediaData?.label === "__shopping_delivery__") {
+            return content.replace(/\s*·\s*对方(?:此前|现在).*$/, "");
+        }
         let text = content;
         const charN = character?.name || "对方";
         const userN = userIdentity?.name;

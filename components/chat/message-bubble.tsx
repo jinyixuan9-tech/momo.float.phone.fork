@@ -1195,20 +1195,26 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
     const d = msg.mediaData;
     const isFood = d?.label === "外卖卡";
     const isShoppingDelivery = Boolean(d?.shoppingGiftId || d?.shoppingOrderId || d?.takeoutOrderId);
-    const title = d?.giftName || d?.label || "礼物";
+    const title = isFood ? (d?.giftName || d?.takeoutItems || "外卖").replace(/^外卖\s*[·\-:：]\s*/, "") : d?.giftName || d?.label || "礼物";
     const recipient = d?.recipientName;
     const merchant = d?.giftMerchantLabel || "购物订单";
-    const serial = (d?.takeoutOrderId || d?.shoppingGiftId || d?.giftOrderId || msg.id || "gift")
+    const serial = (d?.takeoutOrderId || d?.shoppingOrderId || d?.shoppingGiftId || d?.giftOrderId || msg.id || "gift")
         .replace(/[^a-z0-9]/gi, "")
         .slice(-6)
         .toUpperCase() || "GIFT01";
     const sentLabel = d?.giftSentAt
         ? new Date(d.giftSentAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
         : "";
+    const arrivalLabel = d?.takeoutDeliverAt && !d.giftDeliveredAt
+        ? new Date(d.takeoutDeliverAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+        : "";
+    const status = d?.giftDeliveredAt
+        ? (isFood || msg.role === "user" ? "已送达" : "已收到")
+        : isFood ? "正在配送" : isShoppingDelivery ? "尚未送达" : msg.role === "assistant" ? "已收到" : "已送出";
 
     return (
         <div
-            className="chat-gift-card w-[248px] rounded-none"
+            className={`chat-gift-card ${isFood ? "chat-gift-card--food" : "chat-gift-card--gift"} w-[248px] rounded-none`}
         >
             <div
                 className="chat-gift-card-body relative min-h-[338px] px-5 py-5"
@@ -1220,7 +1226,7 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                             <div className="chat-gift-card-source ts-12 text-[var(--c-text)] mt-1 truncate">{merchant}</div>
                         </div>
                         <div className="chat-gift-card-status ts-11 font-semibold px-2 py-1 shrink-0">
-                            {isShoppingDelivery ? d?.giftDeliveredAt ? "已送达" : "配送中" : "已送出"}
+                            {status}
                         </div>
                     </div>
 
@@ -1236,23 +1242,27 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                     </div>
 
                     <div className="chat-gift-card-grid mt-5 grid grid-cols-2 gap-x-4 gap-y-3">
-                        {recipient && (
-                            <GiftInfoCell label="收礼人" value={recipient} strong />
-                        )}
-                        <GiftInfoCell label="编号" value={`G-${serial}`} />
-                        <GiftInfoCell label="来源" value={merchant} />
-                        {d?.takeoutDestination && <GiftInfoCell label="送达地点" value={d.takeoutDestination} />}
-                        {d?.takeoutDeliverAt && !d.giftDeliveredAt && <GiftInfoCell label="预计送达" value={new Date(d.takeoutDeliverAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} />}
-                        <GiftInfoCell label={isFood ? "订单金额" : "礼物值"} value={d?.giftPriceLabel || "心意礼物"} />
-                        {isShoppingDelivery && <GiftInfoCell label="收货状态" value={d?.giftDeliveredAt ? "已送达" : "尚未收到 · 等待配送"} />}
-                        {sentLabel && <GiftInfoCell label="送出" value={sentLabel} />}
+                        {isFood ? <>
+                            <GiftInfoCell label="订单编号" value={`D-${serial}`} />
+                            <GiftInfoCell label={arrivalLabel ? "预计送达" : "送达状态"} value={arrivalLabel || status} />
+                            {d?.takeoutDestination && <GiftInfoCell label="送达地点" value={d.takeoutDestination} wide />}
+                            <GiftInfoCell label="订单金额" value={d?.giftPriceLabel || "—"} strong />
+                            {sentLabel && <GiftInfoCell label="下单" value={sentLabel} />}
+                        </> : <>
+                            {recipient && <GiftInfoCell label="收礼人" value={recipient} strong />}
+                            <GiftInfoCell label="编号" value={`G-${serial}`} />
+                            <GiftInfoCell label="来源" value={merchant} />
+                            <GiftInfoCell label="礼物值" value={d?.giftPriceLabel || "心意礼物"} />
+                            {isShoppingDelivery && <GiftInfoCell label="收货状态" value={d?.giftDeliveredAt ? "已送达" : "尚未送达"} />}
+                            {sentLabel && <GiftInfoCell label="送出" value={sentLabel} />}
+                        </>}
                     </div>
 
                     <div className="flex-1" />
 
                     <div className="chat-gift-card-footer mt-5 pt-3 flex items-center justify-between gap-3">
-                        <div className="ts-10 uppercase font-semibold text-[var(--c-icon)]">{isFood ? "Delivery Certificate" : "Gift Certificate"}</div>
-                        <div className="chat-gift-card-brand ts-10 font-semibold text-[var(--c-icon)]">AI PHONE</div>
+                        <div className="ts-10 uppercase font-semibold text-[var(--c-icon)]">{isFood ? "Delivery Receipt" : "Gift Certificate"}</div>
+                        <div className="chat-gift-card-brand ts-10 font-semibold text-[var(--c-icon)]">PayPal</div>
                     </div>
                 </div>
             </div>
@@ -1260,9 +1270,9 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
     );
 }
 
-function GiftInfoCell({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function GiftInfoCell({ label, value, strong = false, wide = false }: { label: string; value: string; strong?: boolean; wide?: boolean }) {
     return (
-        <div className="chat-gift-card-cell min-w-0">
+        <div className={`chat-gift-card-cell min-w-0${wide ? " chat-gift-card-cell--wide" : ""}${strong ? " chat-gift-card-cell--strong" : ""}`}>
             <div className="chat-gift-card-cell-label ts-10 text-[var(--c-icon)]">{label}</div>
             <div className={`chat-gift-card-cell-value ts-12 mt-1 leading-snug truncate ${strong ? "font-semibold text-[var(--c-text-title)]" : "text-[var(--c-text)]"}`}>
                 {value}

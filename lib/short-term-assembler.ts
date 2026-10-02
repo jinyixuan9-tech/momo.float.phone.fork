@@ -58,6 +58,11 @@ function formatMoneyDirectiveAmount(msg: ChatMessage): string {
     return `${currency && currency !== "CNY" ? `${currency} ` : ""}${msg.mediaData?.amount ?? 0}`;
 }
 
+function giftWasDeliveredWhenSent(msg: ChatMessage): boolean {
+    const deliveredAt = msg.mediaData?.giftDeliveredAt;
+    return Boolean(deliveredAt && Date.parse(deliveredAt) <= Date.parse(msg.createdAt));
+}
+
 export type NativeTimelineEntry = {
     id: string;
     sourceApp: "chat" | "sms" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "weverse" | "twitter" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app";
@@ -250,12 +255,12 @@ export function loadNativeTimeline(
                 else if (msg.mediaType === "gift") {
                     const giftName = msg.mediaData?.giftName || msg.mediaData?.label || "礼物";
                     if (msg.mediaData?.takeoutOrderId) {
-                        content = `[外卖${msg.mediaData.giftDeliveredAt ? "已送达" : "配送中"}:${msg.mediaData.takeoutShop || "店铺"}:${msg.mediaData.takeoutItems || giftName}:${msg.mediaData.takeoutDestination || "用户所在地"}:${msg.mediaData.giftPriceLabel || ""}]`;
+                        content = `[外卖${giftWasDeliveredWhenSent(msg) ? "已送达" : "正在配送"}:${msg.mediaData.takeoutShop || "店铺"}:${msg.mediaData.takeoutItems || giftName}:${msg.mediaData.takeoutDestination || "用户所在地"}:${msg.mediaData.giftPriceLabel || ""}]`;
                     } else {
                     const shopping = Boolean(msg.mediaData?.shoppingGiftId || msg.mediaData?.shoppingOrderId);
                     const food = msg.mediaData?.label === "外卖卡";
                     content = shopping
-                        ? `[${food ? "外卖" : "礼物"}${msg.mediaData?.giftDeliveredAt ? "已送达" : "寄送通知，尚未收到"}:${giftName}:${msg.mediaData?.recipientName || "对方"}]`
+                        ? `[${food ? "外卖" : "礼物"}${giftWasDeliveredWhenSent(msg) ? "已送达" : food ? "正在配送" : "尚未送达"}:${giftName}:${msg.mediaData?.recipientName || "对方"}]`
                         : msg.mediaData?.recipientName
                             ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
                             : `[礼物:${giftName}]`;
@@ -361,12 +366,12 @@ export function loadNativeTimeline(
                 else if (msg.mediaType === "gift") {
                     const giftName = msg.mediaData?.giftName || msg.mediaData?.label || "礼物";
                     if (msg.mediaData?.takeoutOrderId) {
-                        content = `[外卖${msg.mediaData.giftDeliveredAt ? "已送达" : "配送中"}:${msg.mediaData.takeoutShop || "店铺"}:${msg.mediaData.takeoutItems || giftName}:${msg.mediaData.takeoutDestination || "用户所在地"}:${msg.mediaData.giftPriceLabel || ""}]`;
+                        content = `[外卖${giftWasDeliveredWhenSent(msg) ? "已送达" : "正在配送"}:${msg.mediaData.takeoutShop || "店铺"}:${msg.mediaData.takeoutItems || giftName}:${msg.mediaData.takeoutDestination || "用户所在地"}:${msg.mediaData.giftPriceLabel || ""}]`;
                     } else {
                     const shopping = Boolean(msg.mediaData?.shoppingGiftId || msg.mediaData?.shoppingOrderId);
                     const food = msg.mediaData?.label === "外卖卡";
                     content = shopping
-                        ? `[${food ? "外卖" : "礼物"}${msg.mediaData?.giftDeliveredAt ? "已送达" : "寄送通知，尚未收到"}:${giftName}:${msg.mediaData?.recipientName || "对方"}]`
+                        ? `[${food ? "外卖" : "礼物"}${giftWasDeliveredWhenSent(msg) ? "已送达" : food ? "正在配送" : "尚未送达"}:${giftName}:${msg.mediaData?.recipientName || "对方"}]`
                         : msg.mediaData?.recipientName
                             ? `[礼物:${giftName}:${msg.mediaData.recipientName}]`
                             : `[礼物:${giftName}]`;
